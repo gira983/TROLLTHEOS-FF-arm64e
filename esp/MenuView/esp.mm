@@ -108,6 +108,20 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     return self;
 }
 
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
+    if (menuContainer && !menuContainer.hidden) {
+        CGPoint p = [self convertPoint:point toView:menuContainer];
+        UIView *hit = [menuContainer hitTest:p withEvent:event];
+        if (hit) return hit;
+    }
+    if (floatingButton && !floatingButton.hidden) {
+        CGPoint p = [self convertPoint:point toView:floatingButton];
+        if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
+    }
+    return nil;
+}
+
 - (void)setupFloatingButton {
     floatingButton = [[UIView alloc] initWithFrame:CGRectMake(50, 50, 50, 50)];
     floatingButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.8 blue:0.0 alpha:1.0];
@@ -123,11 +137,13 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     iconLabel.font = [UIFont boldSystemFontOfSize:20];
     [floatingButton addSubview:iconLabel];
     
-    UITapGestureRecognizer *openTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(showMenu)];
-    [floatingButton addGestureRecognizer:openTap];
-    
     UIPanGestureRecognizer *iconPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+    iconPan.cancelsTouchesInView = NO;
     [floatingButton addGestureRecognizer:iconPan];
+    
+    UITapGestureRecognizer *openTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(showMenu)];
+    [openTap requireGestureRecognizerToFail:iconPan];
+    [floatingButton addGestureRecognizer:openTap];
     
     [self addSubview:floatingButton];
 }
@@ -300,7 +316,8 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     aimTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
     aimTabContainer.layer.borderWidth = 1;
     aimTabContainer.layer.cornerRadius = 10;
-    aimTabContainer.hidden = YES; // Ẩn mặc định
+    aimTabContainer.hidden = YES;
+    aimTabContainer.userInteractionEnabled = NO;
     [menuContainer addSubview:aimTabContainer];
     
     UILabel *aimTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, 200, 20)];
@@ -355,6 +372,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     settingTabContainer.layer.borderWidth = 1;
     settingTabContainer.layer.cornerRadius = 10;
     settingTabContainer.hidden = YES;
+    settingTabContainer.userInteractionEnabled = NO;
     [menuContainer addSubview:settingTabContainer];
     
     UILabel *stTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, 200, 20)];
@@ -368,6 +386,9 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     mainTabContainer.hidden = YES;
     aimTabContainer.hidden = YES;
     settingTabContainer.hidden = YES;
+    mainTabContainer.userInteractionEnabled = NO;
+    aimTabContainer.userInteractionEnabled = NO;
+    settingTabContainer.userInteractionEnabled = NO;
     
     // Reset buttons color
     for (UIView *sub in sender.superview.subviews) {
@@ -379,9 +400,9 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     // Highlight active button
     sender.backgroundColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0];
     
-    if (sender.tag == 0) mainTabContainer.hidden = NO;
-    if (sender.tag == 1) aimTabContainer.hidden = NO;
-    if (sender.tag == 2) settingTabContainer.hidden = NO;
+    if (sender.tag == 0) { mainTabContainer.hidden = NO; mainTabContainer.userInteractionEnabled = YES; }
+    if (sender.tag == 1) { aimTabContainer.hidden = NO; aimTabContainer.userInteractionEnabled = YES; }
+    if (sender.tag == 2) { settingTabContainer.hidden = NO; settingTabContainer.userInteractionEnabled = YES; }
 }
 
 - (void)drawPreviewElements {
