@@ -27,7 +27,7 @@ jobs:
       - name: Build
         run: |
           make clean
-          make ARCHS="arm64 arm64e" 2>&1 | tee build.log
+          make package ARCHS="arm64 arm64e" 2>&1 | tee build.log
           echo "=== ERRORS ==="
           grep "error:" build.log | head -20 || true
 
