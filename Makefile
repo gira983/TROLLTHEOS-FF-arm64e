@@ -25,8 +25,8 @@ Xyris_CFLAGS += -fobjc-arc \
 
 Xyris_CFLAGS += -Iinclude
 Xyris_CFLAGS += -include hud-prefix.pch
-Xyris_CFLAGS += -I/usr/lib/llvm-16/lib/clang/16.0.0/include
-Xyris_CFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
+# Xyris_CFLAGS += -I/usr/lib/llvm-16/lib/clang/16.0.0/include
+# Xyris_CFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
 
 Xyris_CCFLAGS += -std=c++14
 Xyris_CCFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
