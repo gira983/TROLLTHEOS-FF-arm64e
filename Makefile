@@ -29,7 +29,7 @@ Xyris_CFLAGS += -include hud-prefix.pch
 # Xyris_CFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
 
 Xyris_CCFLAGS += -std=c++14
-Xyris_CCFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
+# Xyris_CCFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
 Xyris_CCFLAGS += -DNOTIFY_LAUNCHED_HUD=\"ch.xxtou.notification.hud.launched\"
 Xyris_CCFLAGS += -DNOTIFY_DISMISSAL_HUD=\"ch.xxtou.notification.hud.dismissal\"
 Xyris_CCFLAGS += -DNOTIFY_RELOAD_HUD=\"ch.xxtou.notification.hud.reload\"
