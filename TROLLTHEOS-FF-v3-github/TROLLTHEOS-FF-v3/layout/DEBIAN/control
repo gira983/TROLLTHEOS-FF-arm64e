@@ -1,0 +1,9 @@
+Package: com.ldvquang2306.xyris
+Name: Xyris
+Version: 1.0.0
+Section: Tweaks
+Depends: firmware (>= 13.0), mobilesubstrate (>= 0.9.7000), com.rpetrich.rocketbootstrap (>= 1.0.9)
+Architecture: iphoneos-arm
+Author: ldvquang2306
+Maintainer: ldvquang2306
+Description: Next generation XXTouch for iOS 13 and above.
