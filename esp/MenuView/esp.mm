@@ -317,7 +317,6 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     aimTabContainer.layer.borderWidth = 1;
     aimTabContainer.layer.cornerRadius = 10;
     aimTabContainer.hidden = YES;
-    aimTabContainer.userInteractionEnabled = NO;
     [menuContainer addSubview:aimTabContainer];
     
     UILabel *aimTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, 200, 20)];
@@ -372,8 +371,10 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     settingTabContainer.layer.borderWidth = 1;
     settingTabContainer.layer.cornerRadius = 10;
     settingTabContainer.hidden = YES;
-    settingTabContainer.userInteractionEnabled = NO;
     [menuContainer addSubview:settingTabContainer];
+    
+    // Поднять sidebar поверх всех табов
+    [menuContainer bringSubviewToFront:sidebar];
     
     UILabel *stTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, 200, 20)];
     stTitle.text = @"Settings";
