@@ -1073,13 +1073,11 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     _contentView.backgroundColor = [UIColor clearColor];
     _contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight; 
     _contentView.translatesAutoresizingMaskIntoConstraints = YES;
-    _contentView.userInteractionEnabled = NO; // touches идут через hitTest в MenuView
     [self.view addSubview:_contentView];
 
     _blurView = [[UIView alloc] initWithFrame:_contentView.bounds];
     _blurView.backgroundColor = [UIColor clearColor];
     _blurView.translatesAutoresizingMaskIntoConstraints = NO;
-    _blurView.userInteractionEnabled = NO; // MenuView сама обрабатывает touches через hitTest
     [_contentView addSubview:_blurView];
     
     [NSLayoutConstraint activateConstraints:@[
@@ -1094,6 +1092,7 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
 
     menuView = [[MenuView alloc] initWithFrame:menuFrame];
     menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    menuView.userInteractionEnabled = YES;
     [_blurView addSubview:menuView];
     
     _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
@@ -1111,6 +1110,8 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     _tapGestureRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapGestureRecognized:)];
     _tapGestureRecognizer.numberOfTapsRequired = 1;
     _tapGestureRecognizer.numberOfTouchesRequired = 1;
+    _tapGestureRecognizer.cancelsTouchesInView = NO;
+    _tapGestureRecognizer.delaysTouchesEnded = NO;
     [_contentView addGestureRecognizer:_tapGestureRecognizer];
 
     [_contentView setUserInteractionEnabled:YES];
