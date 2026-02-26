@@ -390,6 +390,18 @@ static NSAttributedString* formattedAttributedString(BOOL isFocused)
 @property (nonatomic, strong) UIWindow *window;
 @end
 
+// PassthroughView — передаёт touches subviews, не перехватывает сама
+@interface PassthroughView : UIView
+@end
+@implementation PassthroughView
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *hit = [super hitTest:point withEvent:event];
+    // Если hit это мы сами — не перехватываем, пусть система ищет дальше
+    if (hit == self) return nil;
+    return hit;
+}
+@end
+
 @interface HUDRootViewController: UIApplicationRotationFollowingControllerNoTouches
 + (BOOL)passthroughMode;
 - (void)resetLoopTimer;
@@ -1069,13 +1081,13 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     [super viewDidLoad];
     
 
-    _contentView = [[UIView alloc] initWithFrame:self.view.bounds];
+    _contentView = [[PassthroughView alloc] initWithFrame:self.view.bounds];
     _contentView.backgroundColor = [UIColor clearColor];
     _contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight; 
     _contentView.translatesAutoresizingMaskIntoConstraints = YES;
     [self.view addSubview:_contentView];
 
-    _blurView = [[UIView alloc] initWithFrame:_contentView.bounds];
+    _blurView = [[PassthroughView alloc] initWithFrame:_contentView.bounds];
     _blurView.backgroundColor = [UIColor clearColor];
     _blurView.translatesAutoresizingMaskIntoConstraints = NO;
     [_contentView addSubview:_blurView];
