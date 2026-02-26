@@ -162,10 +162,8 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 }
 
 - (void)setupMenuUI {
-    CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
-    CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
-    CGFloat menuWidth = MIN(screenW - 20, 550);
-    CGFloat menuHeight = MIN(screenH * 0.55, 320);
+    CGFloat menuWidth = 550;
+    CGFloat menuHeight = 320;
     
     menuContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, menuHeight)];
     menuContainer.backgroundColor = [UIColor colorWithRed:0.05 green:0.05 blue:0.05 alpha:0.95];
@@ -219,7 +217,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     [headerView addGestureRecognizer:menuPan];
     
     // Sidebar Buttons
-    UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - 85, 50, 75, 250)];
+    UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(465, 50, 75, 250)];
     sidebar.backgroundColor = [UIColor colorWithWhite:0.8 alpha:1.0];
     sidebar.layer.cornerRadius = 10;
     [menuContainer addSubview:sidebar];
@@ -239,7 +237,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     }
 
     // --- MAIN TAB (ESP) ---
-    mainTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, menuWidth - 110, 250)];
+    mainTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, 440, 250)];
     mainTabContainer.backgroundColor = [UIColor clearColor];
     [menuContainer addSubview:mainTabContainer];
 
@@ -273,8 +271,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     [self updatePreviewVisibility];
 
     // Feature Box (Right)
-    CGFloat tabW = menuWidth - 110;
-    UIView *featureBox = [[UIView alloc] initWithFrame:CGRectMake(140, 0, tabW - 145, 250)];
+    UIView *featureBox = [[UIView alloc] initWithFrame:CGRectMake(140, 0, 300, 250)];
     featureBox.layer.borderColor = [UIColor whiteColor].CGColor;
     featureBox.layer.borderWidth = 1;
     featureBox.layer.cornerRadius = 10;
@@ -314,7 +311,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     [featureBox addSubview:slider];
 
     // --- AIM TAB ---
-    aimTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, menuWidth - 110, 250)];
+    aimTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, 440, 250)];
     aimTabContainer.backgroundColor = [UIColor blackColor];
     aimTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
     aimTabContainer.layer.borderWidth = 1;
@@ -368,7 +365,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 
 
     // --- SETTING TAB (Empty for now) ---
-    settingTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, menuWidth - 110, 250)];
+    settingTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, 440, 250)];
     settingTabContainer.backgroundColor = [UIColor blackColor];
     settingTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
     settingTabContainer.layer.borderWidth = 1;
