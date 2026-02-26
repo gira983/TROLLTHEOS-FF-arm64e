@@ -395,10 +395,14 @@ static NSAttributedString* formattedAttributedString(BOOL isFocused)
 @end
 @implementation PassthroughView
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *hit = [super hitTest:point withEvent:event];
-    // Если hit это мы сами — не перехватываем, пусть система ищет дальше
-    if (hit == self) return nil;
-    return hit;
+    // Проверяем все subviews напрямую
+    for (UIView *sub in self.subviews.reverseObjectEnumerator) {
+        if (sub.hidden || sub.alpha < 0.01 || !sub.userInteractionEnabled) continue;
+        CGPoint p = [self convertPoint:point toView:sub];
+        UIView *hit = [sub hitTest:p withEvent:event];
+        if (hit) return hit;
+    }
+    return nil;
 }
 @end
 
