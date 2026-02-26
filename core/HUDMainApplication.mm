@@ -775,13 +775,31 @@ static void DumpThreads(void)
 - (BOOL)_ignoresHitTest { return NO; }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // Найти MenuView среди subviews иерархии
-    UIView *hit = [super hitTest:point withEvent:event];
-    // Если hit это само окно или его прозрачные контейнеры — не перехватывать
-    if (hit == self || hit == self.rootViewController.view) {
-        return nil;
+    // Напрямую спросить menuView — может она обработать этот touch?
+    UIViewController *vc = self.rootViewController;
+    if (!vc) return nil;
+    
+    // Пройти по всей иерархии subviews view контроллера
+    UIView *result = [self findMenuViewHit:vc.view point:point event:event];
+    return result;
+}
+
+- (UIView *)findMenuViewHit:(UIView *)view point:(CGPoint)point event:(UIEvent *)event {
+    for (UIView *sub in view.subviews.reverseObjectEnumerator) {
+        if (sub.hidden || sub.alpha < 0.01 || !sub.userInteractionEnabled) continue;
+        CGPoint converted = [self convertPoint:point toView:sub];
+        if (![sub pointInside:converted withEvent:event]) continue;
+        // Рекурсивно ищем самый глубокий view
+        UIView *deeper = [self findMenuViewHit:sub point:point event:event];
+        if (deeper) return deeper;
+        // Если sub сам интерактивный элемент (кнопка, свитч, слайдер)
+        if ([sub isKindOfClass:[UIControl class]] || 
+            [sub isKindOfClass:[UIButton class]] ||
+            sub.gestureRecognizers.count > 0) {
+            return sub;
+        }
     }
-    return hit;
+    return nil;
 }
 
 @end
@@ -1369,3 +1387,4 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
 }
 
 @end
+
