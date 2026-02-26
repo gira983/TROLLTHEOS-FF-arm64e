@@ -390,22 +390,6 @@ static NSAttributedString* formattedAttributedString(BOOL isFocused)
 @property (nonatomic, strong) UIWindow *window;
 @end
 
-// PassthroughView — передаёт touches subviews, не перехватывает сама
-@interface PassthroughView : UIView
-@end
-@implementation PassthroughView
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // Проверяем все subviews напрямую
-    for (UIView *sub in self.subviews.reverseObjectEnumerator) {
-        if (sub.hidden || sub.alpha < 0.01 || !sub.userInteractionEnabled) continue;
-        CGPoint p = [self convertPoint:point toView:sub];
-        UIView *hit = [sub hitTest:p withEvent:event];
-        if (hit) return hit;
-    }
-    return nil;
-}
-@end
-
 @interface HUDRootViewController: UIApplicationRotationFollowingControllerNoTouches
 + (BOOL)passthroughMode;
 - (void)resetLoopTimer;
@@ -788,7 +772,17 @@ static void DumpThreads(void)
 
 + (BOOL)_isSystemWindow { return YES; }
 - (BOOL)_isWindowServerHostingManaged { return NO; }
-- (BOOL)_ignoresHitTest { return [HUDRootViewController passthroughMode]; }
+- (BOOL)_ignoresHitTest { return NO; }
+
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    // Найти MenuView среди subviews иерархии
+    UIView *hit = [super hitTest:point withEvent:event];
+    // Если hit это само окно или его прозрачные контейнеры — не перехватывать
+    if (hit == self || hit == self.rootViewController.view) {
+        return nil;
+    }
+    return hit;
+}
 
 @end
 
@@ -1085,13 +1079,13 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     [super viewDidLoad];
     
 
-    _contentView = [[PassthroughView alloc] initWithFrame:self.view.bounds];
+    _contentView = [[UIView alloc] initWithFrame:self.view.bounds];
     _contentView.backgroundColor = [UIColor clearColor];
     _contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight; 
     _contentView.translatesAutoresizingMaskIntoConstraints = YES;
     [self.view addSubview:_contentView];
 
-    _blurView = [[PassthroughView alloc] initWithFrame:_contentView.bounds];
+    _blurView = [[UIView alloc] initWithFrame:_contentView.bounds];
     _blurView.backgroundColor = [UIColor clearColor];
     _blurView.translatesAutoresizingMaskIntoConstraints = NO;
     [_contentView addSubview:_blurView];
@@ -1123,12 +1117,8 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     [_lockedView setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
     [_blurView addSubview:_lockedView];
     
-    _tapGestureRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapGestureRecognized:)];
-    _tapGestureRecognizer.numberOfTapsRequired = 1;
-    _tapGestureRecognizer.numberOfTouchesRequired = 1;
-    _tapGestureRecognizer.cancelsTouchesInView = NO;
-    _tapGestureRecognizer.delaysTouchesEnded = NO;
-    [_contentView addGestureRecognizer:_tapGestureRecognizer];
+    // tapGestureRecognizer отключён — мешает touches в menuView
+    // _tapGestureRecognizer оставлен как ivar для совместимости
 
     [_contentView setUserInteractionEnabled:YES];
 
@@ -1379,4 +1369,3 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
 }
 
 @end
-
