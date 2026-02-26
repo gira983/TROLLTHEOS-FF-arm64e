@@ -18,46 +18,7 @@ static bool isAimbot = NO;
 static float aimFov = 150.0f;
 static float aimDistance = 200.0f;
 
-// ============================================================
-// CustomSwitch
-// ============================================================
-@interface CustomSwitch : UIControl
-@property (nonatomic, assign, getter=isOn) BOOL on;
-@end
 
-@implementation CustomSwitch { UIView *_thumb; }
-- (instancetype)initWithFrame:(CGRect)frame {
-    self = [super initWithFrame:frame];
-    if (self) {
-        self.backgroundColor = [UIColor clearColor];
-        _thumb = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 22, 22)];
-        _thumb.backgroundColor = [UIColor colorWithWhite:0.75 alpha:1.0];
-        _thumb.layer.cornerRadius = 11;
-        [self addSubview:_thumb];
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggle)];
-        [self addGestureRecognizer:tap];
-    }
-    return self;
-}
-- (void)drawRect:(CGRect)rect {
-    CGContextRef ctx = UIGraphicsGetCurrentContext();
-    UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:self.bounds cornerRadius:self.bounds.size.height/2];
-    CGContextSetFillColorWithColor(ctx, (self.isOn ? [UIColor colorWithRed:0.0 green:0.8 blue:0.0 alpha:1.0] : [UIColor colorWithWhite:0.25 alpha:1.0]).CGColor);
-    [path fill];
-}
-- (void)setOn:(BOOL)on {
-    if (_on != on) { _on = on; [self setNeedsDisplay]; [self updateThumb]; }
-}
-- (void)toggle { self.on = !self.on; [self sendActionsForControlEvents:UIControlEventValueChanged]; }
-- (void)updateThumb {
-    [UIView animateWithDuration:0.2 animations:^{
-        CGRect f = self->_thumb.frame;
-        f.origin.x = self.isOn ? self.bounds.size.width - f.size.width - 2 : 2;
-        self->_thumb.frame = f;
-        self->_thumb.backgroundColor = self.isOn ? [UIColor whiteColor] : [UIColor colorWithWhite:0.75 alpha:1.0];
-    }];
-}
-@end
 
 // ============================================================
 // MenuView
@@ -282,11 +243,12 @@ static float aimDistance = 200.0f;
     UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(16, y+3, 200, 28)];
     l.text = t; l.textColor = [UIColor whiteColor]; l.font = [UIFont systemFontOfSize:14];
     [parent addSubview:l];
-    CustomSwitch *sw = [[CustomSwitch alloc] initWithFrame:CGRectMake(W-68, y+5, 52, 26)];
+    UISwitch *sw = [[UISwitch alloc] initWithFrame:CGRectMake(W-70, y+3, 51, 31)];
     sw.on = v;
+    sw.onTintColor = [UIColor colorWithRed:0.0 green:0.75 blue:0.0 alpha:1.0];
     [sw addTarget:self action:sel forControlEvents:UIControlEventValueChanged];
     [parent addSubview:sw];
-    return y + 36;
+    return y + 40;
 }
 
 // ============================================================
@@ -323,12 +285,12 @@ static float aimDistance = 200.0f;
 // ============================================================
 // Toggle handlers
 // ============================================================
-- (void)toggleBox:(CustomSwitch *)s    { isBox    = s.isOn; }
-- (void)toggleBone:(CustomSwitch *)s   { isBone   = s.isOn; }
-- (void)toggleHealth:(CustomSwitch *)s { isHealth = s.isOn; }
-- (void)toggleName:(CustomSwitch *)s   { isName   = s.isOn; }
-- (void)toggleDist:(CustomSwitch *)s   { isDis    = s.isOn; }
-- (void)toggleAimbot:(CustomSwitch *)s { isAimbot = s.isOn; }
+- (void)toggleBox:(UISwitch *)s    { isBox    = s.isOn; }
+- (void)toggleBone:(UISwitch *)s   { isBone   = s.isOn; }
+- (void)toggleHealth:(UISwitch *)s { isHealth = s.isOn; }
+- (void)toggleName:(UISwitch *)s   { isName   = s.isOn; }
+- (void)toggleDist:(UISwitch *)s   { isDis    = s.isOn; }
+- (void)toggleAimbot:(UISwitch *)s { isAimbot = s.isOn; }
 - (void)sizeChanged:(UISlider *)s      { }
 - (void)fovChanged:(UISlider *)s       { aimFov      = s.value; }
 - (void)distChanged:(UISlider *)s      { aimDistance = s.value; }
