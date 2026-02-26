@@ -111,7 +111,7 @@ static float aimDistance = 200.0f;
     _menuBox.layer.cornerRadius = 14;
     _menuBox.layer.borderColor  = [UIColor colorWithWhite:0.25 alpha:1.0].CGColor;
     _menuBox.layer.borderWidth  = 1.5;
-    _menuBox.clipsToBounds = YES;
+    _menuBox.clipsToBounds = NO;  // YES обрезает touches у краёв
     _menuBox.hidden = YES;
     [self addSubview:_menuBox];
 
@@ -161,6 +161,7 @@ static float aimDistance = 200.0f;
     _tabAim.hidden = YES; _tabSetting.hidden = YES;
     for (UIView *v in @[_tabMain, _tabAim, _tabSetting]) {
         v.backgroundColor = [UIColor clearColor];
+        v.userInteractionEnabled = YES;
         [_menuBox addSubview:v];
     }
 
