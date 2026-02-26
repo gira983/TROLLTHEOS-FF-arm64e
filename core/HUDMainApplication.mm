@@ -1072,12 +1072,14 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     _contentView = [[UIView alloc] initWithFrame:self.view.bounds];
     _contentView.backgroundColor = [UIColor clearColor];
     _contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight; 
-    _contentView.translatesAutoresizingMaskIntoConstraints = YES; 
+    _contentView.translatesAutoresizingMaskIntoConstraints = YES;
+    _contentView.userInteractionEnabled = NO; // touches идут через hitTest в MenuView
     [self.view addSubview:_contentView];
 
     _blurView = [[UIView alloc] initWithFrame:_contentView.bounds];
     _blurView.backgroundColor = [UIColor clearColor];
     _blurView.translatesAutoresizingMaskIntoConstraints = NO;
+    _blurView.userInteractionEnabled = NO; // MenuView сама обрабатывает touches через hitTest
     [_contentView addSubview:_blurView];
     
     [NSLayoutConstraint activateConstraints:@[
@@ -1088,11 +1090,10 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     ]];
     
     CGRect screenBounds = [[UIScreen mainScreen] bounds];
-    CGRect menuFrame = CGRectMake(0, 20, 200, 230);
-    CGFloat centerX = CGRectGetMidX(screenBounds) - menuFrame.size.width / 2;
-    menuFrame.origin.x = centerX;
+    CGRect menuFrame = screenBounds;  // полноэкранный фрейм — MenuView сама центрирует своё меню
 
     menuView = [[MenuView alloc] initWithFrame:menuFrame];
+    menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [_blurView addSubview:menuView];
     
     _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
