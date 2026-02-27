@@ -775,30 +775,34 @@ static void DumpThreads(void)
 - (BOOL)_ignoresHitTest { return NO; }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // Напрямую спросить menuView — может она обработать этот touch?
-    UIViewController *vc = self.rootViewController;
-    if (!vc) return nil;
-    
-    // Пройти по всей иерархии subviews view контроллера
-    UIView *result = [self findMenuViewHit:vc.view point:point event:event];
-    return result;
+    // 1. Сначала проверяем, попал ли тап в интерактивные элементы нашего HUD
+    // Мы обходим иерархию вручную, чтобы не зависеть от super hitTest, 
+    // который на arm64e может возвращать nil для прозрачных окон.
+    UIView *hit = [self customHitTest:self.rootViewController.view point:point event:event];
+    if (hit) return hit;
+
+    // 2. Если не попали в HUD, возвращаем nil, чтобы тап прошел сквозь окно в игру
+    return nil;
 }
 
-- (UIView *)findMenuViewHit:(UIView *)view point:(CGPoint)point event:(UIEvent *)event {
-    for (UIView *sub in view.subviews.reverseObjectEnumerator) {
-        if (sub.hidden || sub.alpha < 0.01 || !sub.userInteractionEnabled) continue;
-        CGPoint converted = [self convertPoint:point toView:sub];
-        if (![sub pointInside:converted withEvent:event]) continue;
-        // Рекурсивно ищем самый глубокий view
-        UIView *deeper = [self findMenuViewHit:sub point:point event:event];
-        if (deeper) return deeper;
-        // Если sub сам интерактивный элемент (кнопка, свитч, слайдер)
-        if ([sub isKindOfClass:[UIControl class]] || 
-            [sub isKindOfClass:[UIButton class]] ||
-            sub.gestureRecognizers.count > 0) {
-            return sub;
-        }
+- (UIView *)customHitTest:(UIView *)view point:(CGPoint)point event:(UIEvent *)event {
+    if (!view || view.hidden || view.alpha < 0.01 || !view.userInteractionEnabled) return nil;
+
+    // Конвертируем точку в координаты текущего view
+    CGPoint localPoint = [self convertPoint:point toView:view];
+    if (![view pointInside:localPoint withEvent:event]) return nil;
+
+    // Рекурсивно проверяем subviews в обратном порядке (от верхних к нижним)
+    for (UIView *subview in [view.subviews reverseObjectEnumerator]) {
+        UIView *hit = [self customHitTest:subview point:point event:event];
+        if (hit) return hit;
     }
+
+    // Если это MenuView или UIControl (кнопка, свитч), и мы внутри него — возвращаем его
+    if ([view isKindOfClass:objc_getClass("MenuView")] || [view isKindOfClass:[UIControl class]]) {
+        return view;
+    }
+
     return nil;
 }
 
@@ -1387,4 +1391,3 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
 }
 
 @end
-
