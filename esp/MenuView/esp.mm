@@ -29,12 +29,30 @@ static float aimDistance = 200.0f;
 - (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers;
 @end
 
+// MenuBox — UIView с правильным hitTest для вложенных контролов
+@interface MenuBox : UIView
+@end
+@implementation MenuBox
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
+    if (![self pointInside:point withEvent:event]) return nil;
+    // Обход всех subviews в обратном порядке
+    for (UIView *sub in self.subviews.reverseObjectEnumerator) {
+        if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
+        CGPoint p = [self convertPoint:point toView:sub];
+        UIView *hit = [sub hitTest:p withEvent:event];
+        if (hit) return hit;
+    }
+    return self;
+}
+@end
+
 @implementation MenuView {
     UIButton *_btnFloat;
     CGPoint   _dragStart;
     CGPoint   _btnCenterAtDrag;
 
-    UIView  *_menuBox;
+    MenuBox *_menuBox;
     UIView  *_tabMain;
     UIView  *_tabAim;
     UIView  *_tabSetting;
@@ -84,15 +102,24 @@ static float aimDistance = 200.0f;
     if (gr.state == UIGestureRecognizerStateBegan) {
         _dragStart = [gr locationInView:self];
         _btnCenterAtDrag = _btnFloat.center;
+        _dragging = NO;
     } else if (gr.state == UIGestureRecognizerStateChanged) {
         CGPoint loc = [gr locationInView:self];
+        CGFloat dx = loc.x - _dragStart.x;
+        CGFloat dy = loc.y - _dragStart.y;
+        // Порог 5pt — чтобы тап не считался перетаскиванием
+        if (!_dragging && sqrt(dx*dx + dy*dy) < 5) return;
+        _dragging = YES;
         CGFloat r = 27;
         CGRect b = self.bounds;
         CGPoint c = CGPointMake(
-            MAX(r, MIN(b.size.width  - r, _btnCenterAtDrag.x + loc.x - _dragStart.x)),
-            MAX(r, MIN(b.size.height - r, _btnCenterAtDrag.y + loc.y - _dragStart.y))
+            MAX(r, MIN(b.size.width  - r, _btnCenterAtDrag.x + dx)),
+            MAX(r, MIN(b.size.height - r, _btnCenterAtDrag.y + dy))
         );
         _btnFloat.center = c;
+    } else if (gr.state == UIGestureRecognizerStateEnded ||
+               gr.state == UIGestureRecognizerStateCancelled) {
+        _dragging = NO;
     }
 }
 
@@ -106,7 +133,7 @@ static float aimDistance = 200.0f;
     CGFloat X = (screen.size.width  - W) / 2;
     CGFloat Y = (screen.size.height - H) / 2;
 
-    _menuBox = [[UIView alloc] initWithFrame:CGRectMake(X, Y, W, H)];
+    _menuBox = [[MenuBox alloc] initWithFrame:CGRectMake(X, Y, W, H)];
     _menuBox.backgroundColor = [UIColor colorWithRed:0.07 green:0.07 blue:0.07 alpha:0.97];
     _menuBox.layer.cornerRadius = 14;
     _menuBox.layer.borderColor  = [UIColor colorWithWhite:0.25 alpha:1.0].CGColor;
@@ -319,14 +346,18 @@ static float aimDistance = 200.0f;
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden) return nil;
-    
-    // Стандартный UIKit hitTest — находит самый глубокий интерактивный view
-    UIView *hit = [super hitTest:point withEvent:event];
-    
-    // Если hit это сама MenuView (прозрачный фон) — не перехватываем
-    if (hit == self) return nil;
-    
-    return hit;
+    // Проверяем _menuBox
+    if (_menuBox && !_menuBox.hidden) {
+        CGPoint p = [self convertPoint:point toView:_menuBox];
+        UIView *hit = [_menuBox hitTest:p withEvent:event];
+        if (hit) return hit;
+    }
+    // Проверяем _btnFloat
+    if (_btnFloat && !_btnFloat.hidden) {
+        CGPoint p = [self convertPoint:point toView:_btnFloat];
+        if ([_btnFloat pointInside:p withEvent:event]) return _btnFloat;
+    }
+    return nil;
 }
 
 // ============================================================
