@@ -101,8 +101,8 @@ static float aimDistance = 200.0f;
 // ============================================================
 - (void)buildMenuBox {
     CGRect screen = [UIScreen mainScreen].bounds;
-    CGFloat W = MIN(screen.size.width - 20, 400);
-    CGFloat H = 300;
+    CGFloat W = MIN(screen.size.width - 20, 380);
+    CGFloat H = MIN(screen.size.height * 0.6, 340);
     CGFloat X = (screen.size.width  - W) / 2;
     CGFloat Y = (screen.size.height - H) / 2;
 
@@ -192,17 +192,21 @@ static float aimDistance = 200.0f;
 }
 
 - (void)buildESPTab:(CGFloat)H width:(CGFloat)W {
-    CGFloat y = 8;
-    y = [self row:_tabMain title:@"Box"      y:y val:isBox    sel:@selector(toggleBox:)    W:W];
-    y = [self row:_tabMain title:@"Bone"     y:y val:isBone   sel:@selector(toggleBone:)   W:W];
-    y = [self row:_tabMain title:@"Health"   y:y val:isHealth sel:@selector(toggleHealth:) W:W];
-    y = [self row:_tabMain title:@"Name"     y:y val:isName   sel:@selector(toggleName:)   W:W];
-    y = [self row:_tabMain title:@"Distance" y:y val:isDis    sel:@selector(toggleDist:)   W:W];
+    // Высота таба = H, нужно вписать 5 строк + слайдер
+    // Каждая строка = (H - слайдер - отступы) / 5
+    CGFloat rowH = 34;
+    CGFloat y = 6;
+    y = [self row:_tabMain title:@"Box"      y:y val:isBox    sel:@selector(toggleBox:)    W:W rowH:rowH];
+    y = [self row:_tabMain title:@"Bone"     y:y val:isBone   sel:@selector(toggleBone:)   W:W rowH:rowH];
+    y = [self row:_tabMain title:@"Health"   y:y val:isHealth sel:@selector(toggleHealth:) W:W rowH:rowH];
+    y = [self row:_tabMain title:@"Name"     y:y val:isName   sel:@selector(toggleName:)   W:W rowH:rowH];
+    y = [self row:_tabMain title:@"Distance" y:y val:isDis    sel:@selector(toggleDist:)   W:W rowH:rowH];
 
-    UILabel *sl = [[UILabel alloc] initWithFrame:CGRectMake(16, y+4, 50, 24)];
-    sl.text = @"Size:"; sl.textColor = [UIColor whiteColor]; sl.font = [UIFont systemFontOfSize:13];
+    // Ползунок Size — вписываем в оставшееся место
+    UILabel *sl = [[UILabel alloc] initWithFrame:CGRectMake(12, y+4, 46, 22)];
+    sl.text = @"Size:"; sl.textColor = [UIColor lightGrayColor]; sl.font = [UIFont systemFontOfSize:12];
     [_tabMain addSubview:sl];
-    UISlider *s = [[UISlider alloc] initWithFrame:CGRectMake(66, y+2, W-86, 28)];
+    UISlider *s = [[UISlider alloc] initWithFrame:CGRectMake(58, y+2, W-70, 28)];
     s.minimumValue = 0.5; s.maximumValue = 1.5; s.value = 1.0;
     s.minimumTrackTintColor = [UIColor colorWithRed:0.0 green:0.7 blue:0.0 alpha:1.0];
     [s addTarget:self action:@selector(sizeChanged:) forControlEvents:UIControlEventValueChanged];
@@ -241,15 +245,18 @@ static float aimDistance = 200.0f;
 }
 
 - (CGFloat)row:(UIView *)parent title:(NSString *)t y:(CGFloat)y val:(BOOL)v sel:(SEL)sel W:(CGFloat)W {
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(16, y+3, 200, 28)];
+    return [self row:parent title:t y:y val:v sel:sel W:W rowH:40];
+}
+- (CGFloat)row:(UIView *)parent title:(NSString *)t y:(CGFloat)y val:(BOOL)v sel:(SEL)sel W:(CGFloat)W rowH:(CGFloat)rowH {
+    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(12, y+2, W-80, rowH-4)];
     l.text = t; l.textColor = [UIColor whiteColor]; l.font = [UIFont systemFontOfSize:14];
     [parent addSubview:l];
-    UISwitch *sw = [[UISwitch alloc] initWithFrame:CGRectMake(W-70, y+3, 51, 31)];
+    UISwitch *sw = [[UISwitch alloc] initWithFrame:CGRectMake(W-66, y+(rowH-31)/2, 51, 31)];
     sw.on = v;
     sw.onTintColor = [UIColor colorWithRed:0.0 green:0.75 blue:0.0 alpha:1.0];
     [sw addTarget:self action:sel forControlEvents:UIControlEventValueChanged];
     [parent addSubview:sw];
-    return y + 40;
+    return y + rowH;
 }
 
 // ============================================================
