@@ -312,18 +312,14 @@ static float aimDistance = 200.0f;
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden) return nil;
-    // Сначала меню
-    if (_menuBox && !_menuBox.hidden) {
-        CGPoint p = [self convertPoint:point toView:_menuBox];
-        UIView *hit = [_menuBox hitTest:p withEvent:event];
-        if (hit) return hit;
-    }
-    // Потом кнопка
-    if (_btnFloat && !_btnFloat.hidden) {
-        CGPoint p = [self convertPoint:point toView:_btnFloat];
-        if ([_btnFloat pointInside:p withEvent:event]) return _btnFloat;
-    }
-    return nil;
+    
+    // Стандартный UIKit hitTest — находит самый глубокий интерактивный view
+    UIView *hit = [super hitTest:point withEvent:event];
+    
+    // Если hit это сама MenuView (прозрачный фон) — не перехватываем
+    if (hit == self) return nil;
+    
+    return hit;
 }
 
 // ============================================================
