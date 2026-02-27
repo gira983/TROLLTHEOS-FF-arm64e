@@ -18,15 +18,9 @@ static bool isAimbot = NO;
 static float aimFov = 150.0f;
 static float aimDistance = 200.0f;
 
-
-
-// ============================================================
-// MenuView
-// ============================================================
 @interface MenuView ()
 @property (nonatomic, strong) CADisplayLink *displayLink;
 @property (nonatomic, strong) NSMutableArray<CALayer *> *drawingLayers;
-- (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers;
 @end
 
 @implementation MenuView {
@@ -47,11 +41,15 @@ static float aimDistance = 200.0f;
         self.userInteractionEnabled = YES;
         self.backgroundColor = [UIColor clearColor];
         self.drawingLayers = [NSMutableArray array];
+        
         [self SetUpBase];
+        
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
         [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+        
         [self buildFloatingButton];
         [self buildMenuBox];
+        
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(appDidBecomeActive) name:UIApplicationDidBecomeActiveNotification object:nil];
     }
     return self;
@@ -64,9 +62,6 @@ static float aimDistance = 200.0f;
     }
 }
 
-// ============================================================
-// FLOATING BUTTON
-// ============================================================
 - (void)buildFloatingButton {
     _btnFloat = [UIButton buttonWithType:UIButtonTypeCustom];
     _btnFloat.frame = CGRectMake(30, 120, 54, 54);
@@ -104,9 +99,6 @@ static float aimDistance = 200.0f;
     }
 }
 
-// ============================================================
-// MENU BOX
-// ============================================================
 - (void)buildMenuBox {
     CGRect screen = [UIScreen mainScreen].bounds;
     CGFloat W = MIN(screen.size.width - 20, 400);
@@ -119,16 +111,18 @@ static float aimDistance = 200.0f;
     _menuBox.layer.cornerRadius = 14;
     _menuBox.layer.borderColor  = [UIColor colorWithWhite:0.25 alpha:1.0].CGColor;
     _menuBox.layer.borderWidth  = 1.5;
-    _menuBox.clipsToBounds = NO;  // YES обрезает touches у краёв
+    _menuBox.userInteractionEnabled = YES;
     _menuBox.hidden = YES;
     [self addSubview:_menuBox];
 
     UIPanGestureRecognizer *drag = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(menuDrag:)];
+    drag.cancelsTouchesInView = NO;
     [_menuBox addGestureRecognizer:drag];
 
     // Header
     UIView *hdr = [[UIView alloc] initWithFrame:CGRectMake(0, 0, W, 40)];
     hdr.backgroundColor = [UIColor colorWithWhite:0.12 alpha:1.0];
+    hdr.userInteractionEnabled = YES;
     [_menuBox addSubview:hdr];
 
     UILabel *ttl = [[UILabel alloc] initWithFrame:CGRectMake(12, 0, W-60, 40)];
@@ -149,6 +143,7 @@ static float aimDistance = 200.0f;
     // Tab bar
     UIView *tabBar = [[UIView alloc] initWithFrame:CGRectMake(0, 40, W, 36)];
     tabBar.backgroundColor = [UIColor colorWithWhite:0.1 alpha:1.0];
+    tabBar.userInteractionEnabled = YES;
     [_menuBox addSubview:tabBar];
 
     CGFloat tw = W / 3;
@@ -252,17 +247,16 @@ static float aimDistance = 200.0f;
     UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(16, y+3, 200, 28)];
     l.text = t; l.textColor = [UIColor whiteColor]; l.font = [UIFont systemFontOfSize:14];
     [parent addSubview:l];
+    
     UISwitch *sw = [[UISwitch alloc] initWithFrame:CGRectMake(W-70, y+3, 51, 31)];
     sw.on = v;
     sw.onTintColor = [UIColor colorWithRed:0.0 green:0.75 blue:0.0 alpha:1.0];
     [sw addTarget:self action:sel forControlEvents:UIControlEventValueChanged];
     [parent addSubview:sw];
+    
     return y + 40;
 }
 
-// ============================================================
-// Show / Hide / Drag
-// ============================================================
 - (void)showMenu {
     _menuBox.hidden = NO;
     _btnFloat.hidden = YES;
@@ -291,9 +285,6 @@ static float aimDistance = 200.0f;
     [gr setTranslation:CGPointZero inView:self];
 }
 
-// ============================================================
-// Toggle handlers
-// ============================================================
 - (void)toggleBox:(UISwitch *)s    { isBox    = s.isOn; }
 - (void)toggleBone:(UISwitch *)s   { isBone   = s.isOn; }
 - (void)toggleHealth:(UISwitch *)s { isHealth = s.isOn; }
@@ -304,9 +295,6 @@ static float aimDistance = 200.0f;
 - (void)fovChanged:(UISlider *)s       { aimFov      = s.value; }
 - (void)distChanged:(UISlider *)s      { aimDistance = s.value; }
 
-// ============================================================
-// Layout + hitTest
-// ============================================================
 - (void)layoutSubviews {
     [super layoutSubviews];
     if (self.superview) self.frame = self.superview.bounds;
@@ -321,7 +309,7 @@ static float aimDistance = 200.0f;
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
 
-    // 1. Проверяем кнопку (она обычно поверх всего, когда меню закрыто)
+    // 1. Проверяем кнопку
     if (_btnFloat && !_btnFloat.hidden) {
         CGPoint p = [self convertPoint:point toView:_btnFloat];
         if ([_btnFloat pointInside:p withEvent:event]) return _btnFloat;
@@ -330,19 +318,15 @@ static float aimDistance = 200.0f;
     // 2. Проверяем меню
     if (_menuBox && !_menuBox.hidden) {
         CGPoint p = [self convertPoint:point toView:_menuBox];
-        // Если точка внутри меню, вызываем стандартный hitTest меню
         if ([_menuBox pointInside:p withEvent:event]) {
+            // Рекурсивно ищем самый глубокий интерактивный элемент внутри меню
             UIView *hit = [_menuBox hitTest:p withEvent:event];
-            // Если hitTest вернул само меню (фон), возвращаем его, чтобы тап не провалился
             return hit ?: _menuBox;
         }
     }
     return nil;
 }
 
-// ============================================================
-// SetUpBase + updateFrame + ESP
-// ============================================================
 - (void)SetUpBase {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -353,7 +337,6 @@ static float aimDistance = 200.0f;
 - (void)updateFrame {
     if (!self.window) return;
     
-    // Проверка: если displayLink почему-то остановился (например, после смены катки)
     if (self.displayLink && self.displayLink.paused) {
         self.displayLink.paused = NO;
     }
@@ -362,6 +345,7 @@ static float aimDistance = 200.0f;
     [CATransaction setDisableActions:YES];
     for (CALayer *l in self.drawingLayers) [l removeFromSuperlayer];
     [self.drawingLayers removeAllObjects];
+    
     if (isAimbot) {
         float cx = self.bounds.size.width/2, cy = self.bounds.size.height/2;
         CAShapeLayer *circle = [CAShapeLayer layer];
@@ -371,27 +355,18 @@ static float aimDistance = 200.0f;
         circle.lineWidth = 1;
         [self.drawingLayers addObject:circle];
     }
+    
     [self renderESPToLayers:self.drawingLayers];
     for (CALayer *l in self.drawingLayers) [self.layer addSublayer:l];
     [CATransaction commit];
 }
 
 - (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.displayLink invalidate]; self.displayLink = nil;
 }
 
-static inline void BoneLine(NSMutableArray<CALayer*>*L,CGPoint a,CGPoint b,UIColor*c,CGFloat w){
-    CGFloat dx=b.x-a.x,dy=b.y-a.y,len=sqrt(dx*dx+dy*dy);
-    if(len<2)return;
-    CALayer*l=[CALayer layer];l.backgroundColor=c.CGColor;
-    l.bounds=CGRectMake(0,0,len,w);l.position=a;l.anchorPoint=CGPointMake(0,0.5);
-    l.transform=CATransform3DMakeRotation(atan2(dy,dx),0,0,1);[L addObject:l];
-}
-Quaternion GetRotationToLocation(Vector3 t,float b,Vector3 m){return Quaternion::LookRotation((t+Vector3(0,b,0))-m,Vector3(0,1,0));}
-void set_aim(uint64_t p,Quaternion r){if(!isVaildPtr(p))return;WriteAddr<Quaternion>(p+0x53C,r);}
-bool get_IsFiring(uint64_t p){if(!isVaildPtr(p))return false;return ReadAddr<bool>(p+0x750);}
-bool get_IsVisible(uint64_t p){if(!isVaildPtr(p))return false;uint64_t v=ReadAddr<uint64_t>(p+0x9B0);if(!isVaildPtr(v))return false;return(ReadAddr<int>(v+0x10)&1)==0;}
-
+// ... (остальной код ESP рендеринга без изменений) ...
 - (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers {
     if(Moudule_Base==(uint64_t)-1)return;
     uint64_t mg=getMatchGame(Moudule_Base),cam=CameraMain(mg);
@@ -442,4 +417,13 @@ bool get_IsVisible(uint64_t p){if(!isVaildPtr(p))return false;uint64_t v=ReadAdd
     }
     if(isAimbot&&isVaildPtr(best)&&fire){set_aim(me,GetRotationToLocation(getPositionExt(getHead(best)),0.1f,myL));}
 }
+
+static inline void BoneLine(NSMutableArray<CALayer*>*L,CGPoint a,CGPoint b,UIColor*c,CGFloat w){
+    CGFloat dx=b.x-a.x,dy=b.y-a.y,len=sqrt(dx*dx+dy*dy);
+    if(len<2)return;
+    CALayer*l=[CALayer layer];l.backgroundColor=c.CGColor;
+    l.bounds=CGRectMake(0,0,len,w);l.position=a;l.anchorPoint=CGPointMake(0,0.5);
+    l.transform=CATransform3DMakeRotation(atan2(dy,dx),0,0,1);[L addObject:l];
+}
+
 @end
