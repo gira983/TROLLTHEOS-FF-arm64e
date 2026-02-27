@@ -10,9 +10,9 @@
 #include <cmath>
 
 // Forward declarations for missing functions if not in headers
-extern "C" bool get_IsFiring(uint64_t player);
-extern "C" Vector3 GetRotationToLocation(Vector3 targetPos, float speed, Vector3 myPos);
-extern "C" void set_aim(uint64_t player, Vector3 angle);
+extern bool get_IsFiring(uint64_t player);
+extern Vector3 GetRotationToLocation(Vector3 targetPos, float speed, Vector3 myPos);
+extern void set_aim(uint64_t player, Vector3 angle);
 
 uint64_t Moudule_Base = -1;
 
