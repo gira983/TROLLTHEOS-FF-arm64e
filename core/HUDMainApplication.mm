@@ -773,21 +773,8 @@ static void DumpThreads(void)
 + (BOOL)_isSystemWindow { return YES; }
 - (BOOL)_isWindowServerHostingManaged { return NO; }
 - (BOOL)_ignoresHitTest { return NO; }
-
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // Спросить menuView напрямую через её собственный hitTest
-    UIViewController *vc = self.rootViewController;
-    if (!vc) return nil;
-    
-    for (UIView *sub in vc.view.subviews.reverseObjectEnumerator) {
-        if (sub.hidden || !sub.userInteractionEnabled) continue;
-        CGPoint p = [sub convertPoint:point fromView:self];
-        UIView *hit = [sub hitTest:p withEvent:event];
-        if (hit && hit != sub) return hit; // нашли конкретный элемент
-        if (hit == sub && hit.gestureRecognizers.count > 0) return hit;
-    }
-    return nil;
-}
+- (BOOL)_isSecure { return YES; }
+- (BOOL)_shouldCreateContextAsSecure { return YES; }
 
 @end
 
@@ -1105,23 +1092,15 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     CGRect screenBounds = [[UIScreen mainScreen] bounds];
     CGRect menuFrame = screenBounds;
 
-    menuView = [[MenuView alloc] initWithFrame:menuFrame];
-    menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    menuView.userInteractionEnabled = YES;
-    
-    // Добавляем в keyWindow после небольшой задержки
-    // keyWindow игры гарантированно получает touches на обеих архитектурах
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindow *targetWin = nil;
-        // Ищем окно с максимальным windowLevel (наше HUD окно)
-        for (UIWindow *w in [UIApplication sharedApplication].windows) {
-            if (!targetWin || w.windowLevel > targetWin.windowLevel) {
-                targetWin = w;
-            }
-        }
-        if (!targetWin) targetWin = [UIApplication sharedApplication].keyWindow;
-        self->menuView.frame = targetWin.bounds;
-        [targetWin addSubview:self->menuView];
+    // menuView добавляется в keyWindow через 2.5 сек как в рабочем demo проекте
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        CGRect screen = [UIScreen mainScreen].bounds;
+        menuView = [[MenuView alloc] initWithFrame:screen];
+        menuView.userInteractionEnabled = YES;
+        menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        UIWindow *keyWin = [UIApplication sharedApplication].keyWindow;
+        if (!keyWin) keyWin = [UIApplication sharedApplication].windows.firstObject;
+        [keyWin addSubview:menuView];
     });
     
     _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
