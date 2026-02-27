@@ -36,14 +36,22 @@ static float aimDistance = 200.0f;
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
     if (![self pointInside:point withEvent:event]) return nil;
-    // Обход всех subviews в обратном порядке
-    for (UIView *sub in self.subviews.reverseObjectEnumerator) {
+    return [self deepHitTest:point inView:self event:event] ?: self;
+}
+- (UIView *)deepHitTest:(CGPoint)point inView:(UIView *)view event:(UIEvent *)event {
+    for (UIView *sub in view.subviews.reverseObjectEnumerator) {
         if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
-        CGPoint p = [self convertPoint:point toView:sub];
-        UIView *hit = [sub hitTest:p withEvent:event];
-        if (hit) return hit;
+        CGPoint p = [view convertPoint:point toView:sub];
+        if (![sub pointInside:p withEvent:event]) continue;
+        // Рекурсивно вглубь
+        UIView *deeper = [self deepHitTest:p inView:sub event:event];
+        if (deeper) return deeper;
+        // UIControl (UISwitch, UISlider, UIButton) — возвращаем его
+        if ([sub isKindOfClass:[UIControl class]]) return sub;
+        // UIView с gesture recognizers
+        if (sub.gestureRecognizers.count > 0) return sub;
     }
-    return self;
+    return nil;
 }
 @end
 
