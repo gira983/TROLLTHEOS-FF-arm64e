@@ -776,6 +776,22 @@ static void DumpThreads(void)
 - (BOOL)_isSecure { return YES; }
 - (BOOL)_shouldCreateContextAsSecure { return YES; }
 
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    // Стандартный hitTest — UIKit сам найдёт нужный view
+    UIView *hit = [super hitTest:point withEvent:event];
+    // Пропускаем прозрачные контейнеры (window, rootVC view, contentView, blurView)
+    // Возвращаем nil только если hit — это одна из прозрачных оболочек
+    if (!hit) return nil;
+    if (hit.backgroundColor == nil || hit.backgroundColor == [UIColor clearColor]) {
+        // Проверяем — это контрол или view с gesture?
+        if ([hit isKindOfClass:[UIControl class]] || hit.gestureRecognizers.count > 0) {
+            return hit;
+        }
+        return nil;
+    }
+    return hit;
+}
+
 @end
 
 
@@ -1075,6 +1091,7 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     _contentView.backgroundColor = [UIColor clearColor];
     _contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight; 
     _contentView.translatesAutoresizingMaskIntoConstraints = YES;
+    _contentView.userInteractionEnabled = YES;
     [self.view addSubview:_contentView];
 
     _blurView = [[UIView alloc] initWithFrame:_contentView.bounds];
@@ -1095,7 +1112,7 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     menuView = [[MenuView alloc] initWithFrame:menuFrame];
     menuView.userInteractionEnabled = YES;
     menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [self.view addSubview:menuView];
+    [_contentView addSubview:menuView];  // в _contentView — поворачивается вместе с экраном
     
     _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     [_blurView addSubview:_speedLabel];
