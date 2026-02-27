@@ -9,13 +9,12 @@
 #include <vector>
 #include <cmath>
 
-// Forward declarations for missing functions if not in headers
 #ifdef __cplusplus
 extern "C" {
 #endif
     bool get_IsFiring(uint64_t player);
     void set_aim(uint64_t player, Vector3 angle);
-    // Для GetRotationToLocation используем C-линковку, но обходим варнинг компилятора
+    
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
     Vector3 GetRotationToLocation(Vector3 targetPos, float speed, Vector3 myPos);
