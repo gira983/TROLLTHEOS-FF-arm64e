@@ -132,7 +132,6 @@ void SetHUDEnabled(BOOL isEnabled)
 #pragma mark -
 
 
-
 #define KILOBITS 1000
 #define MEGABITS 1000000
 #define GIGABITS 1000000000
@@ -288,8 +287,8 @@ static NSAttributedString* formattedAttributedString(BOOL isFocused)
 
         if (DATAUNIT == 1)
         {
-            upDiff *= BYTE_SIZE;
-            downDiff *= BYTE_SIZE;
+            upDiff *= 8; // BYTE_SIZE
+            downDiff *= 8;
         }
 
         if (SHOW_DOWNLOAD_SPEED_FIRST)
@@ -299,15 +298,10 @@ static NSAttributedString* formattedAttributedString(BOOL isFocused)
                 [mutableString appendAttributedString:attributedDownloadPrefix];
                 [mutableString appendAttributedString:[[NSAttributedString alloc] initWithString:formattedSpeed(downDiff, isFocused) attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:FONT_SIZE]}]];
             }
-
             if (SHOW_UPLOAD_SPEED)
             {
-                if ([mutableString length] > 0)
-                {
-                    if (SHOW_SECOND_SPEED_IN_NEW_LINE) [mutableString appendAttributedString:attributedLineSeparator];
-                    else [mutableString appendAttributedString:attributedInlineSeparator];
-                }
-
+                if (SHOW_DOWNLOAD_SPEED)
+                    [mutableString appendAttributedString:(SHOW_SECOND_SPEED_IN_NEW_LINE ? attributedLineSeparator : attributedInlineSeparator)];
                 [mutableString appendAttributedString:attributedUploadPrefix];
                 [mutableString appendAttributedString:[[NSAttributedString alloc] initWithString:formattedSpeed(upDiff, isFocused) attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:FONT_SIZE]}]];
             }
@@ -321,80 +315,29 @@ static NSAttributedString* formattedAttributedString(BOOL isFocused)
             }
             if (SHOW_DOWNLOAD_SPEED)
             {
-                if ([mutableString length] > 0)
-                {
-                    if (SHOW_SECOND_SPEED_IN_NEW_LINE) [mutableString appendAttributedString:attributedLineSeparator];
-                    else [mutableString appendAttributedString:attributedInlineSeparator];
-                }
-
+                if (SHOW_UPLOAD_SPEED)
+                    [mutableString appendAttributedString:(SHOW_SECOND_SPEED_IN_NEW_LINE ? attributedLineSeparator : attributedInlineSeparator)];
                 [mutableString appendAttributedString:attributedDownloadPrefix];
                 [mutableString appendAttributedString:[[NSAttributedString alloc] initWithString:formattedSpeed(downDiff, isFocused) attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:FONT_SIZE]}]];
             }
         }
-        
-        return [mutableString copy];
+
+        return mutableString;
     }
 }
 
-#pragma mark -
 
-@interface UIApplication (Private)
-- (void)suspend;
-- (void)terminateWithSuccess;
-- (void)_run;
-@end
+#pragma mark - HUDRootViewController
 
-@interface UIWindow (Private)
-- (unsigned int)_contextId;
-@end
-
-@interface UIEventDispatcher : NSObject
-- (void)_installEventRunLoopSources:(CFRunLoopRef)arg1;
-@end
-
-@interface UIEventFetcher : NSObject
-- (void)setEventFetcherSink:(id)arg1;
-- (void)displayLinkDidFire:(id)arg1;
-@end
-
-@interface _UIHIDEventSynchronizer : NSObject
-- (void)_renderEvents:(id)arg1;
-@end
-
-@interface SBSAccessibilityWindowHostingController : NSObject
-- (void)registerWindowWithContextID:(unsigned)arg1 atLevel:(double)arg2;
-@end
-
-@interface FBSOrientationObserver : NSObject
-- (long long)activeInterfaceOrientation;
-- (void)activeInterfaceOrientationWithCompletion:(id)arg1;
-- (void)invalidate;
-- (void)setHandler:(id)arg1;
-- (id)handler;
-@end
-
-@interface FBSOrientationUpdate : NSObject
-- (unsigned long long)sequenceNumber;
-- (long long)rotationDirection;
-- (long long)orientation;
-- (double)duration;
-@end
-
-
-#pragma mark -
-
-#import "UIAutoRotatingWindow.h"
-#import "UIApplicationRotationFollowingControllerNoTouches.h"
-
-@interface HUDMainApplicationDelegate : UIResponder <UIApplicationDelegate>
-@property (nonatomic, strong) UIWindow *window;
-@end
-
-@interface HUDRootViewController: UIApplicationRotationFollowingControllerNoTouches
-+ (BOOL)passthroughMode;
+@interface HUDRootViewController : UIViewController
 - (void)resetLoopTimer;
 - (void)stopLoopTimer;
 @end
+
+
+#pragma mark - HUDMainWindow
+
+#import "UIAutoRotatingWindow.h"
 
 @interface HUDMainWindow : UIAutoRotatingWindow
 @end
@@ -703,6 +646,10 @@ static void DumpThreads(void)
 
 #pragma mark - HUDMainApplicationDelegate
 
+@interface HUDMainApplicationDelegate : UIResponder <UIApplicationDelegate>
+@property (nonatomic, strong) UIWindow *window;
+@end
+
 @implementation HUDMainApplicationDelegate {
     HUDRootViewController *_rootViewController;
     SBSAccessibilityWindowHostingController *_windowHostingController;
@@ -775,30 +722,33 @@ static void DumpThreads(void)
 - (BOOL)_ignoresHitTest { return NO; }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // 1. Сначала проверяем, попал ли тап в интерактивные элементы нашего HUD
-    // Мы обходим иерархию вручную, чтобы не зависеть от super hitTest, 
-    // который на arm64e может возвращать nil для прозрачных окон.
-    UIView *hit = [self customHitTest:self.rootViewController.view point:point event:event];
+    // 1. Прямой поиск MenuView в иерархии
+    UIView *rootView = self.rootViewController.view;
+    if (!rootView) return nil;
+
+    // Рекурсивный поиск MenuView или любого UIControl
+    UIView *hit = [self findInteractiveView:rootView point:point event:event];
+    
+    // Если нашли что-то интерактивное — возвращаем это
     if (hit) return hit;
 
-    // 2. Если не попали в HUD, возвращаем nil, чтобы тап прошел сквозь окно в игру
+    // 2. Если ничего не нашли, возвращаем nil, чтобы тап прошел сквозь окно
     return nil;
 }
 
-- (UIView *)customHitTest:(UIView *)view point:(CGPoint)point event:(UIEvent *)event {
-    if (!view || view.hidden || view.alpha < 0.01 || !view.userInteractionEnabled) return nil;
+- (UIView *)findInteractiveView:(UIView *)view point:(CGPoint)point event:(UIEvent *)event {
+    if (view.hidden || view.alpha < 0.01 || !view.userInteractionEnabled) return nil;
 
-    // Конвертируем точку в координаты текущего view
     CGPoint localPoint = [self convertPoint:point toView:view];
     if (![view pointInside:localPoint withEvent:event]) return nil;
 
-    // Рекурсивно проверяем subviews в обратном порядке (от верхних к нижним)
+    // Сначала проверяем subviews (в обратном порядке)
     for (UIView *subview in [view.subviews reverseObjectEnumerator]) {
-        UIView *hit = [self customHitTest:subview point:point event:event];
+        UIView *hit = [self findInteractiveView:subview point:point event:event];
         if (hit) return hit;
     }
 
-    // Если это MenuView или UIControl (кнопка, свитч), и мы внутри него — возвращаем его
+    // Если это MenuView или UIControl — это наша цель
     if ([view isKindOfClass:objc_getClass("MenuView")] || [view isKindOfClass:[UIControl class]]) {
         return view;
     }
@@ -807,12 +757,6 @@ static void DumpThreads(void)
 }
 
 @end
-
-
-
-
-
-
 
 
 #pragma mark - HUDRootViewController
@@ -934,13 +878,6 @@ static void DumpThreads(void)
     [self removeAllAnimations];
     [self resetGestureRecognizers];
     [self updateViewConstraints];
-
-    //[self performSelector:@selector(onBlur:) withObject:_contentView afterDelay:IDLE_INTERVAL];
-}
-
-+ (BOOL)passthroughMode
-{
-    return [[[NSDictionary dictionaryWithContentsOfFile:USER_DEFAULTS_PATH] objectForKey:@"passthroughMode"] boolValue];
 }
 
 - (NSInteger)selectedMode
@@ -978,27 +915,6 @@ static void DumpThreads(void)
     return mode ? [mode boolValue] : NO;
 }
 
-- (BOOL)usesRotation
-{
-    [self loadUserDefaults:NO];
-    NSNumber *mode = [_userDefaults objectForKey:@"usesRotation"];
-    return mode ? [mode boolValue] : NO;
-}
-
-- (BOOL)keepInPlace
-{
-    [self loadUserDefaults:NO];
-    NSNumber *mode = [_userDefaults objectForKey:@"keepInPlace"];
-    return mode ? [mode boolValue] : NO;
-}
-
-- (CGFloat)currentPositionY
-{
-    [self loadUserDefaults:NO];
-    NSNumber *positionY = [_userDefaults objectForKey:@"currentPositionY"];
-    return positionY ? [positionY doubleValue] : CGFLOAT_MAX;
-}
-
 - (void)setCurrentPositionY:(CGFloat)positionY
 {
     [self loadUserDefaults:NO];
@@ -1029,89 +945,54 @@ static void DumpThreads(void)
     [_orientationObserver invalidate];
 }
 
-- (void)updateSpeedLabel
-{
-#if DEBUG
-    os_log_debug(OS_LOG_DEFAULT, "updateSpeedLabel");
-#endif
-
-}
-
-static inline CGFloat orientationAngle(UIInterfaceOrientation orientation)
-{
-    switch (orientation) {
-        case UIInterfaceOrientationPortraitUpsideDown:
-            return M_PI;
-        case UIInterfaceOrientationLandscapeLeft:
-            return -M_PI_2;
-        case UIInterfaceOrientationLandscapeRight:
-            return M_PI_2;
-        default:
-            return 0;
-    }
-}
-
-static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRect bounds)
-{
-    switch (orientation) {
-        case UIInterfaceOrientationLandscapeLeft:
-        case UIInterfaceOrientationLandscapeRight:
-            return CGRectMake(0, 0, bounds.size.height, bounds.size.width);
-        default:
-            return bounds;
-    }
-}
-
-
 - (void)updateOrientation:(UIInterfaceOrientation)orientation animateWithDuration:(NSTimeInterval)duration {
     if (orientation == _orientation)
         return;
     
     _orientation = orientation;
-
-    // Lấy kích thước màn hình gốc 
     CGRect screenBounds = [UIScreen mainScreen].bounds;
     
-    CGRect targetBounds = orientationBounds(orientation, screenBounds);
-    CGPoint centerPoint = CGPointMake(screenBounds.size.width / 2.0, screenBounds.size.height / 2.0);
+    CGFloat angle = 0;
+    CGRect targetBounds = screenBounds;
     
-    CGFloat angle = orientationAngle(orientation);
-    CGAffineTransform transform = CGAffineTransformMakeRotation(angle);
+    if (orientation == UIInterfaceOrientationLandscapeLeft) {
+        angle = -M_PI_2;
+        targetBounds = CGRectMake(0, 0, screenBounds.size.height, screenBounds.size.width);
+    } else if (orientation == UIInterfaceOrientationLandscapeRight) {
+        angle = M_PI_2;
+        targetBounds = CGRectMake(0, 0, screenBounds.size.height, screenBounds.size.width);
+    } else if (orientation == UIInterfaceOrientationPortraitUpsideDown) {
+        angle = M_PI;
+    }
 
     [UIView animateWithDuration:duration animations:^{
-
         self->_contentView.bounds = targetBounds;
-        
-        self->_contentView.center = centerPoint;
-        
-        self->_contentView.transform = transform;
+        self->_contentView.center = CGPointMake(screenBounds.size.width / 2.0, screenBounds.size.height / 2.0);
+        self->_contentView.transform = CGAffineTransformMakeRotation(angle);
     }];
     
     [_contentView setNeedsLayout];
     [_contentView layoutIfNeeded];
 }
 
-
-
-
-
-
 - (void)viewDidLoad
 {
     [super viewDidLoad];
     
+    self.view.userInteractionEnabled = YES;
+    self.view.backgroundColor = [UIColor clearColor];
 
     _contentView = [[UIView alloc] initWithFrame:self.view.bounds];
     _contentView.backgroundColor = [UIColor clearColor];
-    _contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight; 
-    _contentView.translatesAutoresizingMaskIntoConstraints = YES;
+    _contentView.userInteractionEnabled = YES;
     [self.view addSubview:_contentView];
 
     _blurView = [[UIView alloc] initWithFrame:_contentView.bounds];
     _blurView.backgroundColor = [UIColor clearColor];
-    _blurView.translatesAutoresizingMaskIntoConstraints = NO;
+    _blurView.userInteractionEnabled = YES;
     [_contentView addSubview:_blurView];
     
+    _blurView.translatesAutoresizingMaskIntoConstraints = NO;
     [NSLayoutConstraint activateConstraints:@[
         [_blurView.topAnchor constraintEqualToAnchor:_contentView.topAnchor],
         [_blurView.bottomAnchor constraintEqualToAnchor:_contentView.bottomAnchor],
@@ -1119,35 +1000,22 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
         [_blurView.trailingAnchor constraintEqualToAnchor:_contentView.trailingAnchor]
     ]];
     
-    CGRect screenBounds = [[UIScreen mainScreen] bounds];
-    CGRect menuFrame = screenBounds;  // полноэкранный фрейм — MenuView сама центрирует своё меню
-
-    menuView = [[MenuView alloc] initWithFrame:menuFrame];
-    menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    menuView = [[MenuView alloc] initWithFrame:_contentView.bounds];
     menuView.userInteractionEnabled = YES;
     [_blurView addSubview:menuView];
     
     _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    _speedLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [_blurView addSubview:_speedLabel];
     
     _lockedView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"lock.fill"]];
     _lockedView.tintColor = [UIColor whiteColor];
     _lockedView.translatesAutoresizingMaskIntoConstraints = NO;
-    _lockedView.contentMode = UIViewContentModeScaleAspectFit;
     _lockedView.alpha = 0.0;
-    [_lockedView setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
-    [_lockedView setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
     [_blurView addSubview:_lockedView];
-    
-    // tapGestureRecognizer отключён — мешает touches в menuView
-    // _tapGestureRecognizer оставлен как ivar для совместимости
-
-    [_contentView setUserInteractionEnabled:YES];
 
     [self reloadUserDefaults];
 }
-
-
 
 - (void)resetLoopTimer
 {
@@ -1161,14 +1029,10 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     _timer = nil;
 }
 
-- (void)viewSafeAreaInsetsDidChange
+- (void)updateSpeedLabel
 {
-    [super viewSafeAreaInsetsDidChange];
-    [self removeAllAnimations];
-    [self resetGestureRecognizers];
-    [self updateViewConstraints];
-    
-    
+    if (!shouldUpdateSpeedLabel) return;
+    _speedLabel.attributedText = formattedAttributedString(_isFocused);
 }
 
 - (void)updateViewConstraints
@@ -1176,12 +1040,9 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     [NSLayoutConstraint deactivateConstraints:_constraints];
     [_constraints removeAllObjects];
 
-
     NSInteger selectedMode = [self selectedMode];
     BOOL isCentered = (selectedMode == HUDPresetPositionTopCenter || selectedMode == HUDPresetPositionTopCenterMost);
-    BOOL isCenteredMost = (selectedMode == HUDPresetPositionTopCenterMost);
 
-    // Xử lý vị trí SpeedLabel
     [_constraints addObjectsFromArray:@[
         [_speedLabel.topAnchor constraintEqualToAnchor:_contentView.topAnchor],
         [_speedLabel.bottomAnchor constraintEqualToAnchor:_contentView.bottomAnchor],
@@ -1191,89 +1052,16 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
         [_constraints addObject:[_speedLabel.centerXAnchor constraintEqualToAnchor:_contentView.centerXAnchor]];
     else if (selectedMode == HUDPresetPositionTopLeft)
         [_constraints addObject:[_speedLabel.leadingAnchor constraintEqualToAnchor:_contentView.leadingAnchor constant:10]];
-    else  // HUDPresetPositionTopRight
+    else
         [_constraints addObject:[_speedLabel.trailingAnchor constraintEqualToAnchor:_contentView.trailingAnchor constant:-10]];
 
-    // Xử lý vị trí LockedView
     [_constraints addObjectsFromArray:@[
-        [_lockedView.topAnchor constraintGreaterThanOrEqualToAnchor:_blurView.topAnchor constant:2],
         [_lockedView.centerXAnchor constraintEqualToAnchor:_blurView.centerXAnchor],
         [_lockedView.centerYAnchor constraintEqualToAnchor:_blurView.centerYAnchor],
     ]];
 
     [NSLayoutConstraint activateConstraints:_constraints];
     [super updateViewConstraints];
-}
-
-- (void)keepFocus:(UIView *)view
-{
-    [self onFocus:view duration:0];
-}
-
-- (void)onFocus:(UIView *)view
-{
-    [self onFocus:view duration:0.2];
-}
-
-- (void)onFocus:(UIView *)view duration:(NSTimeInterval)duration
-{
-    [self onFocus:view scaleFactor:0.1 duration:duration beginFromInitialState:YES blurWhenDone:YES];
-}
-
-- (void)onFocus:(UIView *)view scaleFactor:(CGFloat)scaleFactor duration:(NSTimeInterval)duration beginFromInitialState:(BOOL)beginFromInitialState blurWhenDone:(BOOL)blurWhenDone
-{
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(onBlur:) object:view];
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(onFocus:) object:view];
-    
-    _isFocused = YES;
-    [self updateSpeedLabel];
-    [self resetLoopTimer];
-
-    NSInteger selectedMode = [self selectedMode];
-    BOOL isCentered = (selectedMode == HUDPresetPositionTopCenter || selectedMode == HUDPresetPositionTopCenterMost);
-    
-    CGFloat topTrans = CGRectGetHeight(view.bounds) * (scaleFactor / 2);
-    CGFloat leadingTrans = (isCentered ? 0 : (selectedMode == HUDPresetPositionTopLeft ? CGRectGetWidth(view.bounds) * (scaleFactor / 2) : -CGRectGetWidth(view.bounds) * (scaleFactor / 2)));
-
-    if (beginFromInitialState)
-        [view setTransform:CGAffineTransformIdentity];
-    
-    [UIView animateWithDuration:duration delay:0.0 usingSpringWithDamping:1.0 initialSpringVelocity:1.0 options:UIViewAnimationOptionCurveEaseIn | UIViewAnimationOptionBeginFromCurrentState animations:^{
-        if (ABS(leadingTrans) > 1e-6 || ABS(topTrans) > 1e-6)
-        {
-            CGAffineTransform transform = CGAffineTransformMakeTranslation(leadingTrans, topTrans);
-            view.transform = CGAffineTransformScale(transform, 1.0 + scaleFactor, 1.0 + scaleFactor);
-        }
-
-        view.alpha = 1.0;
-    } completion:^(BOOL finished) {
-        if (blurWhenDone)
-        {
-            [self performSelector:@selector(onBlur:) withObject:view afterDelay:IDLE_INTERVAL];
-        }
-    }];
-}
-
-- (void)onBlur:(UIView *)view
-{
-    [self onBlur:view duration:0.6];
-}
-
-- (void)onBlur:(UIView *)view duration:(NSTimeInterval)duration
-{
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(onBlur:) object:view];
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(onFocus:) object:view];
-    
-    _isFocused = NO;
-    [self updateSpeedLabel];
-    [self resetLoopTimer];
-
-    [UIView animateWithDuration:duration delay:0.0 usingSpringWithDamping:1.0 initialSpringVelocity:1.0 options:UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionBeginFromCurrentState animations:^{
-        view.transform = CGAffineTransformIdentity;
-        view.alpha = 0.667;
-    } completion:^(BOOL finished) {
-        // [view setUserInteractionEnabled:YES];
-    }];
 }
 
 - (void)removeAllAnimations
@@ -1287,106 +1075,6 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     {
         [recognizer setEnabled:NO];
         [recognizer setEnabled:YES];
-    }
-}
-
-- (void)tapGestureRecognized:(UITapGestureRecognizer *)sender
-{
-#if DEBUG
-    os_log_info(OS_LOG_DEFAULT, "TAPPED");
-#endif
-
-}
-
-- (void)cancelPreviousPerformRequestsWithTarget:(UIView *)view
-{
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(onBlur:) object:view];
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(onFocus:) object:view];
-}
-
-- (void)flashLockedViewWithDuration:(NSTimeInterval)duration
-{
-    [_lockedView.layer removeAllAnimations];
-    CABasicAnimation *animation = [CABasicAnimation animationWithKeyPath:@"opacity"];
-    animation.fromValue = [NSNumber numberWithFloat:0.0];
-    animation.toValue = [NSNumber numberWithFloat:1.0];
-    animation.duration = duration;
-    animation.autoreverses = YES;
-    animation.repeatCount = 1;
-    animation.removedOnCompletion = YES;
-    animation.fillMode = kCAFillModeForwards;
-    animation.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
-    [_lockedView.layer addAnimation:animation forKey:@"opacity"];
-
-    [_speedLabel.layer removeAllAnimations];
-    CABasicAnimation *animationReverse = [CABasicAnimation animationWithKeyPath:@"opacity"];
-    animationReverse.fromValue = [NSNumber numberWithFloat:1.0];
-    animationReverse.toValue = [NSNumber numberWithFloat:0.0];
-    animationReverse.duration = duration;
-    animationReverse.autoreverses = YES;
-    animationReverse.repeatCount = 1;
-    animationReverse.removedOnCompletion = YES;
-    animationReverse.fillMode = kCAFillModeForwards;
-    animationReverse.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
-    [_speedLabel.layer addAnimation:animationReverse forKey:@"opacity"];
-}
-
-- (void)longPressGestureRecognized:(UILongPressGestureRecognizer *)sender
-{
-    if (!_isFocused)
-        return;
-    
-    if ([self selectedMode] == 1 || [self keepInPlace])
-    {
-        if (sender.state == UIGestureRecognizerStateBegan)
-            [self cancelPreviousPerformRequestsWithTarget:sender.view];
-        else if (sender.state == UIGestureRecognizerStateFailed || sender.state == UIGestureRecognizerStateEnded || sender.state == UIGestureRecognizerStateCancelled)
-            [self performSelector:@selector(onBlur:) withObject:sender.view afterDelay:IDLE_INTERVAL];
-
-        if (sender.state == UIGestureRecognizerStateBegan)
-        {
-            if (!_notificationFeedbackGenerator)
-                _notificationFeedbackGenerator = [[UINotificationFeedbackGenerator alloc] init];
-            
-            [_notificationFeedbackGenerator prepare];
-            [_notificationFeedbackGenerator notificationOccurred:UINotificationFeedbackTypeError];
-
-            [self flashLockedViewWithDuration:0.2];
-        }
-        
-        return;
-    }
-
-    static CGFloat beginOffsetY = 0.0;
-    static CGFloat beginConstantY = 0.0;
-    if (sender.state == UIGestureRecognizerStateBegan)
-    {
-        beginOffsetY = [sender locationInView:sender.view.superview].y;
-        beginConstantY = _topConstraint.constant;
-        [self onFocus:sender.view scaleFactor:0.2 duration:0.1 beginFromInitialState:NO blurWhenDone:NO];
-    }
-    else if (sender.state == UIGestureRecognizerStateChanged)
-    {
-        CGFloat currentOffsetY = [sender locationInView:sender.view.superview].y - beginOffsetY;
-        [_topConstraint setConstant:beginConstantY + currentOffsetY];
-    }
-    else
-    {
-        if (sender.state == UIGestureRecognizerStateEnded)
-            [self setCurrentPositionY:_topConstraint.constant];
-        [self onFocus:sender.view scaleFactor:0.1 duration:0.1 beginFromInitialState:NO blurWhenDone:NO];
-        [self reloadUserDefaults];
-    }
-
-    if (!_impactFeedbackGenerator)
-    {
-        _impactFeedbackGenerator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-    }
-
-    if (sender.state == UIGestureRecognizerStateBegan || sender.state == UIGestureRecognizerStateEnded || sender.state == UIGestureRecognizerStateCancelled)
-    {
-        [_impactFeedbackGenerator prepare];
-        [_impactFeedbackGenerator impactOccurred];
     }
 }
 
