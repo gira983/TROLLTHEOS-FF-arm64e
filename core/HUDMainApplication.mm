@@ -16,6 +16,37 @@
 #import "HUDPresetPosition.h"
 #import "../esp/MenuView/esp.h"
 
+// Forward declarations for private classes to fix compilation errors
+@interface UIEventDispatcher : NSObject
+- (void)_installEventRunLoopSources:(CFRunLoopRef)runLoop;
+@end
+
+@interface UIEventFetcher : NSObject
+- (void)setEventFetcherSink:(id)sink;
+@end
+
+@interface SBSAccessibilityWindowHostingController : NSObject
+- (void)registerWindowWithContextID:(unsigned int)contextID atLevel:(double)level;
+@end
+
+@interface FBSOrientationUpdate : NSObject
+@property (nonatomic, readonly) long long orientation;
+@property (nonatomic, readonly) double duration;
+@end
+
+@interface FBSOrientationObserver : NSObject
+- (void)setHandler:(void (^)(FBSOrientationUpdate *))handler;
+- (void)invalidate;
+@end
+
+@interface UIApplication (Private)
+- (void)terminateWithSuccess;
+@end
+
+@interface UIWindow (Private)
+- (unsigned int)_contextId;
+@end
+
 #define SPAWN_AS_ROOT 0
 
 extern "C" char **environ;
@@ -50,18 +81,9 @@ BOOL IsHUDEnabled(void)
     posix_spawn(&task_pid, executablePath, NULL, &attr, (char **)args, environ);
     posix_spawnattr_destroy(&attr);
 
-#if DEBUG
-    os_log_debug(OS_LOG_DEFAULT, "spawned %{public}s -check pid = %{public}d", executablePath, task_pid);
-#endif
-    
     int status;
     do {
-        if (waitpid(task_pid, &status, 0) != -1)
-        {
-#if DEBUG
-            os_log_debug(OS_LOG_DEFAULT, "child status %d", WEXITSTATUS(status));
-#endif
-        }
+        if (waitpid(task_pid, &status, 0) != -1) {}
     } while (!WIFEXITED(status) && !WIFSIGNALED(status));
 
     return WEXITSTATUS(status) != 0;
@@ -98,10 +120,6 @@ void SetHUDEnabled(BOOL isEnabled)
         const char *args[] = { executablePath, "-hud", NULL };
         posix_spawn(&task_pid, executablePath, NULL, &attr, (char **)args, environ);
         posix_spawnattr_destroy(&attr);
-
-#if DEBUG
-        os_log_debug(OS_LOG_DEFAULT, "spawned %{public}s -hud pid = %{public}d", executablePath, task_pid);
-#endif
     }
     else
     {
@@ -111,26 +129,13 @@ void SetHUDEnabled(BOOL isEnabled)
         const char *args[] = { executablePath, "-exit", NULL };
         posix_spawn(&task_pid, executablePath, NULL, &attr, (char **)args, environ);
         posix_spawnattr_destroy(&attr);
-
-#if DEBUG
-        os_log_debug(OS_LOG_DEFAULT, "spawned %{public}s -exit pid = %{public}d", executablePath, task_pid);
-#endif
         
         int status;
         do {
-            if (waitpid(task_pid, &status, 0) != -1)
-            {
-#if DEBUG
-                os_log_debug(OS_LOG_DEFAULT, "child status %d", WEXITSTATUS(status));
-#endif
-            }
+            if (waitpid(task_pid, &status, 0) != -1) {}
         } while (!WIFEXITED(status) && !WIFSIGNALED(status));
     }
 }
-
-
-#pragma mark -
-
 
 #define KILOBITS 1000
 #define MEGABITS 1000000
@@ -199,33 +204,17 @@ static UpDownBytes getUpDownBytes()
     UpDownBytes upDownBytes;
     upDownBytes.inputBytes = 0;
     upDownBytes.outputBytes = 0;
-    
     if (getifaddrs(&ifa_list) == -1) return upDownBytes;
-
     for (ifa = ifa_list; ifa; ifa = ifa->ifa_next)
     {
-        /* Skip invalid interfaces */
-        if (ifa->ifa_name == NULL || ifa->ifa_addr == NULL || ifa->ifa_data == NULL)
-            continue;
-        
-        /* Skip interfaces that are not link level interfaces */
-        if (AF_LINK != ifa->ifa_addr->sa_family)
-            continue;
-
-        /* Skip interfaces that are not up or running */
-        if (!(ifa->ifa_flags & IFF_UP) && !(ifa->ifa_flags & IFF_RUNNING))
-            continue;
-        
-        /* Skip interfaces that are not ethernet or cellular */
-        if (strncmp(ifa->ifa_name, "en", 2) && strncmp(ifa->ifa_name, "pdp_ip", 6))
-            continue;
-        
+        if (ifa->ifa_name == NULL || ifa->ifa_addr == NULL || ifa->ifa_data == NULL) continue;
+        if (AF_LINK != ifa->ifa_addr->sa_family) continue;
+        if (!(ifa->ifa_flags & IFF_UP) && !(ifa->ifa_flags & IFF_RUNNING)) continue;
+        if (strncmp(ifa->ifa_name, "en", 2) && strncmp(ifa->ifa_name, "pdp_ip", 6)) continue;
         struct if_data *if_data = (struct if_data *)ifa->ifa_data;
-        
         upDownBytes.inputBytes += if_data->ifi_ibytes;
         upDownBytes.outputBytes += if_data->ifi_obytes;
     }
-    
     freeifaddrs(ifa_list);
     return upDownBytes;
 }
@@ -251,443 +240,165 @@ static NSAttributedString* formattedAttributedString(BOOL isFocused)
             attributedLineSeparator = [[NSAttributedString alloc] initWithString:@"\n" attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:FONT_SIZE]}];
 
         NSMutableAttributedString* mutableString = [[NSMutableAttributedString alloc] init];
-        
         UpDownBytes upDownBytes = getUpDownBytes();
-
-        uint64_t upDiff;
-        uint64_t downDiff;
-
-        if (isFocused)
-        {
-            upDiff = upDownBytes.outputBytes;
-            downDiff = upDownBytes.inputBytes;
+        uint64_t upDiff, downDiff;
+        if (isFocused) { upDiff = upDownBytes.outputBytes; downDiff = upDownBytes.inputBytes; }
+        else {
+            upDiff = (upDownBytes.outputBytes > prevOutputBytes) ? upDownBytes.outputBytes - prevOutputBytes : 0;
+            downDiff = (upDownBytes.inputBytes > prevInputBytes) ? upDownBytes.inputBytes - prevInputBytes : 0;
         }
-        else
-        {
-            if (upDownBytes.outputBytes > prevOutputBytes)
-                upDiff = upDownBytes.outputBytes - prevOutputBytes;
-            else
-                upDiff = 0;
-            
-            if (upDownBytes.inputBytes > prevInputBytes)
-                downDiff = upDownBytes.inputBytes - prevInputBytes;
-            else
-                downDiff = 0;
-        }
-        
         prevOutputBytes = upDownBytes.outputBytes;
         prevInputBytes = upDownBytes.inputBytes;
-
-        if (!SHOW_ALWAYS && (upDiff < 2 * KILOBYTES && downDiff < 2 * KILOBYTES))
-        {
-            shouldUpdateSpeedLabel = NO;
-            return nil;
-        }
+        if (!SHOW_ALWAYS && (upDiff < 2 * KILOBYTES && downDiff < 2 * KILOBYTES)) { shouldUpdateSpeedLabel = NO; return nil; }
         else shouldUpdateSpeedLabel = YES;
-
-        if (DATAUNIT == 1)
-        {
-            upDiff *= 8; // BYTE_SIZE
-            downDiff *= 8;
-        }
-
-        if (SHOW_DOWNLOAD_SPEED_FIRST)
-        {
-            if (SHOW_DOWNLOAD_SPEED)
-            {
+        if (DATAUNIT == 1) { upDiff *= 8; downDiff *= 8; }
+        if (SHOW_DOWNLOAD_SPEED_FIRST) {
+            if (SHOW_DOWNLOAD_SPEED) {
                 [mutableString appendAttributedString:attributedDownloadPrefix];
                 [mutableString appendAttributedString:[[NSAttributedString alloc] initWithString:formattedSpeed(downDiff, isFocused) attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:FONT_SIZE]}]];
             }
-            if (SHOW_UPLOAD_SPEED)
-            {
-                if (SHOW_DOWNLOAD_SPEED)
-                    [mutableString appendAttributedString:(SHOW_SECOND_SPEED_IN_NEW_LINE ? attributedLineSeparator : attributedInlineSeparator)];
+            if (SHOW_UPLOAD_SPEED) {
+                if (SHOW_DOWNLOAD_SPEED) [mutableString appendAttributedString:(SHOW_SECOND_SPEED_IN_NEW_LINE ? attributedLineSeparator : attributedInlineSeparator)];
                 [mutableString appendAttributedString:attributedUploadPrefix];
                 [mutableString appendAttributedString:[[NSAttributedString alloc] initWithString:formattedSpeed(upDiff, isFocused) attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:FONT_SIZE]}]];
             }
-        }
-        else
-        {
-            if (SHOW_UPLOAD_SPEED)
-            {
+        } else {
+            if (SHOW_UPLOAD_SPEED) {
                 [mutableString appendAttributedString:attributedUploadPrefix];
                 [mutableString appendAttributedString:[[NSAttributedString alloc] initWithString:formattedSpeed(upDiff, isFocused) attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:FONT_SIZE]}]];
             }
-            if (SHOW_DOWNLOAD_SPEED)
-            {
-                if (SHOW_UPLOAD_SPEED)
-                    [mutableString appendAttributedString:(SHOW_SECOND_SPEED_IN_NEW_LINE ? attributedLineSeparator : attributedInlineSeparator)];
+            if (SHOW_DOWNLOAD_SPEED) {
+                if (SHOW_UPLOAD_SPEED) [mutableString appendAttributedString:(SHOW_SECOND_SPEED_IN_NEW_LINE ? attributedLineSeparator : attributedInlineSeparator)];
                 [mutableString appendAttributedString:attributedDownloadPrefix];
                 [mutableString appendAttributedString:[[NSAttributedString alloc] initWithString:formattedSpeed(downDiff, isFocused) attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:FONT_SIZE]}]];
             }
         }
-
         return mutableString;
     }
 }
 
-
 #pragma mark - HUDRootViewController
-
 @interface HUDRootViewController : UIViewController
 - (void)resetLoopTimer;
 - (void)stopLoopTimer;
 @end
 
-
 #pragma mark - HUDMainWindow
-
 #import "UIAutoRotatingWindow.h"
-
 @interface HUDMainWindow : UIAutoRotatingWindow
 @end
 
-
 #pragma mark - Darwin Notification
-
 #define NOTIFY_UI_LOCKCOMPLETE "com.apple.springboard.lockcomplete"
 #define NOTIFY_UI_LOCKSTATE    "com.apple.springboard.lockstate"
 #define NOTIFY_LS_APP_CHANGED  "com.apple.LaunchServices.ApplicationsChanged"
-
 #import "LSApplicationProxy.h"
 #import "LSApplicationWorkspace.h"
 
-static void LaunchServicesApplicationStateChanged
-(CFNotificationCenterRef center,
- void *observer,
- CFStringRef name,
- const void *object,
- CFDictionaryRef userInfo)
+static void LaunchServicesApplicationStateChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo)
 {
-    /* Application installed or uninstalled */
-
     BOOL isAppInstalled = NO;
-    
-    for (LSApplicationProxy *app in [[objc_getClass("LSApplicationWorkspace") defaultWorkspace] allApplications])
-    {
-        if ([app.applicationIdentifier isEqualToString:@"ch.xxtou.hudapp"])
-        {
-            isAppInstalled = YES;
-            break;
-        }
+    for (LSApplicationProxy *app in [[objc_getClass("LSApplicationWorkspace") defaultWorkspace] allApplications]) {
+        if ([app.applicationIdentifier isEqualToString:@"ch.xxtou.hudapp"]) { isAppInstalled = YES; break; }
     }
-
-    if (!isAppInstalled)
-    {
-        UIApplication *app = [UIApplication sharedApplication];
-        [app terminateWithSuccess];
-    }
+    if (!isAppInstalled) { [(UIApplication *)[UIApplication sharedApplication] terminateWithSuccess]; }
 }
 
 #import "SpringBoardServices.h"
-
-static void SpringBoardLockStatusChanged
-(CFNotificationCenterRef center,
- void *observer,
- CFStringRef name,
- const void *object,
- CFDictionaryRef userInfo)
+static void SpringBoardLockStatusChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo)
 {
     HUDRootViewController *rootViewController = (__bridge HUDRootViewController *)observer;
     NSString *lockState = (__bridge NSString *)name;
-    if ([lockState isEqualToString:@NOTIFY_UI_LOCKCOMPLETE])
-    {
-        [rootViewController stopLoopTimer];
-        [rootViewController.view setHidden:YES];
-    }
-    else if ([lockState isEqualToString:@NOTIFY_UI_LOCKSTATE])
-    {
+    if ([lockState isEqualToString:@NOTIFY_UI_LOCKCOMPLETE]) { [rootViewController stopLoopTimer]; [rootViewController.view setHidden:YES]; }
+    else if ([lockState isEqualToString:@NOTIFY_UI_LOCKSTATE]) {
         mach_port_t sbsPort = SBSSpringBoardServerPort();
-        
-        if (sbsPort == MACH_PORT_NULL)
-            return;
-        
-        BOOL isLocked;
-        BOOL isPasscodeSet;
+        if (sbsPort == MACH_PORT_NULL) return;
+        BOOL isLocked, isPasscodeSet;
         SBGetScreenLockStatus(sbsPort, &isLocked, &isPasscodeSet);
-
-        if (!isLocked)
-        {
-            [rootViewController.view setHidden:NO];
-            [rootViewController resetLoopTimer];
-        }
-        else
-        {
-            [rootViewController stopLoopTimer];
-            [rootViewController.view setHidden:YES];
-        }
+        if (!isLocked) { [rootViewController.view setHidden:NO]; [rootViewController resetLoopTimer]; }
+        else { [rootViewController stopLoopTimer]; [rootViewController.view setHidden:YES]; }
     }
 }
-
 
 #pragma mark - HUDMainApplication
-
 #import <pthread.h>
 #import <mach/mach.h>
-
 #import "pac_helper.h"
-
-static void DumpThreads(void)
-{
-    char name[256];
-    mach_msg_type_number_t count;
-    thread_act_array_t list;
-    task_threads(mach_task_self(), &list, &count);
-    for (int i = 0; i < count; ++i)
-    {
-        pthread_t pt = pthread_from_mach_thread_np(list[i]);
-        if (pt)
-        {
-            name[0] = '\0';
-#if DEBUG
-            int rc = pthread_getname_np(pt, name, sizeof name);
-            os_log_debug(OS_LOG_DEFAULT, "mach thread %u: getname returned %d: %{public}s", list[i], rc, name);
-#endif
-        }
-        else
-        {
-#if DEBUG
-            os_log_debug(OS_LOG_DEFAULT, "mach thread %u: no pthread found", list[i]);
-#endif
-        }
-    }
-}
 
 @interface HUDMainApplication : UIApplication
 @end
 
 @implementation HUDMainApplication
-
 - (instancetype)init
 {
     if (self = [super init])
     {
-#if DEBUG
-        os_log_debug(OS_LOG_DEFAULT, "- [HUDMainApplication init]");
-#endif
         notify_post(NOTIFY_LAUNCHED_HUD);
-        
 #ifdef NOTIFY_DISMISSAL_HUD
         {
             int token;
             notify_register_dispatch(NOTIFY_DISMISSAL_HUD, &token, dispatch_get_main_queue(), ^(int token) {
                 notify_cancel(token);
-                
-                // Fade out the HUD window
-                [UIView animateWithDuration:0.25f animations:^{
-                    [[self.windows firstObject] setAlpha:0.0];
-                } completion:^(BOOL finished) {
-                    // Terminate the HUD app
-                    [self terminateWithSuccess];
-                }];
+                [UIView animateWithDuration:0.25f animations:^{ [[self.windows firstObject] setAlpha:0.0]; } completion:^(BOOL finished) { [self terminateWithSuccess]; }];
             });
         }
 #endif
         do {
             UIEventDispatcher *dispatcher = (UIEventDispatcher *)[self valueForKey:@"eventDispatcher"];
-            if (!dispatcher)
-            {
-#if DEBUG
-                os_log_error(OS_LOG_DEFAULT, "failed to get ivar _eventDispatcher");
-#endif
-                break;
-            }
-
-#if DEBUG
-            os_log_debug(OS_LOG_DEFAULT, "got ivar _eventDispatcher: %p", dispatcher);
-#endif
-
-            if ([dispatcher respondsToSelector:@selector(_installEventRunLoopSources:)])
-            {
-                CFRunLoopRef mainRunLoop = CFRunLoopGetMain();
-                [dispatcher _installEventRunLoopSources:mainRunLoop];
-            }
-            else
-            {
+            if (!dispatcher) break;
+            if ([dispatcher respondsToSelector:@selector(_installEventRunLoopSources:)]) { [dispatcher _installEventRunLoopSources:CFRunLoopGetMain()]; }
+            else {
                 IMP runMethodIMP = class_getMethodImplementation([self class], @selector(_run));
-                if (!runMethodIMP)
-                {
-#if DEBUG
-                    os_log_error(OS_LOG_DEFAULT, "failed to get - [UIApplication _run] method");
-#endif
-                    break;
-                }
-
+                if (!runMethodIMP) break;
                 uint32_t *runMethodPtr = (uint32_t *)make_sym_readable((void *)runMethodIMP);
-#if DEBUG
-                os_log_debug(OS_LOG_DEFAULT, "- [UIApplication _run]: %p", runMethodPtr);
-#endif
-
-                void (*orig_UIEventDispatcher__installEventRunLoopSources_)(id _Nonnull, SEL _Nonnull, CFRunLoopRef) = NULL;
-                for (int i = 0; i < 0x140; i++)
-                {
-                    // mov x2, x0
-                    // mov x0, x?
-                    if (runMethodPtr[i] != 0xaa0003e2 || (runMethodPtr[i + 1] & 0xff000000) != 0xaa000000)
-                        continue;
-                    
-                    // bl -[UIEventDispatcher _installEventRunLoopSources:]
+                void (*orig_UIEventDispatcher__installEventRunLoopSources_)(id, SEL, CFRunLoopRef) = NULL;
+                for (int i = 0; i < 0x140; i++) {
+                    if (runMethodPtr[i] != 0xaa0003e2 || (runMethodPtr[i + 1] & 0xff000000) != 0xaa000000) continue;
                     uint32_t blInst = runMethodPtr[i + 2];
                     uint32_t *blInstPtr = &runMethodPtr[i + 2];
-                    if ((blInst & 0xfc000000) != 0x94000000)
-                    {
-#if DEBUG
-                        os_log_error(OS_LOG_DEFAULT, "not a BL instruction: 0x%x, address %p", blInst, blInstPtr);
-#endif
-                        continue;
-                    }
-
-#if DEBUG
-                    os_log_debug(OS_LOG_DEFAULT, "found BL instruction: 0x%x, address %p", blInst, blInstPtr);
-#endif
-
+                    if ((blInst & 0xfc000000) != 0x94000000) continue;
                     int32_t blOffset = blInst & 0x03ffffff;
-                    if (blOffset & 0x02000000)
-                        blOffset |= 0xfc000000;
+                    if (blOffset & 0x02000000) blOffset |= 0xfc000000;
                     blOffset <<= 2;
-
-#if DEBUG
-                    os_log_debug(OS_LOG_DEFAULT, "BL offset: 0x%x", blOffset);
-#endif
-
                     uint64_t blAddr = (uint64_t)blInstPtr + blOffset;
-
-#if DEBUG
-                    os_log_debug(OS_LOG_DEFAULT, "BL target address: %p", (void *)blAddr);
-#endif
-                    
-                    // cbz x0, loc_?????????
                     uint32_t cbzInst = *((uint32_t *)make_sym_readable((void *)blAddr));
-                    if ((cbzInst & 0xff000000) != 0xb4000000)
-                    {
-#if DEBUG
-                        os_log_error(OS_LOG_DEFAULT, "not a CBZ instruction: 0x%x", cbzInst);
-#endif
-                        continue;
-                    }
-
-#if DEBUG
-                    os_log_debug(OS_LOG_DEFAULT, "found CBZ instruction: 0x%x, address %p", cbzInst, (void *)blAddr);
-#endif
-                    
-                    orig_UIEventDispatcher__installEventRunLoopSources_ = (void (*)(id  _Nonnull __strong, SEL _Nonnull, CFRunLoopRef))make_sym_callable((void *)blAddr);
+                    if ((cbzInst & 0xff000000) != 0xb4000000) continue;
+                    orig_UIEventDispatcher__installEventRunLoopSources_ = (void (*)(id, SEL, CFRunLoopRef))make_sym_callable((void *)blAddr);
                 }
-
-                if (!orig_UIEventDispatcher__installEventRunLoopSources_)
-                {
-#if DEBUG
-                    os_log_error(OS_LOG_DEFAULT, "failed to find -[UIEventDispatcher _installEventRunLoopSources:]");
-#endif
-                    break;
-                }
-
-#if DEBUG
-                os_log_debug(OS_LOG_DEFAULT, "- [UIEventDispatcher _installEventRunLoopSources:]: %p", orig_UIEventDispatcher__installEventRunLoopSources_);
-#endif
-
-                CFRunLoopRef mainRunLoop = CFRunLoopGetMain();
-                orig_UIEventDispatcher__installEventRunLoopSources_(dispatcher, @selector(_installEventRunLoopSources:), mainRunLoop);
+                if (!orig_UIEventDispatcher__installEventRunLoopSources_) break;
+                orig_UIEventDispatcher__installEventRunLoopSources_(dispatcher, @selector(_installEventRunLoopSources:), CFRunLoopGetMain());
             }
-
-#if DEBUG
-            // Get image base with dyld, the image is /System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore.
-            uint64_t imageUIKitCore = 0;
-            {
-                uint32_t imageCount = _dyld_image_count();
-                for (uint32_t i = 0; i < imageCount; i++)
-                {
-                    const char *imageName = _dyld_get_image_name(i);
-                    if (imageName && !strcmp(imageName, "/System/Library/PrivateFrameworks/UIKitCore.framework/UIKitCore"))
-                    {
-                        imageUIKitCore = _dyld_get_image_vmaddr_slide(i);
-                        break;
-                    }
-                }
-            }
-
-            os_log_debug(OS_LOG_DEFAULT, "UIKitCore: %p", (void *)imageUIKitCore);
-#endif
-
             UIEventFetcher *fetcher = [[objc_getClass("UIEventFetcher") alloc] init];
-            [dispatcher setValue:fetcher forKey:@"eventFetcher"];
-
-            if ([fetcher respondsToSelector:@selector(setEventFetcherSink:)])
-                [fetcher setEventFetcherSink:dispatcher];
-            else
-            {
-                /* Tested on iOS 15.1.1 and below */
-                [fetcher setValue:dispatcher forKey:@"eventFetcherSink"];
-
-                /* Print NSThread names */
-                DumpThreads();
-
-#if DEBUG
-                /* Force HIDTransformer to print logs */
-                [[NSUserDefaults standardUserDefaults] setObject:@YES forKey:@"LogTouch" inDomain:@"com.apple.UIKit"];
-                [[NSUserDefaults standardUserDefaults] setObject:@YES forKey:@"LogGesture" inDomain:@"com.apple.UIKit"];
-                [[NSUserDefaults standardUserDefaults] setObject:@YES forKey:@"LogEventDispatch" inDomain:@"com.apple.UIKit"];
-                [[NSUserDefaults standardUserDefaults] setObject:@YES forKey:@"LogGestureEnvironment" inDomain:@"com.apple.UIKit"];
-                [[NSUserDefaults standardUserDefaults] setObject:@YES forKey:@"LogGestureExclusion" inDomain:@"com.apple.UIKit"];
-                [[NSUserDefaults standardUserDefaults] setObject:@YES forKey:@"LogSystemGestureUpdate" inDomain:@"com.apple.UIKit"];
-                [[NSUserDefaults standardUserDefaults] setObject:@YES forKey:@"LogGesturePerformance" inDomain:@"com.apple.UIKit"];
-                [[NSUserDefaults standardUserDefaults] setObject:@YES forKey:@"LogHIDTransformer" inDomain:@"com.apple.UIKit"];
-                [[NSUserDefaults standardUserDefaults] synchronize];
-#endif
-            }
-
+            [dispatcher setValue:fetcher forKey:@"eventDispatcher"];
+            if ([fetcher respondsToSelector:@selector(setEventFetcherSink:)]) [fetcher setEventFetcherSink:dispatcher];
+            else [fetcher setValue:dispatcher forKey:@"eventFetcherSink"];
             [self setValue:fetcher forKey:@"eventFetcher"];
         } while (NO);
     }
     return self;
 }
-
 @end
 
-
 #pragma mark - HUDMainApplicationDelegate
-
 @interface HUDMainApplicationDelegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;
 @end
 
 @implementation HUDMainApplicationDelegate {
     HUDRootViewController *_rootViewController;
-    SBSAccessibilityWindowHostingController *_windowHostingController;
+    id _windowHostingController;
 }
-
-- (instancetype)init
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
-    if (self = [super init])
-    {
-#if DEBUG
-        os_log_debug(OS_LOG_DEFAULT, "- [HUDMainApplicationDelegate init]");
-#endif
-    }
-    return self;
-}
-
-- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary <UIApplicationLaunchOptionsKey, id> *)launchOptions
-{
-#if DEBUG
-    os_log_debug(OS_LOG_DEFAULT, "- [HUDMainApplicationDelegate application:%{public}@ didFinishLaunchingWithOptions:%{public}@]", application, launchOptions);
-#endif
-
     _rootViewController = [[HUDRootViewController alloc] init];
-
     self.window = [[HUDMainWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     [self.window setRootViewController:_rootViewController];
-    
     [self.window setWindowLevel:10000010.0];
     [self.window setHidden:NO];
     [self.window makeKeyAndVisible];
-
     _windowHostingController = [[objc_getClass("SBSAccessibilityWindowHostingController") alloc] init];
     unsigned int _contextId = [self.window _contextId];
     double windowLevel = [self.window windowLevel];
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-    // [_windowHostingController registerWindowWithContextID:_contextId atLevel:windowLevel];
     NSMethodSignature *signature = [NSMethodSignature signatureWithObjCTypes:"v@:Id"];
     NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
     [invocation setTarget:_windowHostingController];
@@ -695,387 +406,130 @@ static void DumpThreads(void)
     [invocation setArgument:&_contextId atIndex:2];
     [invocation setArgument:&windowLevel atIndex:3];
     [invocation invoke];
-#pragma clang diagnostic pop
-
     return YES;
 }
-
 @end
 
-
 #pragma mark - HUDMainWindow
-
 @implementation HUDMainWindow
-
-- (instancetype)initWithFrame:(CGRect)frame
-{
-    if (self = [super _initWithFrame:frame attached:NO])
-    {
-        self.backgroundColor = [UIColor clearColor];
-        [self commonInit];
-    }
-    return self;
-}
-
+- (instancetype)initWithFrame:(CGRect)frame { if (self = [super _initWithFrame:frame attached:NO]) { self.backgroundColor = [UIColor clearColor]; [self commonInit]; } return self; }
 + (BOOL)_isSystemWindow { return YES; }
 - (BOOL)_isWindowServerHostingManaged { return NO; }
 - (BOOL)_ignoresHitTest { return NO; }
-
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // 1. Прямой поиск MenuView в иерархии
     UIView *rootView = self.rootViewController.view;
     if (!rootView) return nil;
-
-    // Рекурсивный поиск MenuView или любого UIControl
     UIView *hit = [self findInteractiveView:rootView point:point event:event];
-    
-    // Если нашли что-то интерактивное — возвращаем это
-    if (hit) return hit;
-
-    // 2. Если ничего не нашли, возвращаем nil, чтобы тап прошел сквозь окно
-    return nil;
+    return hit;
 }
-
 - (UIView *)findInteractiveView:(UIView *)view point:(CGPoint)point event:(UIEvent *)event {
     if (view.hidden || view.alpha < 0.01 || !view.userInteractionEnabled) return nil;
-
     CGPoint localPoint = [self convertPoint:point toView:view];
     if (![view pointInside:localPoint withEvent:event]) return nil;
-
-    // Сначала проверяем subviews (в обратном порядке)
     for (UIView *subview in [view.subviews reverseObjectEnumerator]) {
         UIView *hit = [self findInteractiveView:subview point:point event:event];
         if (hit) return hit;
     }
-
-    // Если это MenuView или UIControl — это наша цель
-    if ([view isKindOfClass:objc_getClass("MenuView")] || [view isKindOfClass:[UIControl class]]) {
-        return view;
-    }
-
+    if ([view isKindOfClass:NSClassFromString(@"MenuView")] || [view isKindOfClass:[UIControl class]]) return view;
     return nil;
 }
-
 @end
 
-
 #pragma mark - HUDRootViewController
-
 @implementation HUDRootViewController {
     NSMutableDictionary *_userDefaults;
     NSMutableArray <NSLayoutConstraint *> *_constraints;
-    FBSOrientationObserver *_orientationObserver;
+    id _orientationObserver;
     UIView *_blurView;
     MenuView *menuView;
     UIView *_contentView;
     UILabel *_speedLabel;
     UIImageView *_lockedView;
     NSTimer *_timer;
-    UITapGestureRecognizer *_tapGestureRecognizer;
-    UILongPressGestureRecognizer *_longPressGestureRecognizer;
-    UIImpactFeedbackGenerator *_impactFeedbackGenerator;
-    UINotificationFeedbackGenerator *_notificationFeedbackGenerator;
     BOOL _isFocused;
     UIInterfaceOrientation _orientation;
-    NSLayoutConstraint *_topConstraint;
-    CGFloat _minimumTopConstraintConstant;
 }
-
-- (void)registerNotifications
-{
+- (void)registerNotifications {
     int token;
-    notify_register_dispatch(NOTIFY_RELOAD_HUD, &token, dispatch_get_main_queue(), ^(int token) {
-        [self reloadUserDefaults];
-    });
-
-    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-    
-    CFNotificationCenterAddObserver(
-        darwinCenter,
-        (__bridge const void *)self,
-        LaunchServicesApplicationStateChanged,
-        CFSTR(NOTIFY_LS_APP_CHANGED),
-        NULL,
-        CFNotificationSuspensionBehaviorDeliverImmediately
-    );
-    
-    CFNotificationCenterAddObserver(
-        darwinCenter,
-        (__bridge const void *)self,
-        SpringBoardLockStatusChanged,
-        CFSTR(NOTIFY_UI_LOCKCOMPLETE),
-        NULL,
-        CFNotificationSuspensionBehaviorDeliverImmediately
-    );
-    
-    CFNotificationCenterAddObserver(
-        darwinCenter,
-        (__bridge const void *)self,
-        SpringBoardLockStatusChanged,
-        CFSTR(NOTIFY_UI_LOCKSTATE),
-        NULL,
-        CFNotificationSuspensionBehaviorDeliverImmediately
-    );
+    notify_register_dispatch(NOTIFY_RELOAD_HUD, &token, dispatch_get_main_queue(), ^(int token) { [self reloadUserDefaults]; });
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), (__bridge const void *)self, LaunchServicesApplicationStateChanged, CFSTR(NOTIFY_LS_APP_CHANGED), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), (__bridge const void *)self, SpringBoardLockStatusChanged, CFSTR(NOTIFY_UI_LOCKCOMPLETE), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), (__bridge const void *)self, SpringBoardLockStatusChanged, CFSTR(NOTIFY_UI_LOCKSTATE), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
 }
-
 #define USER_DEFAULTS_PATH @"/var/mobile/Library/Preferences/ch.xxtou.hudapp.plist"
-
-- (void)loadUserDefaults:(BOOL)forceReload
-{
-    if (forceReload || !_userDefaults)
-        _userDefaults = [[NSDictionary dictionaryWithContentsOfFile:USER_DEFAULTS_PATH] mutableCopy] ?: [NSMutableDictionary dictionary];
-}
-
-- (void)saveUserDefaults
-{
-    BOOL wroteSucceed = [_userDefaults writeToFile:USER_DEFAULTS_PATH atomically:YES];
-    if (wroteSucceed) {
-        [[NSFileManager defaultManager] setAttributes:@{
-            NSFileOwnerAccountID: @501,
-            NSFileGroupOwnerAccountID: @501,
-        } ofItemAtPath:USER_DEFAULTS_PATH error:nil];
-        notify_post(NOTIFY_RELOAD_APP);
-    }
-}
-
-- (void)reloadUserDefaults
-{
+- (void)loadUserDefaults:(BOOL)forceReload { if (forceReload || !_userDefaults) _userDefaults = [[NSDictionary dictionaryWithContentsOfFile:USER_DEFAULTS_PATH] mutableCopy] ?: [NSMutableDictionary dictionary]; }
+- (void)reloadUserDefaults {
     [self loadUserDefaults:YES];
-
     NSInteger selectedMode = [self selectedMode];
     BOOL isCentered = (selectedMode == HUDPresetPositionTopCenter || selectedMode == HUDPresetPositionTopCenterMost);
     BOOL isCenteredMost = (selectedMode == HUDPresetPositionTopCenterMost);
-    
-    BOOL singleLineMode = [self singleLineMode];
-    BOOL usesBitrate = [self usesBitrate];
-    BOOL usesArrowPrefixes = [self usesArrowPrefixes];
-    BOOL usesLargeFont = [self usesLargeFont] && !isCenteredMost;
-
+    BOOL singleLineMode = [self singleLineMode], usesBitrate = [self usesBitrate], usesArrowPrefixes = [self usesArrowPrefixes], usesLargeFont = [self usesLargeFont] && !isCenteredMost;
     _blurView.layer.maskedCorners = (isCenteredMost ? kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner : kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner);
     _blurView.layer.cornerRadius = (usesLargeFont ? 4.5 : 4.0);
     _speedLabel.textAlignment = (isCentered ? NSTextAlignmentCenter : NSTextAlignmentLeft);
-    if (isCentered) {
-        _lockedView.image = [UIImage systemImageNamed:@"hand.raised.slash.fill"];
-    } else {
-        _lockedView.image = [UIImage systemImageNamed:@"lock.fill"];
-    }
-    
-    DATAUNIT = usesBitrate;
-    SHOW_UPLOAD_SPEED = !singleLineMode;
-    SHOW_DOWNLOAD_SPEED_FIRST = isCentered;
-    SHOW_SECOND_SPEED_IN_NEW_LINE = !isCentered;
-    FONT_SIZE = (usesLargeFont ? 9.0 : 8.0);
-    
-    UPLOAD_PREFIX = (usesArrowPrefixes ? "↑" : "▲");
-    DOWNLOAD_PREFIX = (usesArrowPrefixes ? "↓" : "▼");
-    
-    prevInputBytes = 0;
-    prevOutputBytes = 0;
-    
-    attributedUploadPrefix = nil;
-    attributedDownloadPrefix = nil;
-
-    [self removeAllAnimations];
-    [self resetGestureRecognizers];
+    _lockedView.image = isCentered ? [UIImage systemImageNamed:@"hand.raised.slash.fill"] : [UIImage systemImageNamed:@"lock.fill"];
+    DATAUNIT = usesBitrate; SHOW_UPLOAD_SPEED = !singleLineMode; SHOW_DOWNLOAD_SPEED_FIRST = isCentered; SHOW_SECOND_SPEED_IN_NEW_LINE = !isCentered; FONT_SIZE = (usesLargeFont ? 9.0 : 8.0);
+    UPLOAD_PREFIX = (usesArrowPrefixes ? "↑" : "▲"); DOWNLOAD_PREFIX = (usesArrowPrefixes ? "↓" : "▼");
+    prevInputBytes = 0; prevOutputBytes = 0; attributedUploadPrefix = nil; attributedDownloadPrefix = nil;
     [self updateViewConstraints];
 }
-
-- (NSInteger)selectedMode
-{
-    [self loadUserDefaults:NO];
-    NSNumber *mode = [_userDefaults objectForKey:@"selectedMode"];
-    return mode ? [mode integerValue] : HUDPresetPositionTopCenter;
-}
-
-- (BOOL)singleLineMode
-{
-    [self loadUserDefaults:NO];
-    NSNumber *mode = [_userDefaults objectForKey:@"singleLineMode"];
-    return mode ? [mode boolValue] : NO;
-}
-
-- (BOOL)usesBitrate
-{
-    [self loadUserDefaults:NO];
-    NSNumber *mode = [_userDefaults objectForKey:@"usesBitrate"];
-    return mode ? [mode boolValue] : NO;
-}
-
-- (BOOL)usesArrowPrefixes
-{
-    [self loadUserDefaults:NO];
-    NSNumber *mode = [_userDefaults objectForKey:@"usesArrowPrefixes"];
-    return mode ? [mode boolValue] : NO;
-}
-
-- (BOOL)usesLargeFont
-{
-    [self loadUserDefaults:NO];
-    NSNumber *mode = [_userDefaults objectForKey:@"usesLargeFont"];
-    return mode ? [mode boolValue] : NO;
-}
-
-- (void)setCurrentPositionY:(CGFloat)positionY
-{
-    [self loadUserDefaults:NO];
-    [_userDefaults setObject:[NSNumber numberWithDouble:positionY] forKey:@"currentPositionY"];
-    [self saveUserDefaults];
-}
-
-- (instancetype)init
-{
-    self = [super init];
-    if (self) {
+- (NSInteger)selectedMode { [self loadUserDefaults:NO]; NSNumber *mode = [_userDefaults objectForKey:@"selectedMode"]; return mode ? [mode integerValue] : HUDPresetPositionTopCenter; }
+- (BOOL)singleLineMode { [self loadUserDefaults:NO]; NSNumber *mode = [_userDefaults objectForKey:@"singleLineMode"]; return mode ? [mode boolValue] : NO; }
+- (BOOL)usesBitrate { [self loadUserDefaults:NO]; NSNumber *mode = [_userDefaults objectForKey:@"usesBitrate"]; return mode ? [mode boolValue] : NO; }
+- (BOOL)usesArrowPrefixes { [self loadUserDefaults:NO]; NSNumber *mode = [_userDefaults objectForKey:@"usesArrowPrefixes"]; return mode ? [mode boolValue] : NO; }
+- (BOOL)usesLargeFont { [self loadUserDefaults:NO]; NSNumber *mode = [_userDefaults objectForKey:@"usesLargeFont"]; return mode ? [mode boolValue] : NO; }
+- (instancetype)init {
+    if (self = [super init]) {
         _constraints = [NSMutableArray array];
         _orientationObserver = [[objc_getClass("FBSOrientationObserver") alloc] init];
         __weak HUDRootViewController *weakSelf = self;
-        [_orientationObserver setHandler:^(FBSOrientationUpdate *orientationUpdate) {
+        [(FBSOrientationObserver *)_orientationObserver setHandler:^(FBSOrientationUpdate *orientationUpdate) {
             HUDRootViewController *strongSelf = weakSelf;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [strongSelf updateOrientation:(UIInterfaceOrientation)orientationUpdate.orientation animateWithDuration:orientationUpdate.duration];
-            });
+            dispatch_async(dispatch_get_main_queue(), ^{ [strongSelf updateOrientation:(UIInterfaceOrientation)orientationUpdate.orientation animateWithDuration:orientationUpdate.duration]; });
         }];
         [self registerNotifications];
     }
     return self;
 }
-
-- (void)dealloc
-{
-    [_orientationObserver invalidate];
-}
-
+- (void)dealloc { [(FBSOrientationObserver *)_orientationObserver invalidate]; }
 - (void)updateOrientation:(UIInterfaceOrientation)orientation animateWithDuration:(NSTimeInterval)duration {
-    if (orientation == _orientation)
-        return;
-    
+    if (orientation == _orientation) return;
     _orientation = orientation;
     CGRect screenBounds = [UIScreen mainScreen].bounds;
-    
-    CGFloat angle = 0;
-    CGRect targetBounds = screenBounds;
-    
-    if (orientation == UIInterfaceOrientationLandscapeLeft) {
-        angle = -M_PI_2;
-        targetBounds = CGRectMake(0, 0, screenBounds.size.height, screenBounds.size.width);
-    } else if (orientation == UIInterfaceOrientationLandscapeRight) {
-        angle = M_PI_2;
-        targetBounds = CGRectMake(0, 0, screenBounds.size.height, screenBounds.size.width);
-    } else if (orientation == UIInterfaceOrientationPortraitUpsideDown) {
-        angle = M_PI;
-    }
-
+    CGFloat angle = 0; CGRect targetBounds = screenBounds;
+    if (orientation == UIInterfaceOrientationLandscapeLeft) { angle = -M_PI_2; targetBounds = CGRectMake(0, 0, screenBounds.size.height, screenBounds.size.width); }
+    else if (orientation == UIInterfaceOrientationLandscapeRight) { angle = M_PI_2; targetBounds = CGRectMake(0, 0, screenBounds.size.height, screenBounds.size.width); }
+    else if (orientation == UIInterfaceOrientationPortraitUpsideDown) { angle = M_PI; }
     [UIView animateWithDuration:duration animations:^{
         self->_contentView.bounds = targetBounds;
         self->_contentView.center = CGPointMake(screenBounds.size.width / 2.0, screenBounds.size.height / 2.0);
         self->_contentView.transform = CGAffineTransformMakeRotation(angle);
     }];
-    
-    [_contentView setNeedsLayout];
-    [_contentView layoutIfNeeded];
+    [_contentView setNeedsLayout]; [_contentView layoutIfNeeded];
 }
-
-- (void)viewDidLoad
-{
+- (void)viewDidLoad {
     [super viewDidLoad];
-    
-    self.view.userInteractionEnabled = YES;
-    self.view.backgroundColor = [UIColor clearColor];
-
-    _contentView = [[UIView alloc] initWithFrame:self.view.bounds];
-    _contentView.backgroundColor = [UIColor clearColor];
-    _contentView.userInteractionEnabled = YES;
-    [self.view addSubview:_contentView];
-
-    _blurView = [[UIView alloc] initWithFrame:_contentView.bounds];
-    _blurView.backgroundColor = [UIColor clearColor];
-    _blurView.userInteractionEnabled = YES;
-    [_contentView addSubview:_blurView];
-    
+    self.view.userInteractionEnabled = YES; self.view.backgroundColor = [UIColor clearColor];
+    _contentView = [[UIView alloc] initWithFrame:self.view.bounds]; _contentView.backgroundColor = [UIColor clearColor]; _contentView.userInteractionEnabled = YES; [self.view addSubview:_contentView];
+    _blurView = [[UIView alloc] initWithFrame:_contentView.bounds]; _blurView.backgroundColor = [UIColor clearColor]; _blurView.userInteractionEnabled = YES; [_contentView addSubview:_blurView];
     _blurView.translatesAutoresizingMaskIntoConstraints = NO;
-    [NSLayoutConstraint activateConstraints:@[
-        [_blurView.topAnchor constraintEqualToAnchor:_contentView.topAnchor],
-        [_blurView.bottomAnchor constraintEqualToAnchor:_contentView.bottomAnchor],
-        [_blurView.leadingAnchor constraintEqualToAnchor:_contentView.leadingAnchor],
-        [_blurView.trailingAnchor constraintEqualToAnchor:_contentView.trailingAnchor]
-    ]];
-    
-    menuView = [[MenuView alloc] initWithFrame:_contentView.bounds];
-    menuView.userInteractionEnabled = YES;
-    [_blurView addSubview:menuView];
-    
-    _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    _speedLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [_blurView addSubview:_speedLabel];
-    
-    _lockedView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"lock.fill"]];
-    _lockedView.tintColor = [UIColor whiteColor];
-    _lockedView.translatesAutoresizingMaskIntoConstraints = NO;
-    _lockedView.alpha = 0.0;
-    [_blurView addSubview:_lockedView];
-
+    [NSLayoutConstraint activateConstraints:@[ [_blurView.topAnchor constraintEqualToAnchor:_contentView.topAnchor], [_blurView.bottomAnchor constraintEqualToAnchor:_contentView.bottomAnchor], [_blurView.leadingAnchor constraintEqualToAnchor:_contentView.leadingAnchor], [_blurView.trailingAnchor constraintEqualToAnchor:_contentView.trailingAnchor] ]];
+    menuView = [[MenuView alloc] initWithFrame:_contentView.bounds]; menuView.userInteractionEnabled = YES; [_blurView addSubview:menuView];
+    _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero]; _speedLabel.translatesAutoresizingMaskIntoConstraints = NO; [_blurView addSubview:_speedLabel];
+    _lockedView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"lock.fill"]]; _lockedView.tintColor = [UIColor whiteColor]; _lockedView.translatesAutoresizingMaskIntoConstraints = NO; _lockedView.alpha = 0.0; [_blurView addSubview:_lockedView];
     [self reloadUserDefaults];
 }
-
-- (void)resetLoopTimer
-{
-    [_timer invalidate];
-    _timer = [NSTimer scheduledTimerWithTimeInterval:UPDATE_INTERVAL target:self selector:@selector(updateSpeedLabel) userInfo:nil repeats:YES];
+- (void)resetLoopTimer { [_timer invalidate]; _timer = [NSTimer scheduledTimerWithTimeInterval:UPDATE_INTERVAL target:self selector:@selector(updateSpeedLabel) userInfo:nil repeats:YES]; }
+- (void)stopLoopTimer { [_timer invalidate]; _timer = nil; }
+- (void)updateSpeedLabel { if (!shouldUpdateSpeedLabel) return; _speedLabel.attributedText = formattedAttributedString(_isFocused); }
+- (void)updateViewConstraints {
+    [NSLayoutConstraint deactivateConstraints:_constraints]; [_constraints removeAllObjects];
+    NSInteger selectedMode = [self selectedMode]; BOOL isCentered = (selectedMode == HUDPresetPositionTopCenter || selectedMode == HUDPresetPositionTopCenterMost);
+    [_constraints addObjectsFromArray:@[ [_speedLabel.topAnchor constraintEqualToAnchor:_contentView.topAnchor], [_speedLabel.bottomAnchor constraintEqualToAnchor:_contentView.bottomAnchor] ]];
+    if (isCentered) [_constraints addObject:[_speedLabel.centerXAnchor constraintEqualToAnchor:_contentView.centerXAnchor]];
+    else if (selectedMode == HUDPresetPositionTopLeft) [_constraints addObject:[_speedLabel.leadingAnchor constraintEqualToAnchor:_contentView.leadingAnchor constant:10]];
+    else [_constraints addObject:[_speedLabel.trailingAnchor constraintEqualToAnchor:_contentView.trailingAnchor constant:-10]];
+    [_constraints addObjectsFromArray:@[ [_lockedView.centerXAnchor constraintEqualToAnchor:_blurView.centerXAnchor], [_lockedView.centerYAnchor constraintEqualToAnchor:_blurView.centerYAnchor] ]];
+    [NSLayoutConstraint activateConstraints:_constraints]; [super updateViewConstraints];
 }
-
-- (void)stopLoopTimer
-{
-    [_timer invalidate];
-    _timer = nil;
-}
-
-- (void)updateSpeedLabel
-{
-    if (!shouldUpdateSpeedLabel) return;
-    _speedLabel.attributedText = formattedAttributedString(_isFocused);
-}
-
-- (void)updateViewConstraints
-{
-    [NSLayoutConstraint deactivateConstraints:_constraints];
-    [_constraints removeAllObjects];
-
-    NSInteger selectedMode = [self selectedMode];
-    BOOL isCentered = (selectedMode == HUDPresetPositionTopCenter || selectedMode == HUDPresetPositionTopCenterMost);
-
-    [_constraints addObjectsFromArray:@[
-        [_speedLabel.topAnchor constraintEqualToAnchor:_contentView.topAnchor],
-        [_speedLabel.bottomAnchor constraintEqualToAnchor:_contentView.bottomAnchor],
-    ]];
-    
-    if (isCentered)
-        [_constraints addObject:[_speedLabel.centerXAnchor constraintEqualToAnchor:_contentView.centerXAnchor]];
-    else if (selectedMode == HUDPresetPositionTopLeft)
-        [_constraints addObject:[_speedLabel.leadingAnchor constraintEqualToAnchor:_contentView.leadingAnchor constant:10]];
-    else
-        [_constraints addObject:[_speedLabel.trailingAnchor constraintEqualToAnchor:_contentView.trailingAnchor constant:-10]];
-
-    [_constraints addObjectsFromArray:@[
-        [_lockedView.centerXAnchor constraintEqualToAnchor:_blurView.centerXAnchor],
-        [_lockedView.centerYAnchor constraintEqualToAnchor:_blurView.centerYAnchor],
-    ]];
-
-    [NSLayoutConstraint activateConstraints:_constraints];
-    [super updateViewConstraints];
-}
-
-- (void)removeAllAnimations
-{
-    [_contentView.layer removeAllAnimations];
-}
-
-- (void)resetGestureRecognizers
-{
-    for (UIGestureRecognizer *recognizer in _contentView.gestureRecognizers)
-    {
-        [recognizer setEnabled:NO];
-        [recognizer setEnabled:YES];
-    }
-}
-
 @end
