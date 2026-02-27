@@ -121,23 +121,25 @@ int get_MaxHP(uint64_t Player) {
     return GetDataUInt16(Player, 1);
 }
 
+extern "C" {
+    bool get_IsFiring(uint64_t player) {
+        return ReadAddr<bool>(player + 0x540);
+    }
 
-extern "C" bool get_IsFiring(uint64_t player) {
-    // protected bool m_IsFiring; // 0x540
-    return ReadAddr<bool>(player + 0x540);
-}
+    void set_aim(uint64_t player, Vector3 angle) {
+        WriteAddr<Vector3>(player + 0x340, angle);
+    }
 
-extern "C" void set_aim(uint64_t player, Vector3 angle) {
-    // public Vector3 AimRotation; // 0x340
-    WriteAddr<Vector3>(player + 0x340, angle);
-}
-
-extern "C" Vector3 GetRotationToLocation(Vector3 targetPos, float speed, Vector3 myPos) {
-    Vector3 diff = targetPos - myPos;
-    float dist = Vector3::Magnitude(diff);
-    
-    float pitch = -asin(diff.y / dist) * (180 / M_PI);
-    float yaw = atan2(diff.x, diff.z) * (180 / M_PI);
-    
-    return Vector3(pitch, yaw, 0);
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wreturn-type-c-linkage"
+    Vector3 GetRotationToLocation(Vector3 targetPos, float speed, Vector3 myPos) {
+        Vector3 diff = targetPos - myPos;
+        float dist = Vector3::Magnitude(diff);
+        
+        float pitch = -asin(diff.y / dist) * (180 / M_PI);
+        float yaw = atan2(diff.x, diff.z) * (180 / M_PI);
+        
+        return Vector3(pitch, yaw, 0);
+    }
+    #pragma clang diagnostic pop
 }
