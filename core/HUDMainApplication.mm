@@ -1092,16 +1092,10 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     CGRect screenBounds = [[UIScreen mainScreen] bounds];
     CGRect menuFrame = screenBounds;
 
-    // menuView добавляется в keyWindow через 2.5 сек как в рабочем demo проекте
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        CGRect screen = [UIScreen mainScreen].bounds;
-        menuView = [[MenuView alloc] initWithFrame:screen];
-        menuView.userInteractionEnabled = YES;
-        menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        UIWindow *keyWin = [UIApplication sharedApplication].keyWindow;
-        if (!keyWin) keyWin = [UIApplication sharedApplication].windows.firstObject;
-        [keyWin addSubview:menuView];
-    });
+    menuView = [[MenuView alloc] initWithFrame:menuFrame];
+    menuView.userInteractionEnabled = YES;
+    menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self.view addSubview:menuView];
     
     _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     [_blurView addSubview:_speedLabel];
