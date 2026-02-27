@@ -51,6 +51,7 @@ static float aimDistance = 200.0f;
     UIButton *_btnFloat;
     CGPoint   _dragStart;
     CGPoint   _btnCenterAtDrag;
+    BOOL      _dragging;
 
     MenuBox *_menuBox;
     UIView  *_tabMain;
