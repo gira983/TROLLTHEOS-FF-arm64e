@@ -1103,13 +1103,26 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     ]];
     
     CGRect screenBounds = [[UIScreen mainScreen] bounds];
-    CGRect menuFrame = screenBounds;  // полноэкранный фрейм — MenuView сама центрирует своё меню
+    CGRect menuFrame = screenBounds;
 
     menuView = [[MenuView alloc] initWithFrame:menuFrame];
     menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     menuView.userInteractionEnabled = YES;
-    // Добавляем напрямую в self.view поверх всего — минуем _contentView и _blurView
-    [self.view addSubview:menuView];
+    
+    // Добавляем в keyWindow после небольшой задержки
+    // keyWindow игры гарантированно получает touches на обеих архитектурах
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIWindow *targetWin = nil;
+        // Ищем окно с максимальным windowLevel (наше HUD окно)
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            if (!targetWin || w.windowLevel > targetWin.windowLevel) {
+                targetWin = w;
+            }
+        }
+        if (!targetWin) targetWin = [UIApplication sharedApplication].keyWindow;
+        self->menuView.frame = targetWin.bounds;
+        [targetWin addSubview:self->menuView];
+    });
     
     _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     [_blurView addSubview:_speedLabel];
