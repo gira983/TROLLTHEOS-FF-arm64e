@@ -52,8 +52,16 @@ static float aimDistance = 200.0f;
         [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
         [self buildFloatingButton];
         [self buildMenuBox];
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(appDidBecomeActive) name:UIApplicationDidBecomeActiveNotification object:nil];
     }
     return self;
+}
+
+- (void)appDidBecomeActive {
+    if (self.displayLink) {
+        [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+        self.displayLink.paused = NO;
+    }
 }
 
 // ============================================================
@@ -311,17 +319,23 @@ static float aimDistance = 200.0f;
 }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (!self.userInteractionEnabled || self.hidden) return nil;
-    // Сначала меню
-    if (_menuBox && !_menuBox.hidden) {
-        CGPoint p = [self convertPoint:point toView:_menuBox];
-        UIView *hit = [_menuBox hitTest:p withEvent:event];
-        if (hit) return hit;
-    }
-    // Потом кнопка
+    if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
+
+    // 1. Проверяем кнопку (она обычно поверх всего, когда меню закрыто)
     if (_btnFloat && !_btnFloat.hidden) {
         CGPoint p = [self convertPoint:point toView:_btnFloat];
         if ([_btnFloat pointInside:p withEvent:event]) return _btnFloat;
+    }
+
+    // 2. Проверяем меню
+    if (_menuBox && !_menuBox.hidden) {
+        CGPoint p = [self convertPoint:point toView:_menuBox];
+        // Если точка внутри меню, вызываем стандартный hitTest меню
+        if ([_menuBox pointInside:p withEvent:event]) {
+            UIView *hit = [_menuBox hitTest:p withEvent:event];
+            // Если hitTest вернул само меню (фон), возвращаем его, чтобы тап не провалился
+            return hit ?: _menuBox;
+        }
     }
     return nil;
 }
@@ -338,6 +352,12 @@ static float aimDistance = 200.0f;
 
 - (void)updateFrame {
     if (!self.window) return;
+    
+    // Проверка: если displayLink почему-то остановился (например, после смены катки)
+    if (self.displayLink && self.displayLink.paused) {
+        self.displayLink.paused = NO;
+    }
+
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     for (CALayer *l in self.drawingLayers) [l removeFromSuperlayer];
