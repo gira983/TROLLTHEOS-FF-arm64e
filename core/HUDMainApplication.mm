@@ -775,29 +775,16 @@ static void DumpThreads(void)
 - (BOOL)_ignoresHitTest { return NO; }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // Напрямую спросить menuView — может она обработать этот touch?
+    // Спросить menuView напрямую через её собственный hitTest
     UIViewController *vc = self.rootViewController;
     if (!vc) return nil;
     
-    // Пройти по всей иерархии subviews view контроллера
-    UIView *result = [self findMenuViewHit:vc.view point:point event:event];
-    return result;
-}
-
-- (UIView *)findMenuViewHit:(UIView *)view point:(CGPoint)point event:(UIEvent *)event {
-    for (UIView *sub in view.subviews.reverseObjectEnumerator) {
-        if (sub.hidden || sub.alpha < 0.01 || !sub.userInteractionEnabled) continue;
-        CGPoint converted = [self convertPoint:point toView:sub];
-        if (![sub pointInside:converted withEvent:event]) continue;
-        // Рекурсивно ищем самый глубокий view
-        UIView *deeper = [self findMenuViewHit:sub point:point event:event];
-        if (deeper) return deeper;
-        // Если sub сам интерактивный элемент (кнопка, свитч, слайдер)
-        if ([sub isKindOfClass:[UIControl class]] || 
-            [sub isKindOfClass:[UIButton class]] ||
-            sub.gestureRecognizers.count > 0) {
-            return sub;
-        }
+    for (UIView *sub in vc.view.subviews.reverseObjectEnumerator) {
+        if (sub.hidden || !sub.userInteractionEnabled) continue;
+        CGPoint p = [sub convertPoint:point fromView:self];
+        UIView *hit = [sub hitTest:p withEvent:event];
+        if (hit && hit != sub) return hit; // нашли конкретный элемент
+        if (hit == sub && hit.gestureRecognizers.count > 0) return hit;
     }
     return nil;
 }
