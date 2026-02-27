@@ -1,11 +1,18 @@
 #import "esp.h"
-#import "mahoa.h"
+#import "../../mahoa.h"
+#import "../lib/GameLogic.h"
+#import "../lib/UnityMath.h"
 #import <QuartzCore/QuartzCore.h>
 #import <UIKit/UIKit.h>
 #include <sys/mman.h>
 #include <string>
 #include <vector>
 #include <cmath>
+
+// Forward declarations for missing functions if not in headers
+extern "C" bool get_IsFiring(uint64_t player);
+extern "C" Vector3 GetRotationToLocation(Vector3 targetPos, float speed, Vector3 myPos);
+extern "C" void set_aim(uint64_t player, Vector3 angle);
 
 uint64_t Moudule_Base = -1;
 
@@ -67,7 +74,6 @@ static float aimDistance = 200.0f;
     _btnFloat = [UIButton buttonWithType:UIButtonTypeCustom];
     _btnFloat.frame = CGRectMake(30, 120, 54, 54);
     
-    // Стильный градиентный фон для кнопки
     CAGradientLayer *grad = [CAGradientLayer layer];
     grad.frame = _btnFloat.bounds;
     grad.colors = @[(id)[UIColor colorWithRed:0.0 green:0.8 blue:0.4 alpha:1.0].CGColor, 
@@ -87,11 +93,10 @@ static float aimDistance = 200.0f;
     [_btnFloat setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     _btnFloat.titleLabel.font = [UIFont boldSystemFontOfSize:24];
     
-    // Используем только TouchUpInside для открытия меню
     [_btnFloat addTarget:self action:@selector(floatTapped) forControlEvents:UIControlEventTouchUpInside];
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(floatPan:)];
-    pan.cancelsTouchesInView = YES; // Важно: блокирует TouchUpInside если началось перетаскивание
+    pan.cancelsTouchesInView = YES;
     [_btnFloat addGestureRecognizer:pan];
     
     [self addSubview:_btnFloat];
@@ -124,7 +129,6 @@ static float aimDistance = 200.0f;
         [UIView animateWithDuration:0.2 animations:^{
             self->_btnFloat.transform = CGAffineTransformIdentity;
         }];
-        // Сбрасываем флаг перетаскивания с небольшой задержкой, чтобы не сработал тап
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             self->_isDragging = NO;
         });
@@ -154,7 +158,6 @@ static float aimDistance = 200.0f;
     drag.cancelsTouchesInView = NO;
     [_menuBox addGestureRecognizer:drag];
 
-    // Header - более современный вид
     UIView *hdr = [[UIView alloc] initWithFrame:CGRectMake(0, 0, W, 50)];
     hdr.backgroundColor = [UIColor colorWithWhite:0.15 alpha:1.0];
     UIBezierPath *maskPath = [UIBezierPath bezierPathWithRoundedRect:hdr.bounds byRoundingCorners:(UIRectCornerTopLeft | UIRectCornerTopRight) cornerRadii:CGSizeMake(20, 20)];
@@ -179,7 +182,6 @@ static float aimDistance = 200.0f;
     [closeBtn addTarget:self action:@selector(hideMenu) forControlEvents:UIControlEventTouchUpInside];
     [hdr addSubview:closeBtn];
 
-    // Tab bar - стильные кнопки
     UIView *tabBar = [[UIView alloc] initWithFrame:CGRectMake(10, 60, W-20, 40)];
     tabBar.backgroundColor = [UIColor colorWithWhite:0.05 alpha:1.0];
     tabBar.layer.cornerRadius = 10;
@@ -195,7 +197,6 @@ static float aimDistance = 200.0f;
     [tabBar addSubview:_btnTabSetting];
     [self updateTabUI:0];
 
-    // Content
     CGFloat cy = 110, ch = H - cy - 10;
     _tabMain    = [[UIView alloc] initWithFrame:CGRectMake(0, cy, W, ch)];
     _tabAim     = [[UIView alloc] initWithFrame:CGRectMake(0, cy, W, ch)];
