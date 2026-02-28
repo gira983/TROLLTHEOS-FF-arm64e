@@ -187,7 +187,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     menuContainer.hidden = YES;
     // Поглощаем все touches на menuContainer — чтобы они не уходили выше по иерархии
     UITapGestureRecognizer *absorbTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(_absorbTap:)];
-    absorbTap.cancelsTouchesInView = NO;
+    absorbTap.cancelsTouchesInView = YES;
     [menuContainer addGestureRecognizer:absorbTap];
     [self addSubview:menuContainer];
     
@@ -548,11 +548,16 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    if (self.superview) self.frame = self.superview.bounds;
-    CGRect screenBounds = self.bounds;
-    // Центрировать меню при повороте если оно открыто
-    if (menuContainer && !menuContainer.hidden) {
-        menuContainer.center = CGPointMake(screenBounds.size.width / 2, screenBounds.size.height / 2);
+    if (self.superview) {
+        CGRect newFrame = self.superview.bounds;
+        // Меняем frame только если размер реально изменился (поворот экрана)
+        if (!CGSizeEqualToSize(self.frame.size, newFrame.size)) {
+            self.frame = newFrame;
+            CGRect screenBounds = self.bounds;
+            if (menuContainer && !menuContainer.hidden) {
+                menuContainer.center = CGPointMake(screenBounds.size.width / 2, screenBounds.size.height / 2);
+            }
+        }
     }
     if (floatingButton) {
         CGPoint btnCenter = floatingButton.center;
