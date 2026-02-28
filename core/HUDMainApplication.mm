@@ -1109,6 +1109,8 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     _tapGestureRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapGestureRecognized:)];
     _tapGestureRecognizer.numberOfTapsRequired = 1;
     _tapGestureRecognizer.numberOfTouchesRequired = 1;
+    _tapGestureRecognizer.cancelsTouchesInView = NO;
+    _tapGestureRecognizer.delaysTouchesEnded = NO;
     [_contentView addGestureRecognizer:_tapGestureRecognizer];
 
     [_contentView setUserInteractionEnabled:YES];
@@ -1360,4 +1362,3 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
 }
 
 @end
-
