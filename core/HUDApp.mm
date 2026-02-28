@@ -76,6 +76,20 @@ void GSEventRegisterEventCallBack(void (*)(GSEventRef));
 
 #import "TSEventFetcher.h"
 
+// Лог в файл для отладки
+static void writeLog(NSString *msg) {
+    static NSString *path = @"/var/mobile/Library/Caches/hud_debug.log";
+    NSString *line = [NSString stringWithFormat:@"%@\n", msg];
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+    if (!fh) {
+        [@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        fh = [NSFileHandle fileHandleForWritingAtPath:path];
+    }
+    [fh seekToEndOfFile];
+    [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [fh closeFile];
+}
+
 static __used void _HUDEventCallback(void *target, void *refcon, IOHIDServiceRef service, IOHIDEventRef event)
 {
     static UIApplication *app = [UIApplication sharedApplication];
@@ -159,8 +173,20 @@ static __used void _HUDEventCallback(void *target, void *refcon, IOHIDServiceRef
                     [activeViews removeObjectForKey:key];
             }
             
-            if (pointerId > 0 && keyView)
+            if (pointerId > 0 && keyView) {
+                NSString *phaseStr = @"?";
+                if (phase == UITouchPhaseBegan) phaseStr = @"Began";
+                else if (phase == UITouchPhaseMoved) phaseStr = @"Moved";
+                else if (phase == UITouchPhaseEnded) phaseStr = @"Ended";
+                else if (phase == UITouchPhaseCancelled) phaseStr = @"Cancelled";
+                
+                writeLog([NSString stringWithFormat:@"[TOUCH] phase=%@ id=%ld loc=(%.0f,%.0f) view=%@ class=%@",
+                    phaseStr, (long)clampedId,
+                    [rep location].x, [rep location].y,
+                    keyView, NSStringFromClass([keyView class])]);
+                
                 [TSEventFetcher receiveAXEventID:clampedId atGlobalCoordinate:[rep location] withTouchPhase:phase inWindow:keyWindow onView:keyView];
+            }
         }
     }
     else {
