@@ -161,7 +161,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [self.backgroundView addSubview:appIconImageView];
 
     UILabel *appNameLabel = [[UILabel alloc] init];
-    appNameLabel.text = @"Xyris";
+    appNameLabel.text = @"Fryzzternal";
     appNameLabel.font = [UIFont fontWithName:@"HelveticaNeue" size:labelFontSize];
     appNameLabel.textColor = [UIColor whiteColor];
     appNameLabel.font = [UIFont boldSystemFontOfSize:labelFontSize];
