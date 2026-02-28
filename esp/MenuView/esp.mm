@@ -68,10 +68,6 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 - (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers;
 @end
 
-@interface MenuView (Private)
-- (UIView *)deepHitTest:(CGPoint)point inView:(UIView *)view event:(UIEvent *)event;
-@end
-
 @implementation MenuView {
     UIView *menuContainer;
     UIView *floatingButton;
@@ -114,22 +110,26 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
+    
+    // Меню открыто — отдаём touch меню
     if (menuContainer && !menuContainer.hidden) {
         CGPoint p = [self convertPoint:point toView:menuContainer];
         if ([menuContainer pointInside:p withEvent:event]) {
-            UIView *hit = [self deepHitTest:p inView:menuContainer event:event];
-            if (hit) return hit;
-            // Фон меню — возвращаем menuContainer, он поглотит tap
-            return menuContainer;
+            // Стандартный hitTest UIKit сам найдёт нужный subview (switch, button и тд)
+            UIView *hit = [menuContainer hitTest:p withEvent:event];
+            return hit ? hit : menuContainer;
         }
     }
+    
+    // Кнопка — отдаём floatingButton
     if (floatingButton && !floatingButton.hidden) {
         CGPoint p = [self convertPoint:point toView:floatingButton];
         if ([floatingButton pointInside:p withEvent:event]) {
-            // Возвращаем сам floatingButton — gesture recognizers на нём сработают
             return floatingButton;
         }
     }
+    
+    // Всё остальное — nil, touch проходит к игре
     return nil;
 }
 
@@ -196,11 +196,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     menuContainer.layer.borderWidth = 2;
     menuContainer.clipsToBounds = NO;
     menuContainer.hidden = YES;
-    // Пустой gesture поглощает touches на фоне menuContainer
-    UITapGestureRecognizer *absorbTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(_absorbTap:)];
-    absorbTap.cancelsTouchesInView = NO;  // НЕ блокируем дочерние UIControl
-    absorbTap.delaysTouchesEnded = NO;
-    [menuContainer addGestureRecognizer:absorbTap];
+    // absorbTap убран — menuContainer.hitTest сам решает что перехватить
     [self addSubview:menuContainer];
     
     // Header
@@ -595,10 +591,6 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
         [self centerMenu];
     }];
     [self updatePreviewVisibility];
-}
-
-- (void)_absorbTap:(UITapGestureRecognizer *)gr {
-    // Поглощаем tap — ничего не делаем, просто не даём touch уйти выше
 }
 
 - (void)hideMenu {
