@@ -111,25 +111,41 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
     
-    // Меню открыто — отдаём touch меню
+    // Меню открыто
     if (menuContainer && !menuContainer.hidden) {
-        CGPoint p = [self convertPoint:point toView:menuContainer];
-        if ([menuContainer pointInside:p withEvent:event]) {
-            // Стандартный hitTest UIKit сам найдёт нужный subview (switch, button и тд)
-            UIView *hit = [menuContainer hitTest:p withEvent:event];
-            return hit ? hit : menuContainer;
+        CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
+        if ([menuContainer pointInside:pInMenu withEvent:event]) {
+            // Обходим все subviews menuContainer вручную (thread-safe)
+            for (UIView *sub in menuContainer.subviews.reverseObjectEnumerator) {
+                if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
+                CGPoint pInSub = [menuContainer convertPoint:pInMenu toView:sub];
+                if (![sub pointInside:pInSub withEvent:event]) continue;
+                // Проверяем subviews этого sub (напр. кнопки внутри sidebar)
+                for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
+                    if (leaf.hidden || !leaf.userInteractionEnabled || leaf.alpha < 0.01) continue;
+                    CGPoint pInLeaf = [sub convertPoint:pInSub toView:leaf];
+                    if ([leaf pointInside:pInLeaf withEvent:event]) {
+                        // Ещё один уровень — для CustomSwitch внутри featureBox
+                        for (UIView *deep in leaf.subviews.reverseObjectEnumerator) {
+                            if (deep.hidden || !deep.userInteractionEnabled || deep.alpha < 0.01) continue;
+                            CGPoint pInDeep = [leaf convertPoint:pInLeaf toView:deep];
+                            if ([deep pointInside:pInDeep withEvent:event]) return deep;
+                        }
+                        return leaf;
+                    }
+                }
+                return sub;
+            }
+            return menuContainer;
         }
     }
     
-    // Кнопка — отдаём floatingButton
+    // Кнопка M
     if (floatingButton && !floatingButton.hidden) {
         CGPoint p = [self convertPoint:point toView:floatingButton];
-        if ([floatingButton pointInside:p withEvent:event]) {
-            return floatingButton;
-        }
+        if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
     }
     
-    // Всё остальное — nil, touch проходит к игре
     return nil;
 }
 
