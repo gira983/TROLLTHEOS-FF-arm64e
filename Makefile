@@ -7,8 +7,8 @@ include $(THEOS)/makefiles/common.mk
 
 IS_NEW_ABI := 1
 
-APPLICATION_NAME := Fryzzternal
-PACKAGE_NAME := fryzz
+APPLICATION_NAME := Xyris
+PACKAGE_NAME := xyris
 
 Xyris_USE_MODULES := 0
 Xyris_FILES += platform_stub.c
