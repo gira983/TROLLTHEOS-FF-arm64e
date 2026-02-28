@@ -1,7 +1,7 @@
 #import "esp.h"
 #import "mahoa.h"
 #import <QuartzCore/QuartzCore.h>
-#import <UIKit/UIKit.h>
+#import <UIKit/UIKit.h> 
 #include <sys/mman.h>
 #include <string>
 #include <vector>
@@ -9,107 +9,59 @@
 
 uint64_t Moudule_Base = -1;
 
-static bool isBox      = YES;
-static bool isBone     = YES;
-static bool isHealth   = YES;
-static bool isName     = YES;
-static bool isDis      = YES;
-static bool isAimbot   = NO;
-static float aimFov      = 150.0f;
-static float aimDistance = 200.0f;
+// --- ESP Config ---
+static bool isBox = YES;
+static bool isBone = YES;
+static bool isHealth = YES;
+static bool isName = YES;
+static bool isDis = YES;
 
-// ─────────────────────────────────────────────
-// MARK: - NeonSwitch (CustomSwitch, точно работает)
-// ─────────────────────────────────────────────
-@interface NeonSwitch : UIControl
+// --- Aimbot Config ---
+static bool isAimbot = NO;
+static float aimFov = 150.0f; // Bán kính vòng tròn FOV
+static float aimDistance = 200.0f; // Khoảng cách aim mặc định
+
+@interface CustomSwitch : UIControl
 @property (nonatomic, assign, getter=isOn) BOOL on;
 @end
-@implementation NeonSwitch { UIView *_thumb; BOOL _on; }
+
+@implementation CustomSwitch { UIView *_thumb; }
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
         self.backgroundColor = [UIColor clearColor];
-        _thumb = [[UIView alloc] initWithFrame:CGRectMake(2, 2, frame.size.height-4, frame.size.height-4)];
-        _thumb.layer.cornerRadius = (frame.size.height-4)/2;
-        _thumb.backgroundColor = [UIColor whiteColor];
-        _thumb.layer.shadowColor = [UIColor whiteColor].CGColor;
-        _thumb.layer.shadowOffset = CGSizeZero;
-        _thumb.layer.shadowRadius = 4;
-        _thumb.layer.shadowOpacity = 0;
+        _thumb = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 22, 22)];
+        _thumb.backgroundColor = [UIColor colorWithWhite:0.75 alpha:1.0];
+        _thumb.layer.cornerRadius = 11;
         [self addSubview:_thumb];
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(_toggle)];
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggle)];
         [self addGestureRecognizer:tap];
-        [self setNeedsDisplay];
     }
     return self;
 }
 - (void)drawRect:(CGRect)rect {
-    CGContextRef ctx = UIGraphicsGetCurrentContext();
-    UIBezierPath *bg = [UIBezierPath bezierPathWithRoundedRect:self.bounds cornerRadius:self.bounds.size.height/2];
-    if (_on) {
-        CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-        CGFloat c[] = {0.0, 0.85, 0.45, 1.0, 0.0, 0.6, 0.3, 1.0};
-        CGGradientRef gr = CGGradientCreateWithColorComponents(cs, c, NULL, 2);
-        CGContextSaveGState(ctx);
-        [bg addClip];
-        CGContextDrawLinearGradient(ctx, gr, CGPointMake(0,0), CGPointMake(self.bounds.size.width,0), 0);
-        CGContextRestoreGState(ctx);
-        CGGradientRelease(gr);
-        CGColorSpaceRelease(cs);
-    } else {
-        [[UIColor colorWithRed:0.15 green:0.15 blue:0.2 alpha:1] setFill];
-        [bg fill];
-    }
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:self.bounds cornerRadius:self.bounds.size.height/2];
+    CGContextSetFillColorWithColor(context, (self.isOn ? [UIColor colorWithRed:0.0 green:0.8 blue:0.0 alpha:1.0] : [UIColor colorWithWhite:0.15 alpha:1.0]).CGColor);
+    [path fill];
 }
 - (void)setOn:(BOOL)on {
-    if (_on == on) return;
-    _on = on;
-    [self setNeedsDisplay];
-    [self _animateThumb];
+    if (_on != on) { _on = on; [self setNeedsDisplay]; [self updateThumbPosition]; }
 }
-- (BOOL)isOn { return _on; }
-- (void)_toggle {
-    self.on = !_on;
+- (void)toggle {
+    self.on = !self.on;
     [self sendActionsForControlEvents:UIControlEventValueChanged];
 }
-- (void)_animateThumb {
-    [UIView animateWithDuration:0.22 delay:0 usingSpringWithDamping:0.7 initialSpringVelocity:0.5 options:0 animations:^{
-        CGFloat r = self.bounds.size.height - 4;
-        self->_thumb.frame = CGRectMake(self->_on ? self.bounds.size.width - r - 2 : 2, 2, r, r);
-        self->_thumb.backgroundColor = UIColor.whiteColor;
-        self->_thumb.layer.shadowOpacity = self->_on ? 0.8f : 0.0f;
-    } completion:nil];
+- (void)updateThumbPosition {
+    [UIView animateWithDuration:0.2 animations:^{
+        CGRect frame = self->_thumb.frame;
+        frame.origin.x = self.isOn ? self.bounds.size.width - frame.size.width - 2 : 2;
+        self->_thumb.frame = frame;
+        self->_thumb.backgroundColor = self.isOn ? UIColor.whiteColor : [UIColor colorWithWhite:0.75 alpha:1.0];
+    }];
 }
 @end
 
-// ─────────────────────────────────────────────
-// MARK: - MenuBox с рекурсивным hitTest
-// ─────────────────────────────────────────────
-@interface MenuBox : UIView
-@end
-@implementation MenuBox
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
-    if (![self pointInside:point withEvent:event]) return nil;
-    UIView *deep = [self _deepFind:point inView:self event:event];
-    return deep ?: self;
-}
-- (UIView *)_deepFind:(CGPoint)pt inView:(UIView *)v event:(UIEvent *)e {
-    for (UIView *s in v.subviews.reverseObjectEnumerator) {
-        if (s.hidden || !s.userInteractionEnabled || s.alpha < 0.01) continue;
-        CGPoint p = [v convertPoint:pt toView:s];
-        if (![s pointInside:p withEvent:e]) continue;
-        UIView *d = [self _deepFind:p inView:s event:e];
-        if (d) return d;
-        if ([s isKindOfClass:[UIControl class]] || s.gestureRecognizers.count > 0) return s;
-    }
-    return nil;
-}
-@end
-
-// ─────────────────────────────────────────────
-// MARK: - MenuView
-// ─────────────────────────────────────────────
 @interface MenuView ()
 @property (nonatomic, strong) CADisplayLink *displayLink;
 @property (nonatomic, strong) NSMutableArray<CALayer *> *drawingLayers;
@@ -117,484 +69,813 @@ static float aimDistance = 200.0f;
 @end
 
 @implementation MenuView {
-    // Float button
-    UIButton  *_btnFloat;
-    CGPoint    _dragStart;
-    CGPoint    _btnCenterAtDrag;
-    BOOL       _dragging;
+    UIView *menuContainer;
+    UIView *floatingButton;
+    CGPoint _initialTouchPoint;
+    
+    // Tab Views
+    UIView *mainTabContainer;
+    UIView *aimTabContainer;
+    UIView *settingTabContainer;
 
-    // Menu
-    MenuBox   *_menuBox;
-    UIView    *_tabMain, *_tabAim, *_tabSetting;
-    UIButton  *_btnTabMain, *_btnTabAim, *_btnTabSetting;
-
-    // Accent color
-    UIColor   *_accent;
+    UIView *previewView;
+    UIView *previewContentContainer;
+    
+    UILabel *previewNameLabel;
+    UILabel *previewDistLabel;
+    UIView *healthBarContainer;
+    UIView *boxContainer;
+    UIView *skeletonContainer;
+    
+    float previewScale;
 }
 
-// ─── init ───────────────────────────────────
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        _accent = [UIColor colorWithRed:0.0 green:0.85 blue:0.45 alpha:1.0];
         self.userInteractionEnabled = YES;
         self.backgroundColor = [UIColor clearColor];
         self.drawingLayers = [NSMutableArray array];
+        
         [self SetUpBase];
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
         [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-        [self _buildButton];
-        [self _buildMenu];
+
+        [self setupFloatingButton];
+        [self setupMenuUI];
+        [self layoutSubviews];
     }
     return self;
 }
 
-// ─── hitTest ────────────────────────────────
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (!self.userInteractionEnabled || self.hidden) return nil;
-    if (_menuBox && !_menuBox.hidden) {
-        CGPoint p = [self convertPoint:point toView:_menuBox];
-        UIView *h = [_menuBox hitTest:p withEvent:event];
-        if (h) return h;
+    if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
+    if (menuContainer && !menuContainer.hidden) {
+        CGPoint p = [self convertPoint:point toView:menuContainer];
+        UIView *hit = [menuContainer hitTest:p withEvent:event];
+        if (hit) return hit;
     }
-    if (_btnFloat && !_btnFloat.hidden) {
-        CGPoint p = [self convertPoint:point toView:_btnFloat];
-        if ([_btnFloat pointInside:p withEvent:event]) return _btnFloat;
+    if (floatingButton && !floatingButton.hidden) {
+        CGPoint p = [self convertPoint:point toView:floatingButton];
+        if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
     }
     return nil;
 }
 
-// ─── FLOAT BUTTON ───────────────────────────
-- (void)_buildButton {
-    _btnFloat = [UIButton buttonWithType:UIButtonTypeCustom];
-    _btnFloat.frame = CGRectMake(20, 130, 56, 56);
-    _btnFloat.backgroundColor = _accent;
-    _btnFloat.layer.cornerRadius = 28;
-    _btnFloat.layer.borderWidth = 1.5;
-    _btnFloat.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.3].CGColor;
-    // glow
-    _btnFloat.layer.shadowColor = _accent.CGColor;
-    _btnFloat.layer.shadowOffset = CGSizeZero;
-    _btnFloat.layer.shadowRadius = 10;
-    _btnFloat.layer.shadowOpacity = 0.7;
-    _btnFloat.clipsToBounds = NO;
-    [_btnFloat setTitle:@"M" forState:UIControlStateNormal];
-    [_btnFloat setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    _btnFloat.titleLabel.font = [UIFont boldSystemFontOfSize:22];
-    [_btnFloat addTarget:self action:@selector(_floatTap) forControlEvents:UIControlEventTouchUpInside];
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(_floatPan:)];
-    pan.cancelsTouchesInView = NO;
-    [_btnFloat addGestureRecognizer:pan];
-    [self addSubview:_btnFloat];
-    // pulse animation
-    CABasicAnimation *pulse = [CABasicAnimation animationWithKeyPath:@"shadowRadius"];
-    pulse.fromValue = @8; pulse.toValue = @16;
-    pulse.duration = 1.4; pulse.autoreverses = YES;
-    pulse.repeatCount = HUGE_VALF;
-    [_btnFloat.layer addAnimation:pulse forKey:@"pulse"];
+- (void)setupFloatingButton {
+    floatingButton = [[UIView alloc] initWithFrame:CGRectMake(50, 50, 50, 50)];
+    floatingButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.8 blue:0.0 alpha:1.0];
+    floatingButton.layer.cornerRadius = 25;
+    floatingButton.layer.borderWidth = 2;
+    floatingButton.layer.borderColor = [UIColor whiteColor].CGColor;
+    floatingButton.clipsToBounds = YES;
+    
+    UILabel *iconLabel = [[UILabel alloc] initWithFrame:floatingButton.bounds];
+    iconLabel.text = @"M";
+    iconLabel.textColor = [UIColor whiteColor];
+    iconLabel.textAlignment = NSTextAlignmentCenter;
+    iconLabel.font = [UIFont boldSystemFontOfSize:20];
+    [floatingButton addSubview:iconLabel];
+    
+    UIPanGestureRecognizer *iconPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+    iconPan.cancelsTouchesInView = NO;
+    [floatingButton addGestureRecognizer:iconPan];
+    
+    UITapGestureRecognizer *openTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(showMenu)];
+    [openTap requireGestureRecognizerToFail:iconPan];
+    [floatingButton addGestureRecognizer:openTap];
+    
+    [self addSubview:floatingButton];
 }
 
-- (void)_floatTap { [self _showMenu]; }
-
-- (void)_floatPan:(UIPanGestureRecognizer *)gr {
-    CGPoint loc = [gr locationInView:self];
-    if (gr.state == UIGestureRecognizerStateBegan) {
-        _dragStart = loc; _btnCenterAtDrag = _btnFloat.center; _dragging = NO;
-    } else if (gr.state == UIGestureRecognizerStateChanged) {
-        CGFloat dx = loc.x - _dragStart.x, dy = loc.y - _dragStart.y;
-        if (!_dragging && sqrtf(dx*dx+dy*dy) < 6) return;
-        _dragging = YES;
-        CGFloat r = 28; CGRect b = self.bounds;
-        _btnFloat.center = CGPointMake(MAX(r, MIN(b.size.width-r, _btnCenterAtDrag.x+dx)),
-                                        MAX(r, MIN(b.size.height-r,_btnCenterAtDrag.y+dy)));
-    } else { _dragging = NO; }
+- (void)addFeatureToView:(UIView *)view withTitle:(NSString *)title atY:(CGFloat)y initialValue:(BOOL)isOn andAction:(SEL)action {
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(15, y, 150, 26)];
+    label.text = title;
+    label.textColor = [UIColor whiteColor];
+    label.font = [UIFont systemFontOfSize:13];
+    [view addSubview:label];
+    
+    CustomSwitch *customSwitch = [[CustomSwitch alloc] initWithFrame:CGRectMake(240, y, 52, 26)];
+    customSwitch.on = isOn;
+    [customSwitch addTarget:self action:action forControlEvents:UIControlEventValueChanged];
+    [view addSubview:customSwitch];
 }
 
-// ─── MENU ────────────────────────────────────
-- (void)_buildMenu {
-    CGRect sc = [UIScreen mainScreen].bounds;
-    CGFloat W = MIN(sc.size.width - 24, 360);
-    CGFloat H = MIN(sc.size.height * 0.62, 320);
-    CGFloat X = (sc.size.width - W) / 2;
-    CGFloat Y = (sc.size.height - H) / 2;
-
-    _menuBox = [[MenuBox alloc] initWithFrame:CGRectMake(X, Y, W, H)];
-    _menuBox.hidden = YES;
-    _menuBox.layer.cornerRadius = 16;
-    // glass background
-    _menuBox.backgroundColor = [UIColor colorWithRed:0.06 green:0.07 blue:0.1 alpha:0.96];
-    _menuBox.layer.borderWidth = 1;
-    _menuBox.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
-    _menuBox.layer.shadowColor = [UIColor blackColor].CGColor;
-    _menuBox.layer.shadowOffset = CGSizeMake(0,8);
-    _menuBox.layer.shadowRadius = 24;
-    _menuBox.layer.shadowOpacity = 0.6;
-    _menuBox.clipsToBounds = NO;
-    [self addSubview:_menuBox];
-
-    // Drag header
-    UIView *hdr = [[UIView alloc] initWithFrame:CGRectMake(0, 0, W, 44)];
-    hdr.backgroundColor = [UIColor colorWithWhite:1 alpha:0.04];
-    hdr.layer.cornerRadius = 16;
-    hdr.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner;
-    [_menuBox addSubview:hdr];
-    UIPanGestureRecognizer *drag = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(_menuDrag:)];
-    [hdr addGestureRecognizer:drag];
-
-    // Title
-    UILabel *ttl = [[UILabel alloc] initWithFrame:CGRectMake(16, 0, W-60, 44)];
-    ttl.text = @"✦ XYRIS";
-    ttl.textColor = _accent;
-    ttl.font = [UIFont boldSystemFontOfSize:17];
-    [hdr addSubview:ttl];
-
-    // Subtitle
-    UILabel *sub = [[UILabel alloc] initWithFrame:CGRectMake(16, 0, W-60, 44)];
-    sub.text = @"  ESP & AIM";
-    sub.textColor = [UIColor colorWithWhite:1 alpha:0.3];
-    sub.font = [UIFont systemFontOfSize:10];
-    sub.textAlignment = NSTextAlignmentRight;
-    sub.frame = CGRectMake(0, 0, W-50, 44);
-    [hdr addSubview:sub];
-
-    // Close btn
-    UIButton *cls = [UIButton buttonWithType:UIButtonTypeCustom];
-    cls.frame = CGRectMake(W-38, 8, 28, 28);
-    cls.backgroundColor = [UIColor colorWithRed:0.9 green:0.25 blue:0.25 alpha:0.85];
-    cls.layer.cornerRadius = 14;
-    [cls setTitle:@"✕" forState:UIControlStateNormal];
-    [cls setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    cls.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-    [cls addTarget:self action:@selector(_hideMenu) forControlEvents:UIControlEventTouchUpInside];
-    [hdr addSubview:cls];
-
-    // Separator
-    UIView *sep = [[UIView alloc] initWithFrame:CGRectMake(0, 44, W, 1)];
-    sep.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
-    [_menuBox addSubview:sep];
-
-    // Tab bar
-    UIView *tabBar = [[UIView alloc] initWithFrame:CGRectMake(0, 45, W, 38)];
-    tabBar.backgroundColor = [UIColor colorWithWhite:0 alpha:0.2];
-    [_menuBox addSubview:tabBar];
-
-    CGFloat tw = W / 3;
-    _btnTabMain    = [self _tabBtn:@"ESP"      frame:CGRectMake(0,    0, tw, 38) active:YES  tag:0];
-    _btnTabAim     = [self _tabBtn:@"AIM"      frame:CGRectMake(tw,   0, tw, 38) active:NO   tag:1];
-    _btnTabSetting = [self _tabBtn:@"Settings" frame:CGRectMake(tw*2, 0, tw, 38) active:NO   tag:2];
-    [tabBar addSubview:_btnTabMain];
-    [tabBar addSubview:_btnTabAim];
-    [tabBar addSubview:_btnTabSetting];
-
-    // Tab indicator line
-    UIView *ind = [[UIView alloc] initWithFrame:CGRectMake(4, 35, tw-8, 2)];
-    ind.backgroundColor = _accent;
-    ind.layer.cornerRadius = 1;
-    ind.tag = 777;
-    [tabBar addSubview:ind];
-
-    // Content
-    CGFloat cy = 83, ch = H - cy;
-    _tabMain    = [[UIView alloc] initWithFrame:CGRectMake(0, cy, W, ch)];
-    _tabAim     = [[UIView alloc] initWithFrame:CGRectMake(0, cy, W, ch)];
-    _tabSetting = [[UIView alloc] initWithFrame:CGRectMake(0, cy, W, ch)];
-    _tabAim.hidden = YES; _tabSetting.hidden = YES;
-    for (UIView *v in @[_tabMain, _tabAim, _tabSetting]) {
-        v.backgroundColor = [UIColor clearColor];
-        v.userInteractionEnabled = YES;
-        v.clipsToBounds = NO;
-        [_menuBox addSubview:v];
+- (void)setupMenuUI {
+    CGFloat menuWidth = 550;
+    CGFloat menuHeight = 320;
+    
+    menuContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, menuHeight)];
+    menuContainer.backgroundColor = [UIColor colorWithRed:0.05 green:0.05 blue:0.05 alpha:0.95];
+    menuContainer.layer.cornerRadius = 15;
+    menuContainer.layer.borderColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0].CGColor;
+    menuContainer.layer.borderWidth = 2;
+    menuContainer.clipsToBounds = YES;
+    menuContainer.hidden = YES;
+    [self addSubview:menuContainer];
+    
+    // Header
+    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, 40)];
+    headerView.backgroundColor = [UIColor clearColor];
+    [menuContainer addSubview:headerView];
+    
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(160, 5, 200, 30)];
+    titleLabel.text = @"MENU TIPA";
+    titleLabel.textColor = [UIColor whiteColor];
+    titleLabel.font = [UIFont fontWithName:@"HelveticaNeue-Bold" size:22];
+    [headerView addSubview:titleLabel];
+    
+    UILabel *subTitle = [[UILabel alloc] initWithFrame:CGRectMake(350, 12, 150, 20)];
+    subTitle.text = @"Cheat by LDVQuang";
+    subTitle.textColor = [UIColor lightGrayColor];
+    subTitle.font = [UIFont systemFontOfSize:10];
+    [headerView addSubview:subTitle];
+    
+    NSArray *colors = @[[UIColor greenColor], [UIColor yellowColor], [UIColor redColor]];
+    for (int i = 0; i < 3; i++) {
+        UIView *circle = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - 80 + (i * 25), 10, 18, 18)];
+        circle.backgroundColor = colors[i];
+        circle.layer.cornerRadius = 9;
+        
+        UILabel *btnIcon = [[UILabel alloc] initWithFrame:circle.bounds];
+        btnIcon.textAlignment = NSTextAlignmentCenter;
+        btnIcon.font = [UIFont boldSystemFontOfSize:12];
+        btnIcon.textColor = [UIColor blackColor];
+        
+        if (i == 0) btnIcon.text = @"□";
+        if (i == 1) btnIcon.text = @"-";
+        if (i == 2) {
+            btnIcon.text = @"X";
+            UITapGestureRecognizer *closeTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(hideMenu)];
+            [circle addGestureRecognizer:closeTap];
+        }
+        [circle addSubview:btnIcon];
+        [headerView addSubview:circle];
+    }
+    
+    UIPanGestureRecognizer *menuPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+    [headerView addGestureRecognizer:menuPan];
+    
+    // Sidebar Buttons
+    UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(465, 50, 75, 250)];
+    sidebar.backgroundColor = [UIColor colorWithWhite:0.8 alpha:1.0];
+    sidebar.layer.cornerRadius = 10;
+    [menuContainer addSubview:sidebar];
+    
+    NSArray *tabs = @[@"Main", @"AIM", @"Setting"];
+    for (int i = 0; i < tabs.count; i++) {
+        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+        btn.frame = CGRectMake(5, 10 + (i * 50), 65, 35);
+        btn.backgroundColor = (i == 0) ? [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0] : [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
+        [btn setTitle:tabs[i] forState:UIControlStateNormal];
+        [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        btn.layer.cornerRadius = 17.5;
+        btn.titleLabel.font = [UIFont boldSystemFontOfSize:11];
+        btn.tag = i;
+        [btn addTarget:self action:@selector(tabChanged:) forControlEvents:UIControlEventTouchUpInside];
+        [sidebar addSubview:btn];
     }
 
-    [self _buildESPTab:ch W:W];
-    [self _buildAIMTab:ch W:W];
-    [self _buildSettingsTab:ch W:W];
+    // --- MAIN TAB (ESP) ---
+    mainTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, 440, 250)];
+    mainTabContainer.backgroundColor = [UIColor clearColor];
+    [menuContainer addSubview:mainTabContainer];
+
+    // Preview Section (Left)
+    UIView *previewBorder = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 130, 250)];
+    previewBorder.layer.borderColor = [UIColor whiteColor].CGColor;
+    previewBorder.layer.borderWidth = 1;
+    previewBorder.layer.cornerRadius = 10;
+    [mainTabContainer addSubview:previewBorder];
+    
+    UILabel *pvTitle = [[UILabel alloc] initWithFrame:CGRectMake(0, 5, 130, 20)];
+    pvTitle.text = @"Preview";
+    pvTitle.textColor = [UIColor whiteColor];
+    pvTitle.textAlignment = NSTextAlignmentCenter;
+    pvTitle.font = [UIFont boldSystemFontOfSize:14];
+    [previewBorder addSubview:pvTitle];
+    
+    UIView *line = [[UIView alloc] initWithFrame:CGRectMake(10, 28, 110, 1)];
+    line.backgroundColor = [UIColor whiteColor];
+    [previewBorder addSubview:line];
+    
+    previewView = [[UIView alloc] initWithFrame:CGRectMake(0, 30, 130, 220)];
+    previewView.backgroundColor = [UIColor blackColor];
+    previewView.clipsToBounds = YES;
+    [previewBorder addSubview:previewView];
+    
+    previewContentContainer = [[UIView alloc] initWithFrame:previewView.bounds];
+    [previewView addSubview:previewContentContainer];
+    
+    [self drawPreviewElements];
+    [self updatePreviewVisibility];
+
+    // Feature Box (Right)
+    UIView *featureBox = [[UIView alloc] initWithFrame:CGRectMake(140, 0, 300, 250)];
+    featureBox.layer.borderColor = [UIColor whiteColor].CGColor;
+    featureBox.layer.borderWidth = 1;
+    featureBox.layer.cornerRadius = 10;
+    featureBox.backgroundColor = [UIColor blackColor];
+    [mainTabContainer addSubview:featureBox];
+    
+    UILabel *ftTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, 200, 20)];
+    ftTitle.text = @"ESP Feature";
+    ftTitle.textColor = [UIColor whiteColor];
+    ftTitle.font = [UIFont boldSystemFontOfSize:16];
+    [featureBox addSubview:ftTitle];
+    
+    UIView *ftLine = [[UIView alloc] initWithFrame:CGRectMake(15, 35, 270, 1)];
+    ftLine.backgroundColor = [UIColor whiteColor];
+    [featureBox addSubview:ftLine];
+    
+    [self addFeatureToView:featureBox withTitle:@"Box" atY:45 initialValue:isBox andAction:@selector(toggleBox:)];
+    [self addFeatureToView:featureBox withTitle:@"Bone" atY:80 initialValue:isBone andAction:@selector(toggleBone:)];
+    [self addFeatureToView:featureBox withTitle:@"Health" atY:115 initialValue:isHealth andAction:@selector(toggleHealth:)];
+    [self addFeatureToView:featureBox withTitle:@"Name" atY:150 initialValue:isName andAction:@selector(toggleName:)];
+    [self addFeatureToView:featureBox withTitle:@"Distance" atY:185 initialValue:isDis andAction:@selector(toggleDist:)];
+
+    UILabel *sliderLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 220, 40, 20)];
+    sliderLabel.text = @"Size:";
+    sliderLabel.textColor = [UIColor whiteColor];
+    sliderLabel.font = [UIFont systemFontOfSize:12];
+    [featureBox addSubview:sliderLabel];
+    
+    UISlider *slider = [[UISlider alloc] initWithFrame:CGRectMake(55, 220, 225, 20)];
+    slider.minimumValue = 0.5;
+    slider.maximumValue = 1.3;
+    slider.value = 1.0;
+    slider.thumbTintColor = [UIColor whiteColor];
+    slider.minimumTrackTintColor = [UIColor greenColor];
+    slider.transform = CGAffineTransformMakeScale(0.8, 0.8);
+    [slider addTarget:self action:@selector(sliderValueChanged:) forControlEvents:UIControlEventValueChanged];
+    [featureBox addSubview:slider];
+
+    // --- AIM TAB ---
+    aimTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, 440, 250)];
+    aimTabContainer.backgroundColor = [UIColor blackColor];
+    aimTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
+    aimTabContainer.layer.borderWidth = 1;
+    aimTabContainer.layer.cornerRadius = 10;
+    aimTabContainer.hidden = YES;
+    [menuContainer addSubview:aimTabContainer];
+    
+    UILabel *aimTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, 200, 20)];
+    aimTitle.text = @"Aimbot Logic";
+    aimTitle.textColor = [UIColor whiteColor];
+    aimTitle.font = [UIFont boldSystemFontOfSize:16];
+    [aimTabContainer addSubview:aimTitle];
+    
+    UIView *aimLine = [[UIView alloc] initWithFrame:CGRectMake(15, 35, 410, 1)];
+    aimLine.backgroundColor = [UIColor whiteColor];
+    [aimTabContainer addSubview:aimLine];
+    
+    [self addFeatureToView:aimTabContainer withTitle:@"Enable Aimbot" atY:45 initialValue:isAimbot andAction:@selector(toggleAimbot:)];
+    
+    // FOV Slider
+    UILabel *fovLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 85, 200, 20)];
+    fovLabel.text = @"FOV Radius:";
+    fovLabel.textColor = [UIColor whiteColor];
+    fovLabel.font = [UIFont systemFontOfSize:13];
+    [aimTabContainer addSubview:fovLabel];
+    
+    UISlider *fovSlider = [[UISlider alloc] initWithFrame:CGRectMake(15, 110, 400, 20)];
+    fovSlider.minimumValue = 10.0;
+    fovSlider.maximumValue = 400.0;
+    fovSlider.value = aimFov;
+    fovSlider.thumbTintColor = [UIColor whiteColor];
+    fovSlider.minimumTrackTintColor = [UIColor redColor];
+    [fovSlider addTarget:self action:@selector(fovChanged:) forControlEvents:UIControlEventValueChanged];
+    [aimTabContainer addSubview:fovSlider];
+    
+    // Distance Slider
+    UILabel *distLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 145, 200, 20)];
+    distLabel.text = @"Aim Distance (m):";
+    distLabel.textColor = [UIColor whiteColor];
+    distLabel.font = [UIFont systemFontOfSize:13];
+    [aimTabContainer addSubview:distLabel];
+    
+    UISlider *distSlider = [[UISlider alloc] initWithFrame:CGRectMake(15, 170, 400, 20)];
+    distSlider.minimumValue = 10.0;
+    distSlider.maximumValue = 500.0;
+    distSlider.value = aimDistance;
+    distSlider.thumbTintColor = [UIColor whiteColor];
+    distSlider.minimumTrackTintColor = [UIColor blueColor];
+    [distSlider addTarget:self action:@selector(distChanged:) forControlEvents:UIControlEventValueChanged];
+    [aimTabContainer addSubview:distSlider];
+
+
+    // --- SETTING TAB (Empty for now) ---
+    settingTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, 440, 250)];
+    settingTabContainer.backgroundColor = [UIColor blackColor];
+    settingTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
+    settingTabContainer.layer.borderWidth = 1;
+    settingTabContainer.layer.cornerRadius = 10;
+    settingTabContainer.hidden = YES;
+    [menuContainer addSubview:settingTabContainer];
+    
+    // Поднять sidebar поверх всех табов
+    [menuContainer bringSubviewToFront:sidebar];
+    
+    UILabel *stTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, 200, 20)];
+    stTitle.text = @"Settings";
+    stTitle.textColor = [UIColor whiteColor];
+    stTitle.font = [UIFont boldSystemFontOfSize:16];
+    [settingTabContainer addSubview:stTitle];
 }
 
-- (UIButton *)_tabBtn:(NSString *)title frame:(CGRect)f active:(BOOL)a tag:(NSInteger)tag {
-    UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-    btn.frame = f; btn.tag = tag;
-    btn.backgroundColor = [UIColor clearColor];
-    [btn setTitle:title forState:UIControlStateNormal];
-    [btn setTitleColor:(a ? _accent : [UIColor colorWithWhite:1 alpha:0.4]) forState:UIControlStateNormal];
-    btn.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-    [btn addTarget:self action:@selector(_tabTap:) forControlEvents:UIControlEventTouchUpInside];
-    return btn;
+- (void)tabChanged:(UIButton *)sender {
+    mainTabContainer.hidden = YES;
+    aimTabContainer.hidden = YES;
+    settingTabContainer.hidden = YES;
+    mainTabContainer.userInteractionEnabled = NO;
+    aimTabContainer.userInteractionEnabled = NO;
+    settingTabContainer.userInteractionEnabled = NO;
+    
+    // Reset buttons color
+    for (UIView *sub in sender.superview.subviews) {
+        if ([sub isKindOfClass:[UIButton class]]) {
+            UIButton *btn = (UIButton *)sub;
+            btn.backgroundColor = [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
+        }
+    }
+    // Highlight active button
+    sender.backgroundColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0];
+    
+    if (sender.tag == 0) { mainTabContainer.hidden = NO; mainTabContainer.userInteractionEnabled = YES; }
+    if (sender.tag == 1) { aimTabContainer.hidden = NO; aimTabContainer.userInteractionEnabled = YES; }
+    if (sender.tag == 2) { settingTabContainer.hidden = NO; settingTabContainer.userInteractionEnabled = YES; }
 }
 
-- (void)_tabTap:(UIButton *)btn {
-    _tabMain.hidden = YES; _tabAim.hidden = YES; _tabSetting.hidden = YES;
-    for (UIButton *b in @[_btnTabMain, _btnTabAim, _btnTabSetting])
-        [b setTitleColor:[UIColor colorWithWhite:1 alpha:0.4] forState:UIControlStateNormal];
-    [btn setTitleColor:_accent forState:UIControlStateNormal];
-    if (btn.tag == 0) _tabMain.hidden    = NO;
-    if (btn.tag == 1) _tabAim.hidden     = NO;
-    if (btn.tag == 2) _tabSetting.hidden = NO;
-    // Move indicator
-    UIView *tabBar = btn.superview;
-    UIView *ind = [tabBar viewWithTag:777];
-    CGFloat tw = btn.bounds.size.width;
-    [UIView animateWithDuration:0.2 animations:^{
-        ind.frame = CGRectMake(btn.frame.origin.x + 4, 35, tw - 8, 2);
+- (void)drawPreviewElements {
+    CGFloat w = previewView.frame.size.width;  
+    CGFloat h = previewView.frame.size.height; 
+    CGFloat cx = w / 2;
+    CGFloat startY = 45; 
+    
+    previewNameLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 20, w, 15)];
+    previewNameLabel.text = @"ID PlayerName";
+    previewNameLabel.textColor = [UIColor greenColor];
+    previewNameLabel.textAlignment = NSTextAlignmentCenter;
+    previewNameLabel.font = [UIFont boldSystemFontOfSize:11];
+    [previewContentContainer addSubview:previewNameLabel];
+    
+    CGFloat barW = 70;
+    healthBarContainer = [[UIView alloc] initWithFrame:CGRectMake(cx - barW/2, 38, barW, 2)];
+    healthBarContainer.backgroundColor = [UIColor greenColor];
+    [previewContentContainer addSubview:healthBarContainer];
+    
+    CGFloat boxW = 70;
+    CGFloat boxH = 130;
+    CGFloat bx = cx - boxW/2;
+    CGFloat by = startY;
+    
+    boxContainer = [[UIView alloc] initWithFrame:previewView.bounds];
+    [previewContentContainer addSubview:boxContainer];
+    
+    CGFloat lineLen = 15;
+    UIColor *boxColor = [UIColor whiteColor];
+    [self addLineRect:CGRectMake(bx, by, lineLen, 1) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx, by, 1, lineLen) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx + boxW - lineLen, by, lineLen, 1) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx + boxW, by, 1, lineLen) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx, by + boxH, lineLen, 1) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx, by + boxH - lineLen, 1, lineLen) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx + boxW - lineLen, by + boxH, lineLen, 1) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx + boxW, by + boxH - lineLen, 1, lineLen) color:boxColor parent:boxContainer];
+
+    skeletonContainer = [[UIView alloc] initWithFrame:previewView.bounds];
+    [previewContentContainer addSubview:skeletonContainer];
+    
+    UIColor *skelColor = [UIColor whiteColor];
+    CGFloat skelThick = 1.0;
+    
+    CGFloat headRad = 7;
+    CGFloat headY = by + 15;
+    UIView *head = [[UIView alloc] initWithFrame:CGRectMake(cx - headRad, headY - headRad, headRad*2, headRad*2)];
+    head.layer.borderColor = skelColor.CGColor;
+    head.layer.borderWidth = skelThick;
+    head.layer.cornerRadius = headRad;
+    [skeletonContainer addSubview:head];
+    
+    CGPoint pNeck = CGPointMake(cx, headY + headRad);
+    CGPoint pPelvis = CGPointMake(cx, by + 65);
+    CGPoint pShoulderL = CGPointMake(cx - 15, by + 30);
+    CGPoint pShoulderR = CGPointMake(cx + 15, by + 30);
+    CGPoint pElbowL = CGPointMake(cx - 20, by + 50);
+    CGPoint pElbowR = CGPointMake(cx + 20, by + 50);
+    CGPoint pHandL = CGPointMake(cx - 20, by + 70);
+    CGPoint pHandR = CGPointMake(cx + 20, by + 70);
+    CGPoint pKneeL = CGPointMake(cx - 12, by + 95);
+    CGPoint pKneeR = CGPointMake(cx + 12, by + 95);
+    CGPoint pFootL = CGPointMake(cx - 15, by + 125);
+    CGPoint pFootR = CGPointMake(cx + 15, by + 125);
+    
+    [self addLineFrom:pNeck to:pPelvis color:skelColor width:skelThick inView:skeletonContainer];
+    [self addLineFrom:pShoulderL to:pShoulderR color:skelColor width:skelThick inView:skeletonContainer];
+    [self addLineFrom:CGPointMake(cx, by+30) to:pShoulderL color:skelColor width:skelThick inView:skeletonContainer];
+    [self addLineFrom:pShoulderL to:pElbowL color:skelColor width:skelThick inView:skeletonContainer];
+    [self addLineFrom:pElbowL to:pHandL color:skelColor width:skelThick inView:skeletonContainer];
+    [self addLineFrom:CGPointMake(cx, by+30) to:pShoulderR color:skelColor width:skelThick inView:skeletonContainer];
+    [self addLineFrom:pShoulderR to:pElbowR color:skelColor width:skelThick inView:skeletonContainer];
+    [self addLineFrom:pElbowR to:pHandR color:skelColor width:skelThick inView:skeletonContainer];
+    [self addLineFrom:pPelvis to:pKneeL color:skelColor width:skelThick inView:skeletonContainer];
+    [self addLineFrom:pKneeL to:pFootL color:skelColor width:skelThick inView:skeletonContainer];
+    [self addLineFrom:pPelvis to:pKneeR color:skelColor width:skelThick inView:skeletonContainer];
+    [self addLineFrom:pKneeR to:pFootR color:skelColor width:skelThick inView:skeletonContainer];
+    
+    previewDistLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, by + boxH + 5, w, 15)];
+    previewDistLabel.text = @"Distance";
+    previewDistLabel.textColor = [UIColor whiteColor];
+    previewDistLabel.textAlignment = NSTextAlignmentCenter;
+    previewDistLabel.font = [UIFont systemFontOfSize:10];
+    [previewContentContainer addSubview:previewDistLabel];
+}
+
+- (void)updatePreviewVisibility {
+    boxContainer.hidden = !isBox;
+    skeletonContainer.hidden = !isBone;
+    healthBarContainer.hidden = !isHealth;
+    previewNameLabel.hidden = !isName;
+    previewDistLabel.hidden = !isDis;
+    
+    if (isBox && isBone) {
+        [previewContentContainer bringSubviewToFront:boxContainer];
+    }
+}
+
+// --- Toggle Handlers ---
+- (void)toggleBox:(CustomSwitch *)sender { isBox = sender.isOn; boxContainer.hidden = !isBox; }
+- (void)toggleBone:(CustomSwitch *)sender { isBone = sender.isOn; skeletonContainer.hidden = !isBone; }
+- (void)toggleHealth:(CustomSwitch *)sender { isHealth = sender.isOn; healthBarContainer.hidden = !isHealth; }
+- (void)toggleName:(CustomSwitch *)sender { isName = sender.isOn; previewNameLabel.hidden = !isName; }
+- (void)toggleDist:(CustomSwitch *)sender { isDis = sender.isOn; previewDistLabel.hidden = !isDis; }
+- (void)toggleAimbot:(CustomSwitch *)sender { isAimbot = sender.isOn; }
+
+- (void)fovChanged:(UISlider *)sender { aimFov = sender.value; }
+- (void)distChanged:(UISlider *)sender { aimDistance = sender.value; }
+
+- (void)addLineRect:(CGRect)frame color:(UIColor *)color parent:(UIView *)parent {
+    UIView *v = [[UIView alloc] initWithFrame:frame];
+    v.backgroundColor = color;
+    [parent addSubview:v];
+}
+- (void)addLineFrom:(CGPoint)p1 to:(CGPoint)p2 color:(UIColor *)color width:(CGFloat)width inView:(UIView *)view {
+    UIView *line = [[UIView alloc] init];
+    line.backgroundColor = color;
+    CGFloat dx = p2.x - p1.x;
+    CGFloat dy = p2.y - p1.y;
+    CGFloat len = sqrt(dx*dx + dy*dy);
+    CGFloat angle = atan2(dy, dx);
+    line.frame = CGRectMake(p1.x, p1.y, len, width);
+    line.layer.anchorPoint = CGPointMake(0, 0.5);
+    line.center = p1;
+    line.transform = CGAffineTransformMakeRotation(angle);
+    [view addSubview:line];
+}
+
+- (void)sliderValueChanged:(UISlider *)sender {
+    previewScale = sender.value;
+    [UIView animateWithDuration:0.1 animations:^{
+        self->previewContentContainer.transform = CGAffineTransformMakeScale(self->previewScale, self->previewScale);
     }];
 }
 
-// ─── ESP TAB ─────────────────────────────────
-- (void)_buildESPTab:(CGFloat)H W:(CGFloat)W {
-    CGFloat rowH = 36, y = 8;
-    y = [self _row:_tabMain title:@"Box ESP"    icon:@"⬜" y:y on:isBox    sel:@selector(_togBox:)    W:W h:rowH];
-    y = [self _row:_tabMain title:@"Skeleton"   icon:@"🦴" y:y on:isBone   sel:@selector(_togBone:)   W:W h:rowH];
-    y = [self _row:_tabMain title:@"Health Bar" icon:@"❤" y:y on:isHealth sel:@selector(_togHP:)     W:W h:rowH];
-    y = [self _row:_tabMain title:@"Name Tag"   icon:@"🏷" y:y on:isName   sel:@selector(_togName:)  W:W h:rowH];
-    y = [self _row:_tabMain title:@"Distance"   icon:@"📏" y:y on:isDis    sel:@selector(_togDis:)   W:W h:rowH];
-
-    UIView *sliderRow = [[UIView alloc] initWithFrame:CGRectMake(0, y, W, 38)];
-    sliderRow.backgroundColor = [UIColor colorWithWhite:1 alpha:0.03];
-    sliderRow.layer.cornerRadius = 8;
-    [_tabMain addSubview:sliderRow];
-
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(12, 0, 60, 38)];
-    lbl.text = @"Size"; lbl.textColor = [UIColor colorWithWhite:1 alpha:0.6];
-    lbl.font = [UIFont systemFontOfSize:12]; [sliderRow addSubview:lbl];
-
-    UISlider *sl = [[UISlider alloc] initWithFrame:CGRectMake(60, 7, W-76, 24)];
-    sl.minimumValue = 0.5; sl.maximumValue = 1.5; sl.value = 1.0;
-    sl.minimumTrackTintColor = _accent;
-    sl.maximumTrackTintColor = [UIColor colorWithWhite:1 alpha:0.15];
-    sl.thumbTintColor = [UIColor whiteColor];
-    [sl addTarget:self action:@selector(_sizeChanged:) forControlEvents:UIControlEventValueChanged];
-    [sliderRow addSubview:sl];
-}
-
-// ─── AIM TAB ─────────────────────────────────
-- (void)_buildAIMTab:(CGFloat)H W:(CGFloat)W {
-    CGFloat y = 8;
-    y = [self _row:_tabAim title:@"Aimbot" icon:@"🎯" y:y on:isAimbot sel:@selector(_togAim:) W:W h:38];
-
-    // FOV
-    [self _sliderSection:_tabAim title:@"FOV Radius" y:y+4 W:W
-              minVal:10 maxVal:400 val:aimFov color:[UIColor colorWithRed:1 green:0.3 blue:0.3 alpha:1]
-              sel:@selector(_fovChanged:)];
-    y += 68;
-    // Distance
-    [self _sliderSection:_tabAim title:@"Aim Distance (m)" y:y+4 W:W
-              minVal:10 maxVal:500 val:aimDistance color:[UIColor colorWithRed:0.3 green:0.6 blue:1 alpha:1]
-              sel:@selector(_distChanged:)];
-}
-
-- (void)_sliderSection:(UIView *)parent title:(NSString *)t y:(CGFloat)y W:(CGFloat)W
-               minVal:(float)mn maxVal:(float)mx val:(float)v color:(UIColor *)c sel:(SEL)sel {
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(14, y, W-28, 18)];
-    l.text = t; l.textColor = [UIColor colorWithWhite:1 alpha:0.5];
-    l.font = [UIFont systemFontOfSize:11]; [parent addSubview:l];
-    UISlider *s = [[UISlider alloc] initWithFrame:CGRectMake(12, y+20, W-24, 28)];
-    s.minimumValue = mn; s.maximumValue = mx; s.value = v;
-    s.minimumTrackTintColor = c;
-    s.maximumTrackTintColor = [UIColor colorWithWhite:1 alpha:0.12];
-    s.thumbTintColor = [UIColor whiteColor];
-    [s addTarget:self action:sel forControlEvents:UIControlEventValueChanged];
-    [parent addSubview:s];
-}
-
-// ─── SETTINGS TAB ────────────────────────────
-- (void)_buildSettingsTab:(CGFloat)H W:(CGFloat)W {
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(16, 20, W-32, 40)];
-    l.text = @"More settings coming soon…";
-    l.textColor = [UIColor colorWithWhite:1 alpha:0.25];
-    l.font = [UIFont italicSystemFontOfSize:13];
-    [_tabSetting addSubview:l];
-}
-
-// ─── Row helper ──────────────────────────────
-- (CGFloat)_row:(UIView *)p title:(NSString *)t icon:(NSString *)icon
-              y:(CGFloat)y on:(BOOL)on sel:(SEL)sel W:(CGFloat)W h:(CGFloat)h {
-    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(8, y, W-16, h)];
-    row.backgroundColor = [UIColor colorWithWhite:1 alpha:0.03];
-    row.layer.cornerRadius = 8;
-    row.userInteractionEnabled = YES;
-    [p addSubview:row];
-
-    UILabel *ic = [[UILabel alloc] initWithFrame:CGRectMake(8, 0, 28, h)];
-    ic.text = icon; ic.font = [UIFont systemFontOfSize:14];
-    ic.textAlignment = NSTextAlignmentCenter;
-    [row addSubview:ic];
-
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(38, 0, W-110, h)];
-    lbl.text = t; lbl.textColor = [UIColor whiteColor];
-    lbl.font = [UIFont systemFontOfSize:14];
-    [row addSubview:lbl];
-
-    NeonSwitch *sw = [[NeonSwitch alloc] initWithFrame:CGRectMake(W-16-58, (h-26)/2, 52, 26)];
-    sw.on = on;
-    sw.userInteractionEnabled = YES;
-    [sw addTarget:self action:sel forControlEvents:UIControlEventValueChanged];
-    [row addSubview:sw];
-
-    return y + h + 4;
-}
-
-// ─── Show / Hide / Drag ──────────────────────
-- (void)_showMenu {
-    _menuBox.hidden = NO;
-    _btnFloat.hidden = YES;
-    _menuBox.transform = CGAffineTransformMakeScale(0.85, 0.85);
-    _menuBox.alpha = 0;
-    [UIView animateWithDuration:0.28 delay:0
-         usingSpringWithDamping:0.75 initialSpringVelocity:0.3
-                        options:0 animations:^{
-        self->_menuBox.transform = CGAffineTransformIdentity;
-        self->_menuBox.alpha = 1;
-    } completion:nil];
-}
-
-- (void)_hideMenu {
-    [UIView animateWithDuration:0.2 animations:^{
-        self->_menuBox.transform = CGAffineTransformMakeScale(0.9, 0.9);
-        self->_menuBox.alpha = 0;
-    } completion:^(BOOL done){
-        self->_menuBox.hidden = YES;
-        self->_menuBox.transform = CGAffineTransformIdentity;
-        self->_btnFloat.hidden = NO;
-    }];
-}
-
-- (void)_menuDrag:(UIPanGestureRecognizer *)gr {
-    CGPoint d = [gr translationInView:self];
-    CGRect b = self.bounds;
-    CGPoint c = _menuBox.center;
-    c.x = MAX(_menuBox.bounds.size.width/2, MIN(b.size.width  - _menuBox.bounds.size.width/2,  c.x + d.x));
-    c.y = MAX(_menuBox.bounds.size.height/2,MIN(b.size.height - _menuBox.bounds.size.height/2, c.y + d.y));
-    _menuBox.center = c;
-    [gr setTranslation:CGPointZero inView:self];
-}
-
-// ─── Toggles ─────────────────────────────────
-- (void)_togBox:(NeonSwitch *)s  { isBox    = s.isOn; }
-- (void)_togBone:(NeonSwitch *)s { isBone   = s.isOn; }
-- (void)_togHP:(NeonSwitch *)s   { isHealth = s.isOn; }
-- (void)_togName:(NeonSwitch *)s { isName   = s.isOn; }
-- (void)_togDis:(NeonSwitch *)s  { isDis    = s.isOn; }
-- (void)_togAim:(NeonSwitch *)s  { isAimbot = s.isOn; }
-- (void)_sizeChanged:(UISlider *)s   { }
-- (void)_fovChanged:(UISlider *)s    { aimFov      = s.value; }
-- (void)_distChanged:(UISlider *)s   { aimDistance = s.value; }
-
-// ─── Layout ──────────────────────────────────
 - (void)layoutSubviews {
     [super layoutSubviews];
     if (self.superview) self.frame = self.superview.bounds;
-    if (_btnFloat) {
-        CGRect b = self.bounds; CGPoint c = _btnFloat.center; CGFloat r = 28;
-        c.x = MAX(r, MIN(b.size.width-r,  c.x));
-        c.y = MAX(r, MIN(b.size.height-r, c.y));
-        _btnFloat.center = c;
+    CGRect screenBounds = self.bounds;
+    // Центрировать меню при повороте если оно открыто
+    if (menuContainer && !menuContainer.hidden) {
+        menuContainer.center = CGPointMake(screenBounds.size.width / 2, screenBounds.size.height / 2);
+    }
+    if (floatingButton) {
+        CGPoint btnCenter = floatingButton.center;
+        CGFloat halfW = floatingButton.bounds.size.width / 2;
+        CGFloat halfH = floatingButton.bounds.size.height / 2;
+        if (btnCenter.x < halfW) btnCenter.x = halfW;
+        if (btnCenter.x > screenBounds.size.width - halfW) btnCenter.x = screenBounds.size.width - halfW;
+        if (btnCenter.y < halfH) btnCenter.y = halfH;
+        if (btnCenter.y > screenBounds.size.height - halfH) btnCenter.y = screenBounds.size.height - halfH;
+        floatingButton.center = btnCenter;
     }
 }
 
-// ─── ESP render ──────────────────────────────
+- (void)showMenu {
+    menuContainer.hidden = NO;
+    floatingButton.hidden = YES;
+    menuContainer.transform = CGAffineTransformMakeScale(0.1, 0.1);
+    [self centerMenu];
+    [UIView animateWithDuration:0.3 animations:^{
+        self->menuContainer.transform = CGAffineTransformIdentity;
+    } completion:^(BOOL finished) {
+        [self centerMenu];
+    }];
+    [self updatePreviewVisibility];
+}
+
+- (void)hideMenu {
+    [UIView animateWithDuration:0.3 animations:^{
+        self->menuContainer.transform = CGAffineTransformMakeScale(0.1, 0.1);
+    } completion:^(BOOL finished) {
+        self->menuContainer.hidden = YES;
+        self->floatingButton.hidden = NO;
+        self->menuContainer.transform = CGAffineTransformIdentity;
+    }];
+}
+
+- (void)centerMenu {
+    CGRect bounds = self.bounds;
+    if (CGRectIsEmpty(bounds)) {
+        bounds = [UIScreen mainScreen].bounds;
+    }
+    menuContainer.center = CGPointMake(bounds.size.width / 2, bounds.size.height / 2);
+}
+- (void)handlePan:(UIPanGestureRecognizer *)gesture {
+    CGPoint touchPoint = [gesture locationInView:self];
+    if (gesture.state == UIGestureRecognizerStateBegan) {
+        _initialTouchPoint = touchPoint;
+    } else if (gesture.state == UIGestureRecognizerStateChanged) {
+        CGFloat deltaX = touchPoint.x - _initialTouchPoint.x;
+        CGFloat deltaY = touchPoint.y - _initialTouchPoint.y;
+        UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
+        viewToMove.center = CGPointMake(viewToMove.center.x + deltaX, viewToMove.center.y + deltaY);
+        _initialTouchPoint = touchPoint;
+    }
+}
+
 - (void)SetUpBase {
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ Moudule_Base = (uint64_t)GetGameModule_Base((char*)"freefireth"); });
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        Moudule_Base = (uint64_t)GetGameModule_Base((char*)"freefireth");
+    });
 }
 
 - (void)updateFrame {
     if (!self.window) return;
-    [CATransaction begin]; [CATransaction setDisableActions:YES];
-    for (CALayer *l in self.drawingLayers) [l removeFromSuperlayer];
-    [self.drawingLayers removeAllObjects];
-    if (isAimbot) {
-        float cx = self.bounds.size.width/2, cy2 = self.bounds.size.height/2;
-        CAShapeLayer *c = [CAShapeLayer layer];
-        c.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx,cy2) radius:aimFov startAngle:0 endAngle:2*M_PI clockwise:YES].CGPath;
-        c.fillColor = [UIColor clearColor].CGColor;
-        c.strokeColor = [UIColor colorWithRed:0 green:0.85 blue:0.45 alpha:0.5].CGColor;
-        c.lineWidth = 1.5;
-        [self.drawingLayers addObject:c];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    for (CALayer *layer in self.drawingLayers) {
+        [layer removeFromSuperlayer];
     }
+    [self.drawingLayers removeAllObjects];
+    
+    // Draw FOV Circle
+    if (isAimbot) {
+        float screenX = self.bounds.size.width / 2;
+        float screenY = self.bounds.size.height / 2;
+        
+        CAShapeLayer *circleLayer = [CAShapeLayer layer];
+        UIBezierPath *path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(screenX, screenY) radius:aimFov startAngle:0 endAngle:2 * M_PI clockwise:YES];
+        circleLayer.path = path.CGPath;
+        circleLayer.fillColor = [UIColor clearColor].CGColor;
+        circleLayer.strokeColor = [UIColor colorWithRed:1.0 green:1.0 blue:1.0 alpha:0.5].CGColor;
+        circleLayer.lineWidth = 1.0;
+        [self.drawingLayers addObject:circleLayer];
+    }
+    
     [self renderESPToLayers:self.drawingLayers];
-    for (CALayer *l in self.drawingLayers) [self.layer addSublayer:l];
+    
+    for (CALayer *layer in self.drawingLayers) {
+        [self.layer addSublayer:layer];
+    }
     [CATransaction commit];
+    [self setNeedsDisplay];
 }
 
-- (void)hideMenu { [self _hideMenu]; }
-- (void)showMenu  { [self _showMenu]; }
-- (void)dealloc { [self.displayLink invalidate]; self.displayLink = nil; }
-
-static inline void _BL(NSMutableArray<CALayer*>*L,CGPoint a,CGPoint b,UIColor*c,CGFloat w){
-    CGFloat dx=b.x-a.x,dy=b.y-a.y,len=sqrtf(dx*dx+dy*dy);
-    if(len<2)return;
-    CALayer*l=[CALayer layer];l.backgroundColor=c.CGColor;
-    l.bounds=CGRectMake(0,0,len,w);l.position=a;l.anchorPoint=CGPointMake(0,0.5);
-    l.transform=CATransform3DMakeRotation(atan2f(dy,dx),0,0,1);[L addObject:l];
+- (void)dealloc {
+    [self.displayLink invalidate];
+    self.displayLink = nil;
 }
-Quaternion _GRL(Vector3 t,float b,Vector3 m){return Quaternion::LookRotation((t+Vector3(0,b,0))-m,Vector3(0,1,0));}
-void _SA(uint64_t p,Quaternion r){if(!isVaildPtr(p))return;WriteAddr<Quaternion>(p+0x53C,r);}
-bool _GF(uint64_t p){if(!isVaildPtr(p))return false;return ReadAddr<bool>(p+0x750);}
+
+static inline void DrawBoneLine(
+    NSMutableArray<CALayer *> *layers,
+    CGPoint p1,
+    CGPoint p2,
+    UIColor *color,
+    CGFloat width
+) {
+    CGFloat dx = p2.x - p1.x;
+    CGFloat dy = p2.y - p1.y;
+    CGFloat len = sqrt(dx*dx + dy*dy);
+    if (len < 2.0f) return;
+
+    CALayer *line = [CALayer layer];
+    line.backgroundColor = color.CGColor;
+    line.bounds = CGRectMake(0, 0, len, width);
+    line.position = p1;
+    line.anchorPoint = CGPointMake(0, 0.5);
+    line.transform = CATransform3DMakeRotation(atan2(dy, dx), 0, 0, 1);
+    [layers addObject:line];
+}
+
+
+Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 myLoc){
+    return Quaternion::LookRotation((targetLocation + Vector3(0, y_bias, 0)) - myLoc, Vector3(0, 1, 0));
+}
+
+void set_aim(uint64_t player, Quaternion rotation) {
+    if (!isVaildPtr(player)) return;
+    
+    WriteAddr<Quaternion>(player + 0x53C, rotation);
+}
+
+bool get_IsFiring(uint64_t player) {
+    if (!isVaildPtr(player)) return false;
+    bool fireState = ReadAddr<bool>(player + 0x750);
+    return fireState;
+}
+
+
+bool get_IsVisible(uint64_t player) {
+    if (!isVaildPtr(player)) return false;
+    
+    uint64_t visibleObj = ReadAddr<uint64_t>(player + 0x9B0);
+    if (!isVaildPtr(visibleObj)) return false;
+
+    int visibleFlags = ReadAddr<int>(visibleObj + 0x10); 
+    return (visibleFlags & 0x1) == 0;
+}
+
 
 - (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers {
-    if(Moudule_Base==(uint64_t)-1)return;
-    uint64_t mg=getMatchGame(Moudule_Base),cam=CameraMain(mg);
-    if(!isVaildPtr(cam))return;
-    uint64_t match=getMatch(mg); if(!isVaildPtr(match))return;
-    uint64_t me=getLocalPlayer(match); if(!isVaildPtr(me))return;
-    Vector3 myL=getPositionExt(ReadAddr<uint64_t>(me+0x318));
-    uint64_t pl=ReadAddr<uint64_t>(match+0x120),tv=ReadAddr<uint64_t>(pl+0x28);
-    int cnt=ReadAddr<int>(tv+0x18);
-    float*mx=GetViewMatrix(cam),vW=self.bounds.size.width,vH=self.bounds.size.height;
-    CGPoint sc=CGPointMake(vW/2,vH/2);
-    uint64_t best=0; int minHP=99999; bool fire=false;
-    for(int i=0;i<cnt;i++){
-        uint64_t P=ReadAddr<uint64_t>(tv+0x20+8*i);
-        if(!isVaildPtr(P)||isLocalTeamMate(me,P))continue;
-        int hp=get_CurHP(P); if(hp<=0)continue;
-        Vector3 hd=getPositionExt(getHead(P));
-        fire=_GF(me);
-        float dis=Vector3::Distance(myL,hd); if(dis>400)continue;
-        if(isAimbot&&dis<=aimDistance){
-            Vector3 s=WorldToScreen(hd,mx,vW,vH);float dx=s.x-sc.x,dy=s.y-sc.y;
-            if(sqrtf(dx*dx+dy*dy)<=aimFov&&hp<minHP){minHP=hp;best=P;}
+    if (Moudule_Base == -1) return;
+
+    uint64_t matchGame = getMatchGame(Moudule_Base);
+    uint64_t camera = CameraMain(matchGame);
+    if (!isVaildPtr(camera)) return;
+
+    uint64_t match = getMatch(matchGame);
+    if (!isVaildPtr(match)) return;
+
+    uint64_t myPawnObject = getLocalPlayer(match);
+    if (!isVaildPtr(myPawnObject)) return;
+    
+    uint64_t mainCameraTransform = ReadAddr<uint64_t>(myPawnObject + 0x318);
+    Vector3 myLocation = getPositionExt(mainCameraTransform);
+    
+    uint64_t player = ReadAddr<uint64_t>(match + 0x120);
+    uint64_t tValue = ReadAddr<uint64_t>(player + 0x28);
+    int coutValue = ReadAddr<int>(tValue + 0x18);
+    
+    float *matrix = GetViewMatrix(camera);
+    float viewWidth = self.bounds.size.width;
+    float viewHeight = self.bounds.size.height;
+    CGPoint screenCenter = CGPointMake(viewWidth / 2, viewHeight / 2);
+
+    // Variables for Aimbot
+    uint64_t bestTarget = 0;
+    int minHP = 99999;
+    bool isVis = false;
+    bool isFire = false;
+    
+    for (int i = 0; i < coutValue; i++) {
+        uint64_t PawnObject = ReadAddr<uint64_t>(tValue + 0x20 + 8 * i);
+        if (!isVaildPtr(PawnObject)) continue;
+
+        bool isLocalTeam = isLocalTeamMate(myPawnObject, PawnObject);
+        if (isLocalTeam) continue;
+        
+        int CurHP = get_CurHP(PawnObject);
+        if (CurHP <= 0) continue; 
+
+        Vector3 HeadPos     = getPositionExt(getHead(PawnObject));
+        isFire              = get_IsFiring(myPawnObject);
+        
+        float dis = Vector3::Distance(myLocation, HeadPos);
+        if (dis > 400.0f) continue;
+
+        
+        if (isAimbot && dis <= aimDistance) {
+            Vector3 w2sAim = WorldToScreen(HeadPos, matrix, viewWidth, viewHeight);
+
+            float deltaX = w2sAim.x - screenCenter.x;
+            float deltaY = w2sAim.y - screenCenter.y;
+            float distanceFromCenter = sqrt(deltaX * deltaX + deltaY * deltaY);
+            
+            if (distanceFromCenter <= aimFov) {
+                if (CurHP < minHP) {
+                    minHP = CurHP;
+                    
+                    isVis = get_IsVisible(PawnObject);
+                    bestTarget = PawnObject;
+                }
+            }
+            
         }
-        if(dis>220)continue;
-        Vector3 toe=getPositionExt(getRightToeNode(P));
-        Vector3 sh=WorldToScreen(hd,mx,vW,vH),st=WorldToScreen(toe,mx,vW,vH);
-        float bH=fabsf(sh.y-st.y),bW=bH*0.5f,bx=sh.x-bW/2,by=sh.y;
-        if(isBox){CALayer*l=[CALayer layer];l.frame=CGRectMake(bx,by,bW,bH);
-            l.borderColor=[UIColor colorWithRed:1 green:0.2 blue:0.2 alpha:0.85].CGColor;
-            l.borderWidth=1.2;l.cornerRadius=3;[layers addObject:l];}
-        if(isName){NSString*n=GetNickName(P);if(n.length){
-            CATextLayer*t=[CATextLayer layer];t.string=n;t.fontSize=10;
-            t.frame=CGRectMake(bx-20,by-15,bW+40,14);t.alignmentMode=kCAAlignmentCenter;
-            t.foregroundColor=_accent.CGColor;[layers addObject:t];}}
-        if(isHealth){int mhp=get_MaxHP(P);if(mhp>0){
-            float r=MAX(0,MIN(1,(float)hp/mhp)),brh=bH,fh=brh*r;
-            CALayer*bg=[CALayer layer];bg.frame=CGRectMake(bx-6,by,3,brh);
-            bg.backgroundColor=[UIColor colorWithWhite:0 alpha:0.5].CGColor;[layers addObject:bg];
-            CALayer*fg=[CALayer layer];fg.frame=CGRectMake(bx-6,by+brh-fh,3,fh);
-            UIColor*hc=r>0.5f?[UIColor colorWithRed:0.2 green:0.9 blue:0.3 alpha:1]:[UIColor colorWithRed:0.9 green:0.3 blue:0.2 alpha:1];
-            fg.backgroundColor=hc.CGColor;[layers addObject:fg];}}
-        if(isDis){CATextLayer*t=[CATextLayer layer];
-            t.string=[NSString stringWithFormat:@"%.0fm",dis];t.fontSize=9;
-            t.frame=CGRectMake(bx-10,by+bH+2,bW+20,12);t.alignmentMode=kCAAlignmentCenter;
-            t.foregroundColor=[UIColor colorWithWhite:1 alpha:0.7].CGColor;[layers addObject:t];}
-        if(isBone){
-            Vector3 hip=getPositionExt(getHip(P));
-            #define _W(v) WorldToScreen(v,mx,vW,vH)
-            #define _C(v) CGPointMake(_W(v).x,_W(v).y)
-            UIColor*bc=[UIColor colorWithWhite:1 alpha:0.7];
-            _BL(layers,_C(hd),_C(hip),bc,1);
-            Vector3 ls=getPositionExt(getLeftShoulder(P)),rs=getPositionExt(getRightShoulder(P));
-            Vector3 le=getPositionExt(getLeftElbow(P)),re=getPositionExt(getRightElbow(P));
-            Vector3 lh=getPositionExt(getLeftHand(P)),rh=getPositionExt(getRightHand(P));
-            Vector3 la=getPositionExt(getLeftAnkle(P)),ra=getPositionExt(getRightAnkle(P));
-            _BL(layers,_C(ls),_C(rs),bc,1);
-            _BL(layers,_C(ls),_C(le),bc,1);_BL(layers,_C(le),_C(lh),bc,1);
-            _BL(layers,_C(rs),_C(re),bc,1);_BL(layers,_C(re),_C(rh),bc,1);
-            _BL(layers,_C(hip),_C(la),bc,1);_BL(layers,_C(hip),_C(ra),bc,1);
-            #undef _W
-            #undef _C
+
+        if (dis > 220.0f) continue; 
+
+        Vector3 RightToePos = getPositionExt(getRightToeNode(PawnObject));
+        Vector3 HipPos      = getPositionExt(getHip(PawnObject));
+        Vector3 L_Ankle     = getPositionExt(getLeftAnkle(PawnObject));
+        Vector3 R_Ankle     = getPositionExt(getRightAnkle(PawnObject));
+        
+        Vector3 L_Shoulder  = getPositionExt(getLeftShoulder(PawnObject));
+        Vector3 R_Shoulder  = getPositionExt(getRightShoulder(PawnObject));
+        Vector3 L_Elbow     = getPositionExt(getLeftElbow(PawnObject));
+        Vector3 R_Elbow     = getPositionExt(getRightElbow(PawnObject));
+        Vector3 L_Hand      = getPositionExt(getLeftHand(PawnObject));
+        Vector3 R_Hand      = getPositionExt(getRightHand(PawnObject));
+
+        Vector3 HeadTop     = HeadPos; HeadTop.y += 0.2f;
+        Vector3 w2sHead     = WorldToScreen(HeadTop, matrix, viewWidth, viewHeight);
+        Vector3 w2sToe      = WorldToScreen(RightToePos, matrix, viewWidth, viewHeight);
+
+        Vector3 wHead       = WorldToScreen(HeadPos, matrix, viewWidth, viewHeight);
+        Vector3 wHip        = WorldToScreen(HipPos, matrix, viewWidth, viewHeight);
+
+        if (isBone) {
+             Vector3 wLS = WorldToScreen(L_Shoulder, matrix, viewWidth, viewHeight);
+             Vector3 wRS = WorldToScreen(R_Shoulder, matrix, viewWidth, viewHeight);
+             Vector3 wLE = WorldToScreen(L_Elbow, matrix, viewWidth, viewHeight);
+             Vector3 wRE = WorldToScreen(R_Elbow, matrix, viewWidth, viewHeight);
+             Vector3 wLH = WorldToScreen(L_Hand, matrix, viewWidth, viewHeight);
+             Vector3 wRH = WorldToScreen(R_Hand, matrix, viewWidth, viewHeight);
+             Vector3 wLA = WorldToScreen(L_Ankle, matrix, viewWidth, viewHeight);
+             Vector3 wRA = WorldToScreen(R_Ankle, matrix, viewWidth, viewHeight);
+
+            UIColor *boneColor = [UIColor whiteColor];
+            CGFloat boneWidth = 1.0f;
+
+            DrawBoneLine(layers, CGPointMake(wHead.x, wHead.y), CGPointMake(wHip.x, wHip.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wLS.x, wLS.y), CGPointMake(wRS.x, wRS.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wLS.x, wLS.y), CGPointMake(wLE.x, wLE.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wLE.x, wLE.y), CGPointMake(wLH.x, wLH.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wRS.x, wRS.y), CGPointMake(wRE.x, wRE.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wRE.x, wRE.y), CGPointMake(wRH.x, wRH.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wLA.x, wLA.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wRA.x, wRA.y), boneColor, boneWidth);
+        }
+
+        float boxHeight = abs(w2sHead.y - w2sToe.y);
+        float boxWidth = boxHeight * 0.5f;
+        float x = w2sHead.x - boxWidth * 0.5f;
+        float y = w2sHead.y;
+        
+        if (isBox) {
+            CALayer *boxLayer = [CALayer layer];
+            boxLayer.frame = CGRectMake(x, y, boxWidth, boxHeight);
+            boxLayer.borderColor = [UIColor redColor].CGColor;
+            boxLayer.borderWidth = 1.0;
+            boxLayer.cornerRadius = 3.0;
+            [layers addObject:boxLayer];
+        }
+        
+        if (isName) {
+            NSString *Name = GetNickName(PawnObject);
+            if (Name.length > 0) {
+                CATextLayer *nameLayer = [CATextLayer layer];
+                nameLayer.string = Name;
+                nameLayer.fontSize = 10;
+                nameLayer.frame = CGRectMake(x - 20, y - 15, boxWidth + 40, 15);
+                nameLayer.alignmentMode = kCAAlignmentCenter;
+                nameLayer.foregroundColor = [UIColor greenColor].CGColor;
+                [layers addObject:nameLayer];
+            }
+        }
+        
+        if (isHealth) {
+            int MaxHP = get_MaxHP(PawnObject);
+            if (MaxHP > 0) {
+                float hpRatio = (float)CurHP / (float)MaxHP;
+                if (hpRatio < 0) hpRatio = 0; if (hpRatio > 1) hpRatio = 1;
+                
+                float barWidth = 4.0;
+                float barHeight = boxHeight;
+                float filledHeight = barHeight * hpRatio;
+                
+                CALayer *bgBar = [CALayer layer];
+                bgBar.frame = CGRectMake(x - barWidth - 2, y, barWidth, barHeight);
+                bgBar.backgroundColor = [UIColor redColor].CGColor;
+                [layers addObject:bgBar];
+                
+                CALayer *hpBar = [CALayer layer];
+                hpBar.frame = CGRectMake(x - barWidth - 2, y + (barHeight - filledHeight), barWidth, filledHeight);
+                hpBar.backgroundColor = [UIColor greenColor].CGColor;
+                [layers addObject:hpBar];
+            }
+        }
+        
+        if (isDis) {
+            CATextLayer *distLayer = [CATextLayer layer];
+            distLayer.string = [NSString stringWithFormat:@"[%.0fm]", dis];
+            distLayer.fontSize = 9;
+            distLayer.frame = CGRectMake(x - 10, y + boxHeight + 2, boxWidth + 20, 12);
+            distLayer.alignmentMode = kCAAlignmentCenter;
+            distLayer.foregroundColor = [UIColor whiteColor].CGColor;
+            [layers addObject:distLayer];
         }
     }
-    if(isAimbot&&isVaildPtr(best)&&fire)
-        _SA(me,_GRL(getPositionExt(getHead(best)),0.1f,myL));
+
+    if (isAimbot && isVaildPtr(bestTarget) && isFire) {
+        Vector3 EnemyHead = getPositionExt(getHead(bestTarget));
+
+        Quaternion targetLook = GetRotationToLocation(EnemyHead, 0.1f, myLocation);
+
+        set_aim(myPawnObject, targetLook);
+        
+        
+    }
 }
+
 @end
