@@ -118,8 +118,9 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
         CGPoint p = [self convertPoint:point toView:menuContainer];
         if ([menuContainer pointInside:p withEvent:event]) {
             UIView *hit = [self deepHitTest:p inView:menuContainer event:event];
-            // Возвращаем hit или menuContainer (он поглотит touch через absorbTap)
-            return hit ? hit : menuContainer;
+            if (hit) return hit;
+            // Фон меню — возвращаем menuContainer, он поглотит tap
+            return menuContainer;
         }
     }
     if (floatingButton && !floatingButton.hidden) {
@@ -130,28 +131,23 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 }
 
 - (void)setupFloatingButton {
-    floatingButton = [[UIView alloc] initWithFrame:CGRectMake(50, 50, 50, 50)];
-    floatingButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.8 blue:0.0 alpha:1.0];
-    floatingButton.layer.cornerRadius = 25;
-    floatingButton.layer.borderWidth = 2;
-    floatingButton.layer.borderColor = [UIColor whiteColor].CGColor;
-    floatingButton.clipsToBounds = YES;
-    
-    UILabel *iconLabel = [[UILabel alloc] initWithFrame:floatingButton.bounds];
-    iconLabel.text = @"M";
-    iconLabel.textColor = [UIColor whiteColor];
-    iconLabel.textAlignment = NSTextAlignmentCenter;
-    iconLabel.font = [UIFont boldSystemFontOfSize:20];
-    [floatingButton addSubview:iconLabel];
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+    btn.frame = CGRectMake(50, 50, 50, 50);
+    btn.backgroundColor = [UIColor colorWithRed:0.0 green:0.8 blue:0.0 alpha:1.0];
+    btn.layer.cornerRadius = 25;
+    btn.layer.borderWidth = 2;
+    btn.layer.borderColor = [UIColor whiteColor].CGColor;
+    btn.clipsToBounds = YES;
+    [btn setTitle:@"M" forState:UIControlStateNormal];
+    [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    btn.titleLabel.font = [UIFont boldSystemFontOfSize:20];
+    [btn addTarget:self action:@selector(showMenu) forControlEvents:UIControlEventTouchUpInside];
     
     UIPanGestureRecognizer *iconPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-    iconPan.cancelsTouchesInView = NO;
-    [floatingButton addGestureRecognizer:iconPan];
+    iconPan.cancelsTouchesInView = YES;
+    [btn addGestureRecognizer:iconPan];
     
-    UITapGestureRecognizer *openTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(showMenu)];
-    [openTap requireGestureRecognizerToFail:iconPan];
-    [floatingButton addGestureRecognizer:openTap];
-    
+    floatingButton = btn;
     [self addSubview:floatingButton];
 }
 
@@ -185,9 +181,10 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     menuContainer.layer.borderWidth = 2;
     menuContainer.clipsToBounds = NO;
     menuContainer.hidden = YES;
-    // Поглощаем все touches на menuContainer — чтобы они не уходили выше по иерархии
+    // Пустой gesture поглощает touches на фоне menuContainer
     UITapGestureRecognizer *absorbTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(_absorbTap:)];
-    absorbTap.cancelsTouchesInView = YES;
+    absorbTap.cancelsTouchesInView = NO;  // НЕ блокируем дочерние UIControl
+    absorbTap.delaysTouchesEnded = NO;
     [menuContainer addGestureRecognizer:absorbTap];
     [self addSubview:menuContainer];
     
@@ -607,15 +604,25 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     menuContainer.center = CGPointMake(bounds.size.width / 2, bounds.size.height / 2);
 }
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    CGPoint touchPoint = [gesture locationInView:self];
+    static BOOL isDragging = NO;
+    static CGPoint startCenter;
+    
     if (gesture.state == UIGestureRecognizerStateBegan) {
-        _initialTouchPoint = touchPoint;
+        isDragging = NO;
+        _initialTouchPoint = [gesture locationInView:self];
+        startCenter = (gesture.view == floatingButton) ? floatingButton.center : menuContainer.center;
     } else if (gesture.state == UIGestureRecognizerStateChanged) {
-        CGFloat deltaX = touchPoint.x - _initialTouchPoint.x;
-        CGFloat deltaY = touchPoint.y - _initialTouchPoint.y;
+        CGPoint current = [gesture locationInView:self];
+        CGFloat dx = current.x - _initialTouchPoint.x;
+        CGFloat dy = current.y - _initialTouchPoint.y;
+        // Порог 8pt — только тогда считаем перетаскиванием
+        if (!isDragging && sqrtf(dx*dx + dy*dy) < 8) return;
+        isDragging = YES;
         UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
-        viewToMove.center = CGPointMake(viewToMove.center.x + deltaX, viewToMove.center.y + deltaY);
-        _initialTouchPoint = touchPoint;
+        viewToMove.center = CGPointMake(startCenter.x + dx, startCenter.y + dy);
+    } else if (gesture.state == UIGestureRecognizerStateEnded ||
+               gesture.state == UIGestureRecognizerStateCancelled) {
+        isDragging = NO;
     }
 }
 
