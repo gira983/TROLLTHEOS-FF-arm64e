@@ -112,8 +112,11 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
     if (menuContainer && !menuContainer.hidden) {
         CGPoint p = [self convertPoint:point toView:menuContainer];
-        UIView *hit = [menuContainer hitTest:p withEvent:event];
-        if (hit) return hit;
+        if ([menuContainer pointInside:p withEvent:event]) {
+            UIView *hit = [self deepHitTest:p inView:menuContainer event:event];
+            if (hit) return hit;
+            return menuContainer;
+        }
     }
     if (floatingButton && !floatingButton.hidden) {
         CGPoint p = [self convertPoint:point toView:floatingButton];
@@ -176,7 +179,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     menuContainer.layer.cornerRadius = 15;
     menuContainer.layer.borderColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0].CGColor;
     menuContainer.layer.borderWidth = 2;
-    menuContainer.clipsToBounds = YES;
+    menuContainer.clipsToBounds = NO;
     menuContainer.hidden = YES;
     [self addSubview:menuContainer];
     
@@ -303,21 +306,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     [self addFeatureToView:featureBox withTitle:@"Name" atY:150 initialValue:isName andAction:@selector(toggleName:)];
     [self addFeatureToView:featureBox withTitle:@"Distance" atY:185 initialValue:isDis andAction:@selector(toggleDist:)];
 
-    UILabel *sliderLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, tabH - 30, 40, 20)];
-    sliderLabel.text = @"Size:";
-    sliderLabel.textColor = [UIColor whiteColor];
-    sliderLabel.font = [UIFont systemFontOfSize:12];
-    [featureBox addSubview:sliderLabel];
-    
-    UISlider *slider = [[UISlider alloc] initWithFrame:CGRectMake(55, tabH - 30, tabW - 200, 20)];
-    slider.minimumValue = 0.5;
-    slider.maximumValue = 1.3;
-    slider.value = 1.0;
-    slider.thumbTintColor = [UIColor whiteColor];
-    slider.minimumTrackTintColor = [UIColor greenColor];
-    slider.transform = CGAffineTransformMakeScale(0.8, 0.8);
-    [slider addTarget:self action:@selector(sliderValueChanged:) forControlEvents:UIControlEventValueChanged];
-    [featureBox addSubview:slider];
+    // Size slider убран — не влияет на функционал
 
     // --- AIM TAB ---
     aimTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
