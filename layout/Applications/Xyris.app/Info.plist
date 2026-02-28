@@ -5,17 +5,17 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleDisplayName</key>
-	<string>Xyris</string>
+	<string>Fryzzternal</string>
 	<key>CFBundleExecutable</key>
-	<string>Xyris</string>
+	<string>Fryzz</string>
 	<key>CFBundleIconFile</key>
 	<string>icon.png</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.ldvquang2306.Xyris</string>
+	<string>com.g1reev7.Fryzz</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Xyris</string>
+	<string>Fryzz</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
