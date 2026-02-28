@@ -115,7 +115,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     // Меню открыто
     if (menuContainer && !menuContainer.hidden) {
         CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
-        if (![menuContainer pointInside:pInMenu withEvent:event]) goto checkButton;
+        if ([menuContainer pointInside:pInMenu withEvent:event]) {
         
         // 1. ПРИОРИТЕТ: sidebar с кнопками табов (Main/AIM/Setting)
         if (_sidebar && !_sidebar.hidden) {
@@ -164,10 +164,10 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
             if ([sub pointInside:pInSub withEvent:event]) return sub;
         }
         
-        return menuContainer;
+            return menuContainer;
+        } // конец if pointInside menuContainer
     }
     
-checkButton:
     // Кнопка M
     if (floatingButton && !floatingButton.hidden) {
         CGPoint p = [self convertPoint:point toView:floatingButton];
@@ -246,6 +246,7 @@ checkButton:
     // Header
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, 40)];
     headerView.backgroundColor = [UIColor clearColor];
+    headerView.userInteractionEnabled = YES;
     [menuContainer addSubview:headerView];
     
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(menuWidth * 0.25, 5, menuWidth * 0.45, 30)];
@@ -275,8 +276,7 @@ checkButton:
         if (i == 1) btnIcon.text = @"-";
         if (i == 2) {
             btnIcon.text = @"X";
-            UITapGestureRecognizer *closeTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(hideMenu)];
-            [circle addGestureRecognizer:closeTap];
+            circle.tag = 200; // tag 200 = close button
         }
         [circle addSubview:btnIcon];
         [headerView addSubview:circle];
@@ -296,15 +296,18 @@ checkButton:
     
     NSArray *tabs = @[@"Main", @"AIM", @"Setting"];
     for (int i = 0; i < tabs.count; i++) {
-        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-        btn.frame = CGRectMake(3, 8 + (i * 50 * scale), sidebarW - 6, 35 * scale);
+        UIView *btn = [[UIView alloc] initWithFrame:CGRectMake(3, 8 + (i * 50 * scale), sidebarW - 6, 35 * scale)];
         btn.backgroundColor = (i == 0) ? [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0] : [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
-        [btn setTitle:tabs[i] forState:UIControlStateNormal];
-        [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
         btn.layer.cornerRadius = 17.5;
-        btn.titleLabel.font = [UIFont boldSystemFontOfSize:11];
-        btn.tag = i;
-        [btn addTarget:self action:@selector(tabChanged:) forControlEvents:UIControlEventTouchUpInside];
+        btn.userInteractionEnabled = YES;
+        btn.tag = 100 + i; // tag 100=Main, 101=AIM, 102=Setting
+        UILabel *btnLbl = [[UILabel alloc] initWithFrame:btn.bounds];
+        btnLbl.text = tabs[i];
+        btnLbl.textColor = [UIColor whiteColor];
+        btnLbl.font = [UIFont boldSystemFontOfSize:11];
+        btnLbl.textAlignment = NSTextAlignmentCenter;
+        btnLbl.userInteractionEnabled = NO;
+        [btn addSubview:btnLbl];
         [sidebar addSubview:btn];
     }
 
@@ -443,7 +446,7 @@ checkButton:
     [settingTabContainer addSubview:stTitle];
 }
 
-- (void)tabChanged:(UIButton *)sender {
+- (void)switchToTab:(NSInteger)tabIndex {
     mainTabContainer.hidden = YES;
     aimTabContainer.hidden = YES;
     settingTabContainer.hidden = YES;
@@ -451,19 +454,17 @@ checkButton:
     aimTabContainer.userInteractionEnabled = NO;
     settingTabContainer.userInteractionEnabled = NO;
     
-    // Reset buttons color
-    for (UIView *sub in sender.superview.subviews) {
-        if ([sub isKindOfClass:[UIButton class]]) {
-            UIButton *btn = (UIButton *)sub;
-            btn.backgroundColor = [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
+    for (UIView *sub in _sidebar.subviews) {
+        if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 102) {
+            sub.backgroundColor = [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
         }
     }
-    // Highlight active button
-    sender.backgroundColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0];
+    UIView *activeBtn = [_sidebar viewWithTag:100 + tabIndex];
+    activeBtn.backgroundColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0];
     
-    if (sender.tag == 0) { mainTabContainer.hidden = NO; mainTabContainer.userInteractionEnabled = YES; }
-    if (sender.tag == 1) { aimTabContainer.hidden = NO; aimTabContainer.userInteractionEnabled = YES; }
-    if (sender.tag == 2) { settingTabContainer.hidden = NO; settingTabContainer.userInteractionEnabled = YES; }
+    if (tabIndex == 0) { mainTabContainer.hidden = NO; mainTabContainer.userInteractionEnabled = YES; }
+    if (tabIndex == 1) { aimTabContainer.hidden = NO; aimTabContainer.userInteractionEnabled = YES; }
+    if (tabIndex == 2) { settingTabContainer.hidden = NO; settingTabContainer.userInteractionEnabled = YES; }
 }
 
 - (void)drawPreviewElements {
@@ -656,6 +657,36 @@ checkButton:
     }
     menuContainer.center = CGPointMake(bounds.size.width / 2, bounds.size.height / 2);
 }
+// Обработка touches напрямую — надёжнее чем gesture recognizers в HUD процессе
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *touch = touches.anyObject;
+    UIView *hitView = touch.view;
+    if (!hitView) {
+        [super touchesEnded:touches withEvent:event];
+        return;
+    }
+    
+    NSInteger tag = hitView.tag;
+    
+    // Таб кнопки: 100=Main, 101=AIM, 102=Setting
+    if (tag >= 100 && tag <= 102) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self switchToTab:tag - 100];
+        });
+        return;
+    }
+    
+    // Close button (X)
+    if (tag == 200) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self hideMenu];
+        });
+        return;
+    }
+    
+    [super touchesEnded:touches withEvent:event];
+}
+
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
     UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
     CGPoint translation = [gesture translationInView:self];
