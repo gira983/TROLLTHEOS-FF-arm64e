@@ -1,4 +1,20 @@
 #import "esp.h"
+
+// Лог в файл (определён в HUDApp.mm)
+extern void writeLog(NSString *msg);
+// Fallback если не линкуется
+static void espLog(NSString *msg) {
+    static NSString *path = @"/var/mobile/Library/Caches/hud_debug.log";
+    NSString *line = [NSString stringWithFormat:@"%@\n", msg];
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+    if (!fh) {
+        [@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        fh = [NSFileHandle fileHandleForWritingAtPath:path];
+    }
+    [fh seekToEndOfFile];
+    [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    [fh closeFile];
+}
 #import "mahoa.h"
 #import <QuartzCore/QuartzCore.h>
 #import <UIKit/UIKit.h> 
@@ -117,6 +133,8 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
         CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
         if ([menuContainer pointInside:pInMenu withEvent:event]) {
         
+        espLog([NSString stringWithFormat:@"[HITTEST] point=(%.0f,%.0f) menuContainer OK", pInMenu.x, pInMenu.y]);
+        
         // 1. ПРИОРИТЕТ: sidebar с кнопками табов (Main/AIM/Setting)
         if (_sidebar && !_sidebar.hidden) {
             CGPoint pInSidebar = [menuContainer convertPoint:pInMenu toView:_sidebar];
@@ -124,8 +142,12 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
                 for (UIView *btn in _sidebar.subviews.reverseObjectEnumerator) {
                     if (btn.hidden || !btn.userInteractionEnabled) continue;
                     CGPoint pInBtn = [_sidebar convertPoint:pInSidebar toView:btn];
-                    if ([btn pointInside:pInBtn withEvent:event]) return btn;
+                    if ([btn pointInside:pInBtn withEvent:event]) {
+                        espLog([NSString stringWithFormat:@"[HITTEST] → sidebar btn tag=%ld", (long)btn.tag]);
+                        return btn;
+                    }
                 }
+                espLog(@"[HITTEST] → sidebar itself");
                 return _sidebar;
             }
         }
@@ -144,7 +166,10 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
                     CGPoint pInSub = [activeTab convertPoint:pInTab toView:sub];
                     if (![sub pointInside:pInSub withEvent:event]) continue;
                     // UISlider — возвращаем сразу, он сам обрабатывает drag
-                    if ([sub isKindOfClass:[UISlider class]]) return sub;
+                    if ([sub isKindOfClass:[UISlider class]]) {
+                        espLog([NSString stringWithFormat:@"[HITTEST] → UISlider frame=(%.0f,%.0f,%.0f,%.0f)", sub.frame.origin.x, sub.frame.origin.y, sub.frame.size.width, sub.frame.size.height]);
+                        return sub;
+                    }
                     for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
                         if (leaf.hidden || !leaf.userInteractionEnabled || leaf.alpha < 0.01) continue;
                         CGPoint pInLeaf = [sub convertPoint:pInSub toView:leaf];
@@ -676,7 +701,8 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // Не перехватываем — UISlider получит drag
+    UITouch *t = touches.anyObject;
+    espLog([NSString stringWithFormat:@"[MOVED] view=%@ class=%@", t.view, NSStringFromClass([t.view class])]);
     [super touchesMoved:touches withEvent:event];
 }
 
@@ -687,6 +713,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = touches.anyObject;
     UIView *hitView = touch.view;
+    espLog([NSString stringWithFormat:@"[ENDED] view=%@ class=%@ tag=%ld", hitView, NSStringFromClass([hitView class]), (long)hitView.tag]);
     if (!hitView) {
         [super touchesEnded:touches withEvent:event];
         return;
