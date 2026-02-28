@@ -740,7 +740,7 @@ static void DumpThreads(void)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-    // [_windowHostingController registerWindowWithContextID:_contextId atLevel:windowLevel];
+    // Правильный encoding: I=unsigned int, d=double
     NSMethodSignature *signature = [NSMethodSignature signatureWithObjCTypes:"v@:Id"];
     NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
     [invocation setTarget:_windowHostingController];
@@ -748,6 +748,13 @@ static void DumpThreads(void)
     [invocation setArgument:&_contextId atIndex:2];
     [invocation setArgument:&windowLevel atIndex:3];
     [invocation invoke];
+    
+    // Также регистрируем через прямой вызов если метод доступен
+    if ([_windowHostingController respondsToSelector:NSSelectorFromString(@"registerWindowWithContextID:atLevel:")]) {
+        typedef void (*RegisterFunc)(id, SEL, unsigned int, double);
+        RegisterFunc func = (RegisterFunc)[[_windowHostingController class] instanceMethodForSelector:NSSelectorFromString(@"registerWindowWithContextID:atLevel:")];
+        if (func) func(_windowHostingController, NSSelectorFromString(@"registerWindowWithContextID:atLevel:"), _contextId, windowLevel);
+    }
 #pragma clang diagnostic pop
 
     return YES;
@@ -770,17 +777,16 @@ static void DumpThreads(void)
     return self;
 }
 
-+ (BOOL)_isSystemWindow { return YES; }
+// НЕ объявляем _isSystemWindow=YES — иначе iOS добавляет _UIAccessibilityHUDGateGestureRecognizer
+// который блокирует все touches на окне
++ (BOOL)_isSystemWindow { return NO; }
 - (BOOL)_isWindowServerHostingManaged { return NO; }
 - (BOOL)_ignoresHitTest { return NO; }
 - (BOOL)_isSecure { return YES; }
 - (BOOL)_shouldCreateContextAsSecure { return YES; }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // super hitTest обходит всю иерархию: rootVC.view → _contentView → _blurView → MenuView
     UIView *hit = [super hitTest:point withEvent:event];
-    // Если hit это само окно или rootVC.view (прозрачные контейнеры) — возвращаем nil
-    // чтобы touch прошёл к игре. MenuView.hitTest возвращает nil для пустых мест.
     if (hit == self || hit == self.rootViewController.view) return nil;
     return hit;
 }
