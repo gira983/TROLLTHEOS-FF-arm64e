@@ -410,7 +410,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     [headerView addSubview:titleLabel];
     
     UILabel *subTitle = [[UILabel alloc] initWithFrame:CGRectMake(menuWidth * 0.58, 12, menuWidth * 0.3, 20)];
-    subTitle.text = @"Cheat by LDVQuang";
+    subTitle.text = @"Fryzz🥶";
     subTitle.textColor = [UIColor lightGrayColor];
     subTitle.font = [UIFont systemFontOfSize:10];
     [headerView addSubview:subTitle];
