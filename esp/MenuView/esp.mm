@@ -516,6 +516,8 @@ static float aimDistance = 200.0f;
     [CATransaction commit];
 }
 
+- (void)hideMenu { [self _hideMenu]; }
+- (void)showMenu  { [self _showMenu]; }
 - (void)dealloc { [self.displayLink invalidate]; self.displayLink = nil; }
 
 static inline void _BL(NSMutableArray<CALayer*>*L,CGPoint a,CGPoint b,UIColor*c,CGFloat w){
