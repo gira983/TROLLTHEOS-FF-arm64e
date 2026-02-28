@@ -1089,6 +1089,7 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
 
     _blurView = [[UIView alloc] initWithFrame:_contentView.bounds];
     _blurView.userInteractionEnabled = YES;
+    _blurView.clipsToBounds = NO;
     _blurView.backgroundColor = [UIColor clearColor];
     _blurView.translatesAutoresizingMaskIntoConstraints = NO;
     [_contentView addSubview:_blurView];
@@ -1105,6 +1106,7 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
 
     menuView = [[MenuView alloc] initWithFrame:menuFrame];
     menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    menuView.userInteractionEnabled = YES;
     [_blurView addSubview:menuView];
     
     _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
