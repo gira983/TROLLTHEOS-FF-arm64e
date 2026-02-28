@@ -120,3 +120,4 @@ int get_CurHP(uint64_t Player) {
 int get_MaxHP(uint64_t Player) {
     return GetDataUInt16(Player, 1);
 }
+
