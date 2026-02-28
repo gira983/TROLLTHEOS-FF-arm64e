@@ -772,11 +772,18 @@ static void DumpThreads(void)
 
 + (BOOL)_isSystemWindow { return YES; }
 - (BOOL)_isWindowServerHostingManaged { return NO; }
-// НИКОГДА не игнорируем hitTest — иначе touches не доходят до кнопки M
-// MenuView.hitTest сама возвращает nil для пустых мест → touches проходят к игре
 - (BOOL)_ignoresHitTest { return NO; }
 - (BOOL)_isSecure { return YES; }
 - (BOOL)_shouldCreateContextAsSecure { return YES; }
+
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    // super hitTest обходит всю иерархию: rootVC.view → _contentView → _blurView → MenuView
+    UIView *hit = [super hitTest:point withEvent:event];
+    // Если hit это само окно или rootVC.view (прозрачные контейнеры) — возвращаем nil
+    // чтобы touch прошёл к игре. MenuView.hitTest возвращает nil для пустых мест.
+    if (hit == self || hit == self.rootViewController.view) return nil;
+    return hit;
+}
 
 @end
 
@@ -1076,10 +1083,12 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     _contentView = [[UIView alloc] initWithFrame:self.view.bounds];
     _contentView.backgroundColor = [UIColor clearColor];
     _contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight; 
-    _contentView.translatesAutoresizingMaskIntoConstraints = YES; 
+    _contentView.translatesAutoresizingMaskIntoConstraints = YES;
+    _contentView.userInteractionEnabled = YES;
     [self.view addSubview:_contentView];
 
     _blurView = [[UIView alloc] initWithFrame:_contentView.bounds];
+    _blurView.userInteractionEnabled = YES;
     _blurView.backgroundColor = [UIColor clearColor];
     _blurView.translatesAutoresizingMaskIntoConstraints = NO;
     [_contentView addSubview:_blurView];
