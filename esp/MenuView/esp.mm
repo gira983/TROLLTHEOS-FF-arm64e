@@ -199,7 +199,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     
     NSArray *colors = @[[UIColor greenColor], [UIColor yellowColor], [UIColor redColor]];
     for (int i = 0; i < 3; i++) {
-        UIView *circle = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - sidebarW - 15 - (2-i)*25, 10, 18, 18)];
+        UIView *circle = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - 95 + (i * 25), 10, 18, 18)];
         circle.backgroundColor = colors[i];
         circle.layer.cornerRadius = 9;
         
