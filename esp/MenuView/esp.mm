@@ -560,13 +560,14 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
         }
     }
     if (floatingButton) {
+        CGRect sb = self.bounds;
         CGPoint btnCenter = floatingButton.center;
         CGFloat halfW = floatingButton.bounds.size.width / 2;
         CGFloat halfH = floatingButton.bounds.size.height / 2;
         if (btnCenter.x < halfW) btnCenter.x = halfW;
-        if (btnCenter.x > screenBounds.size.width - halfW) btnCenter.x = screenBounds.size.width - halfW;
+        if (btnCenter.x > sb.size.width - halfW) btnCenter.x = sb.size.width - halfW;
         if (btnCenter.y < halfH) btnCenter.y = halfH;
-        if (btnCenter.y > screenBounds.size.height - halfH) btnCenter.y = screenBounds.size.height - halfH;
+        if (btnCenter.y > sb.size.height - halfH) btnCenter.y = sb.size.height - halfH;
         floatingButton.center = btnCenter;
     }
 }
