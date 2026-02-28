@@ -1,14 +1,14 @@
 ARCHS := arm64 arm64e
 TARGET := iphone:clang:16.5:14.0
 
-INSTALL_TARGET_PROCESSES := Xyris
+INSTALL_TARGET_PROCESSES := Fryzz
 
 include $(THEOS)/makefiles/common.mk
 
 IS_NEW_ABI := 1
 
-APPLICATION_NAME := Xyris
-PACKAGE_NAME := xyris
+APPLICATION_NAME := Fryzzternal
+PACKAGE_NAME := fryzz
 
 Xyris_USE_MODULES := 0
 Xyris_FILES += platform_stub.c
