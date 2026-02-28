@@ -535,7 +535,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
         NSMutableAttributedString *githubIconTextFull = [[NSMutableAttributedString alloc] initWithAttributedString:githubIconText];
         [githubIconTextFull appendAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:defaultAttributes]];
         
-        NSString *githubText = NSLocalizedString(@"My github @LDVQuang2306", nil);
+        NSString *githubText = NSLocalizedString(@"My Telegram @g1reev7", nil);
         NSMutableAttributedString *githubAttributedText = [[NSMutableAttributedString alloc] initWithString:githubText attributes:defaultAttributes];
         
         // replace all "@" with github icon
