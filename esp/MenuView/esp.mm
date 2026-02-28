@@ -68,6 +68,10 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 - (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers;
 @end
 
+@interface MenuView (Private)
+- (UIView *)deepHitTest:(CGPoint)point inView:(UIView *)view event:(UIEvent *)event;
+@end
+
 @implementation MenuView {
     UIView *menuContainer;
     UIView *floatingButton;
