@@ -122,7 +122,12 @@ static __used void _HUDEventCallback(void *target, void *refcon, IOHIDServiceRef
                 }
             });
 
+            // hitTest на нашем окне — найдёт menuContainer или floatingButton если touch в них
             UIView *keyView = [keyWindow hitTest:[rep location] withEvent:nil];
+            // Если hitTest вернул nil или само окно — используем rootVC.view
+            if (!keyView || keyView == keyWindow) {
+                keyView = keyWindow.rootViewController.view;
+            }
             
             UITouchPhase phase = UITouchPhaseEnded;
             if ([rep isTouchDown])
