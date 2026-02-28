@@ -155,15 +155,21 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     label.font = [UIFont systemFontOfSize:13];
     [view addSubview:label];
     
-    CustomSwitch *customSwitch = [[CustomSwitch alloc] initWithFrame:CGRectMake(240, y, 52, 26)];
+    CGFloat swX = MIN(240, view.bounds.size.width - 65);
+    CustomSwitch *customSwitch = [[CustomSwitch alloc] initWithFrame:CGRectMake(swX, y, 52, 26)];
     customSwitch.on = isOn;
     [customSwitch addTarget:self action:action forControlEvents:UIControlEventValueChanged];
     [view addSubview:customSwitch];
 }
 
 - (void)setupMenuUI {
-    CGFloat menuWidth = 550;
-    CGFloat menuHeight = 320;
+    CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
+    CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
+    CGFloat menuWidth = MIN(550, screenW - 10);
+    CGFloat menuHeight = MIN(320, screenH * 0.55);
+    
+    // Масштаб для адаптации всех элементов
+    CGFloat scale = menuWidth / 550.0;
     
     menuContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, menuHeight)];
     menuContainer.backgroundColor = [UIColor colorWithRed:0.05 green:0.05 blue:0.05 alpha:0.95];
@@ -179,13 +185,13 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     headerView.backgroundColor = [UIColor clearColor];
     [menuContainer addSubview:headerView];
     
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(160, 5, 200, 30)];
+    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(menuWidth * 0.25, 5, menuWidth * 0.45, 30)];
     titleLabel.text = @"MENU TIPA";
     titleLabel.textColor = [UIColor whiteColor];
     titleLabel.font = [UIFont fontWithName:@"HelveticaNeue-Bold" size:22];
     [headerView addSubview:titleLabel];
     
-    UILabel *subTitle = [[UILabel alloc] initWithFrame:CGRectMake(350, 12, 150, 20)];
+    UILabel *subTitle = [[UILabel alloc] initWithFrame:CGRectMake(menuWidth * 0.58, 12, menuWidth * 0.3, 20)];
     subTitle.text = @"Cheat by LDVQuang";
     subTitle.textColor = [UIColor lightGrayColor];
     subTitle.font = [UIFont systemFontOfSize:10];
@@ -193,7 +199,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     
     NSArray *colors = @[[UIColor greenColor], [UIColor yellowColor], [UIColor redColor]];
     for (int i = 0; i < 3; i++) {
-        UIView *circle = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - 80 + (i * 25), 10, 18, 18)];
+        UIView *circle = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - sidebarW - 15 - (2-i)*25, 10, 18, 18)];
         circle.backgroundColor = colors[i];
         circle.layer.cornerRadius = 9;
         
@@ -217,7 +223,8 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     [headerView addGestureRecognizer:menuPan];
     
     // Sidebar Buttons
-    UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(465, 50, 75, 250)];
+    CGFloat sidebarW = 75 * scale;
+    UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - sidebarW - 10, 50, sidebarW, 250 * scale)];
     sidebar.backgroundColor = [UIColor colorWithWhite:0.8 alpha:1.0];
     sidebar.layer.cornerRadius = 10;
     [menuContainer addSubview:sidebar];
@@ -225,7 +232,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     NSArray *tabs = @[@"Main", @"AIM", @"Setting"];
     for (int i = 0; i < tabs.count; i++) {
         UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-        btn.frame = CGRectMake(5, 10 + (i * 50), 65, 35);
+        btn.frame = CGRectMake(3, 8 + (i * 50 * scale), sidebarW - 6, 35 * scale);
         btn.backgroundColor = (i == 0) ? [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0] : [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
         [btn setTitle:tabs[i] forState:UIControlStateNormal];
         [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
@@ -237,7 +244,9 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     }
 
     // --- MAIN TAB (ESP) ---
-    mainTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, 440, 250)];
+    CGFloat tabW = menuWidth - sidebarW - 25;
+    CGFloat tabH = menuHeight - 55;
+    mainTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     mainTabContainer.backgroundColor = [UIColor clearColor];
     [menuContainer addSubview:mainTabContainer];
 
@@ -271,7 +280,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     [self updatePreviewVisibility];
 
     // Feature Box (Right)
-    UIView *featureBox = [[UIView alloc] initWithFrame:CGRectMake(140, 0, 300, 250)];
+    UIView *featureBox = [[UIView alloc] initWithFrame:CGRectMake(140, 0, tabW - 145, tabH)];
     featureBox.layer.borderColor = [UIColor whiteColor].CGColor;
     featureBox.layer.borderWidth = 1;
     featureBox.layer.cornerRadius = 10;
@@ -284,7 +293,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     ftTitle.font = [UIFont boldSystemFontOfSize:16];
     [featureBox addSubview:ftTitle];
     
-    UIView *ftLine = [[UIView alloc] initWithFrame:CGRectMake(15, 35, 270, 1)];
+    UIView *ftLine = [[UIView alloc] initWithFrame:CGRectMake(15, 35, tabW - 155, 1)];
     ftLine.backgroundColor = [UIColor whiteColor];
     [featureBox addSubview:ftLine];
     
@@ -294,13 +303,13 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     [self addFeatureToView:featureBox withTitle:@"Name" atY:150 initialValue:isName andAction:@selector(toggleName:)];
     [self addFeatureToView:featureBox withTitle:@"Distance" atY:185 initialValue:isDis andAction:@selector(toggleDist:)];
 
-    UILabel *sliderLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 220, 40, 20)];
+    UILabel *sliderLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, tabH - 30, 40, 20)];
     sliderLabel.text = @"Size:";
     sliderLabel.textColor = [UIColor whiteColor];
     sliderLabel.font = [UIFont systemFontOfSize:12];
     [featureBox addSubview:sliderLabel];
     
-    UISlider *slider = [[UISlider alloc] initWithFrame:CGRectMake(55, 220, 225, 20)];
+    UISlider *slider = [[UISlider alloc] initWithFrame:CGRectMake(55, tabH - 30, tabW - 200, 20)];
     slider.minimumValue = 0.5;
     slider.maximumValue = 1.3;
     slider.value = 1.0;
@@ -311,7 +320,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     [featureBox addSubview:slider];
 
     // --- AIM TAB ---
-    aimTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, 440, 250)];
+    aimTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     aimTabContainer.backgroundColor = [UIColor blackColor];
     aimTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
     aimTabContainer.layer.borderWidth = 1;
@@ -325,7 +334,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     aimTitle.font = [UIFont boldSystemFontOfSize:16];
     [aimTabContainer addSubview:aimTitle];
     
-    UIView *aimLine = [[UIView alloc] initWithFrame:CGRectMake(15, 35, 410, 1)];
+    UIView *aimLine = [[UIView alloc] initWithFrame:CGRectMake(15, 35, tabW - 20, 1)];
     aimLine.backgroundColor = [UIColor whiteColor];
     [aimTabContainer addSubview:aimLine];
     
@@ -338,7 +347,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     fovLabel.font = [UIFont systemFontOfSize:13];
     [aimTabContainer addSubview:fovLabel];
     
-    UISlider *fovSlider = [[UISlider alloc] initWithFrame:CGRectMake(15, 110, 400, 20)];
+    UISlider *fovSlider = [[UISlider alloc] initWithFrame:CGRectMake(15, 110, tabW - 20, 20)];
     fovSlider.minimumValue = 10.0;
     fovSlider.maximumValue = 400.0;
     fovSlider.value = aimFov;
@@ -354,7 +363,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     distLabel.font = [UIFont systemFontOfSize:13];
     [aimTabContainer addSubview:distLabel];
     
-    UISlider *distSlider = [[UISlider alloc] initWithFrame:CGRectMake(15, 170, 400, 20)];
+    UISlider *distSlider = [[UISlider alloc] initWithFrame:CGRectMake(15, 170, tabW - 20, 20)];
     distSlider.minimumValue = 10.0;
     distSlider.maximumValue = 500.0;
     distSlider.value = aimDistance;
@@ -365,7 +374,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 
 
     // --- SETTING TAB (Empty for now) ---
-    settingTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, 440, 250)];
+    settingTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     settingTabContainer.backgroundColor = [UIColor blackColor];
     settingTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
     settingTabContainer.layer.borderWidth = 1;
