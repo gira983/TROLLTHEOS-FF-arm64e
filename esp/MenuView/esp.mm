@@ -125,29 +125,44 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     }
     if (floatingButton && !floatingButton.hidden) {
         CGPoint p = [self convertPoint:point toView:floatingButton];
-        if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
+        if ([floatingButton pointInside:p withEvent:event]) {
+            // Возвращаем сам floatingButton — gesture recognizers на нём сработают
+            return floatingButton;
+        }
     }
     return nil;
 }
 
 - (void)setupFloatingButton {
-    UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-    btn.frame = CGRectMake(50, 50, 50, 50);
-    btn.backgroundColor = [UIColor colorWithRed:0.0 green:0.8 blue:0.0 alpha:1.0];
-    btn.layer.cornerRadius = 25;
-    btn.layer.borderWidth = 2;
-    btn.layer.borderColor = [UIColor whiteColor].CGColor;
-    btn.clipsToBounds = YES;
-    [btn setTitle:@"M" forState:UIControlStateNormal];
-    [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    btn.titleLabel.font = [UIFont boldSystemFontOfSize:20];
-    [btn addTarget:self action:@selector(showMenu) forControlEvents:UIControlEventTouchUpInside];
+    floatingButton = [[UIView alloc] initWithFrame:CGRectMake(50, 150, 54, 54)];
+    floatingButton.backgroundColor = [UIColor colorWithRed:0.0 green:0.8 blue:0.0 alpha:1.0];
+    floatingButton.layer.cornerRadius = 27;
+    floatingButton.layer.borderWidth = 2;
+    floatingButton.layer.borderColor = [UIColor whiteColor].CGColor;
+    floatingButton.clipsToBounds = YES;
+    floatingButton.userInteractionEnabled = YES;
     
+    UILabel *iconLabel = [[UILabel alloc] initWithFrame:floatingButton.bounds];
+    iconLabel.text = @"M";
+    iconLabel.textColor = [UIColor whiteColor];
+    iconLabel.textAlignment = NSTextAlignmentCenter;
+    iconLabel.font = [UIFont boldSystemFontOfSize:22];
+    iconLabel.userInteractionEnabled = NO;
+    [floatingButton addSubview:iconLabel];
+    
+    // Pan для перетаскивания — minimumNumberOfTouches=1
     UIPanGestureRecognizer *iconPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-    iconPan.cancelsTouchesInView = YES;
-    [btn addGestureRecognizer:iconPan];
+    iconPan.maximumNumberOfTouches = 1;
+    iconPan.minimumNumberOfTouches = 1;
+    [floatingButton addGestureRecognizer:iconPan];
     
-    floatingButton = btn;
+    // Tap для открытия — должен провалиться если идёт pan
+    UITapGestureRecognizer *openTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(showMenu)];
+    openTap.numberOfTapsRequired = 1;
+    openTap.numberOfTouchesRequired = 1;
+    [openTap requireGestureRecognizerToFail:iconPan];
+    [floatingButton addGestureRecognizer:openTap];
+    
     [self addSubview:floatingButton];
 }
 
@@ -604,25 +619,16 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     menuContainer.center = CGPointMake(bounds.size.width / 2, bounds.size.height / 2);
 }
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    static BOOL isDragging = NO;
-    static CGPoint startCenter;
+    UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
+    CGPoint translation = [gesture translationInView:self];
     
-    if (gesture.state == UIGestureRecognizerStateBegan) {
-        isDragging = NO;
-        _initialTouchPoint = [gesture locationInView:self];
-        startCenter = (gesture.view == floatingButton) ? floatingButton.center : menuContainer.center;
-    } else if (gesture.state == UIGestureRecognizerStateChanged) {
-        CGPoint current = [gesture locationInView:self];
-        CGFloat dx = current.x - _initialTouchPoint.x;
-        CGFloat dy = current.y - _initialTouchPoint.y;
-        // Порог 8pt — только тогда считаем перетаскиванием
-        if (!isDragging && sqrtf(dx*dx + dy*dy) < 8) return;
-        isDragging = YES;
-        UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
-        viewToMove.center = CGPointMake(startCenter.x + dx, startCenter.y + dy);
-    } else if (gesture.state == UIGestureRecognizerStateEnded ||
-               gesture.state == UIGestureRecognizerStateCancelled) {
-        isDragging = NO;
+    if (gesture.state == UIGestureRecognizerStateBegan ||
+        gesture.state == UIGestureRecognizerStateChanged) {
+        viewToMove.center = CGPointMake(
+            viewToMove.center.x + translation.x,
+            viewToMove.center.y + translation.y
+        );
+        [gesture setTranslation:CGPointZero inView:self];
     }
 }
 
