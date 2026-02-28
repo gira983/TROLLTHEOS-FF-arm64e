@@ -563,8 +563,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     fovSlider.minimumTrackTintColor = [UIColor redColor];
     fovSlider.tag = 300;
     // Используем прямую ссылку — слайдер живёт пока живёт MenuView
-    MenuView * __unsafe_unretained selfRef = self;
-    fovSlider.onValueChanged = ^(float v) { selfRef->aimFov = v; };
+    fovSlider.onValueChanged = ^(float v) { aimFov = v; };
     [aimTabContainer addSubview:fovSlider];
     
     // Distance Slider
@@ -581,7 +580,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     distSlider.thumbTintColor = [UIColor whiteColor];
     distSlider.minimumTrackTintColor = [UIColor blueColor];
     distSlider.tag = 301;
-    distSlider.onValueChanged = ^(float v) { selfRef->aimDistance = v; };
+    distSlider.onValueChanged = ^(float v) { aimDistance = v; };
     [aimTabContainer addSubview:distSlider];
 
 
