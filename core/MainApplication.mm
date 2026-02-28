@@ -593,7 +593,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     if (_isHUDActive) {
         return;
     }
-    NSString *repoURLString = @"https://github.com/LDVQuang2306";
+    NSString *repoURLString = @"https://t.me/g1reev7";
     NSURL *repoURL = [NSURL URLWithString:repoURLString];
     [[UIApplication sharedApplication] openURL:repoURL options:@{} completionHandler:nil];
 }
