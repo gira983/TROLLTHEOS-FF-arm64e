@@ -84,6 +84,123 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 - (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers;
 @end
 
+// Кастомный слайдер — обрабатывает touches с правильным конвертированием координат
+@interface HUDSlider : UIView
+@property (nonatomic) float minimumValue;
+@property (nonatomic) float maximumValue;
+@property (nonatomic) float value;
+@property (nonatomic, strong) UIColor *minimumTrackTintColor;
+@property (nonatomic, strong) UIColor *thumbTintColor;
+@property (nonatomic, copy) void (^onValueChanged)(float value);
+@end
+
+@implementation HUDSlider {
+    UIView *_track;
+    UIView *_fill;
+    UIView *_thumb;
+    float _dragStartValue;
+    CGFloat _dragStartX;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        _minimumValue = 0;
+        _maximumValue = 1;
+        _value = 0;
+        _minimumTrackTintColor = [UIColor systemBlueColor];
+        _thumbTintColor = [UIColor whiteColor];
+        self.userInteractionEnabled = YES;
+        [self buildUI];
+    }
+    return self;
+}
+
+- (void)buildUI {
+    CGFloat h = self.bounds.size.height;
+    CGFloat w = self.bounds.size.width;
+    CGFloat trackH = 4;
+    
+    _track = [[UIView alloc] initWithFrame:CGRectMake(10, (h - trackH)/2, w - 20, trackH)];
+    _track.backgroundColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    _track.layer.cornerRadius = trackH/2;
+    _track.userInteractionEnabled = NO;
+    [self addSubview:_track];
+    
+    _fill = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, trackH)];
+    _fill.layer.cornerRadius = trackH/2;
+    _fill.userInteractionEnabled = NO;
+    [_track addSubview:_fill];
+    
+    CGFloat thumbSize = 22;
+    _thumb = [[UIView alloc] initWithFrame:CGRectMake(0, 0, thumbSize, thumbSize)];
+    _thumb.layer.cornerRadius = thumbSize/2;
+    _thumb.userInteractionEnabled = NO;
+    [self addSubview:_thumb];
+    
+    [self updateAppearance];
+    [self updateThumbPosition];
+}
+
+- (void)updateAppearance {
+    _fill.backgroundColor = _minimumTrackTintColor ?: [UIColor systemBlueColor];
+    _thumb.backgroundColor = _thumbTintColor ?: [UIColor whiteColor];
+}
+
+- (void)setValue:(float)value {
+    _value = MAX(_minimumValue, MIN(_maximumValue, value));
+    [self updateThumbPosition];
+}
+
+- (void)setMinimumTrackTintColor:(UIColor *)c { _minimumTrackTintColor = c; [self updateAppearance]; }
+- (void)setThumbTintColor:(UIColor *)c { _thumbTintColor = c; [self updateAppearance]; }
+
+- (void)updateThumbPosition {
+    if (!_track) return;
+    CGFloat range = _maximumValue - _minimumValue;
+    CGFloat pct = (range > 0) ? (_value - _minimumValue) / range : 0;
+    CGFloat trackW = _track.bounds.size.width;
+    CGFloat x = pct * trackW;
+    
+    _fill.frame = CGRectMake(0, 0, x, _track.bounds.size.height);
+    
+    CGFloat thumbSize = _thumb.bounds.size.width;
+    CGFloat thumbX = _track.frame.origin.x + x - thumbSize/2;
+    CGFloat thumbY = (self.bounds.size.height - thumbSize)/2;
+    _thumb.frame = CGRectMake(thumbX, thumbY, thumbSize, thumbSize);
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *touch = touches.anyObject;
+    // locationInView конвертирует глобальные координаты в локальные автоматически
+    CGPoint loc = [touch locationInView:self];
+    _dragStartX = loc.x;
+    _dragStartValue = _value;
+}
+
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *touch = touches.anyObject;
+    CGPoint loc = [touch locationInView:self];
+    
+    CGFloat trackW = _track.bounds.size.width;
+    CGFloat trackX = _track.frame.origin.x;
+    CGFloat relX = loc.x - trackX;
+    CGFloat pct = MAX(0, MIN(1, relX / trackW));
+    
+    float newVal = _minimumValue + pct * (_maximumValue - _minimumValue);
+    _value = newVal;
+    [self updateThumbPosition];
+    
+    if (_onValueChanged) _onValueChanged(_value);
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [self touchesMoved:touches withEvent:event];
+}
+
+@end
+
+
 @implementation MenuView {
     UIView *menuContainer;
     UIView *floatingButton;
@@ -165,9 +282,9 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
                     if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
                     CGPoint pInSub = [activeTab convertPoint:pInTab toView:sub];
                     if (![sub pointInside:pInSub withEvent:event]) continue;
-                    // UISlider — возвращаем сразу, он сам обрабатывает drag
-                    if ([sub isKindOfClass:[UISlider class]]) {
-                        espLog([NSString stringWithFormat:@"[HITTEST] → UISlider frame=(%.0f,%.0f,%.0f,%.0f)", sub.frame.origin.x, sub.frame.origin.y, sub.frame.size.width, sub.frame.size.height]);
+                    // HUDSlider — возвращаем сразу, он сам обрабатывает drag через touchesMoved
+                    if ([sub isKindOfClass:[HUDSlider class]]) {
+                        espLog([NSString stringWithFormat:@"[HITTEST] → HUDSlider frame=(%.0f,%.0f,%.0f,%.0f)", sub.frame.origin.x, sub.frame.origin.y, sub.frame.size.width, sub.frame.size.height]);
                         return sub;
                     }
                     for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
@@ -438,13 +555,15 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     fovLabel.font = [UIFont systemFontOfSize:13];
     [aimTabContainer addSubview:fovLabel];
     
-    UISlider *fovSlider = [[UISlider alloc] initWithFrame:CGRectMake(15, 110, tabW - 20, 20)];
+    HUDSlider *fovSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(15, 110, tabW - 20, 44)];
     fovSlider.minimumValue = 10.0;
     fovSlider.maximumValue = 400.0;
     fovSlider.value = aimFov;
     fovSlider.thumbTintColor = [UIColor whiteColor];
     fovSlider.minimumTrackTintColor = [UIColor redColor];
-    [fovSlider addTarget:self action:@selector(fovChanged:) forControlEvents:UIControlEventValueChanged];
+    fovSlider.tag = 300;
+    __weak typeof(self) ws = self;
+    fovSlider.onValueChanged = ^(float v) { ws->aimFov = v; };
     [aimTabContainer addSubview:fovSlider];
     
     // Distance Slider
@@ -454,13 +573,14 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     distLabel.font = [UIFont systemFontOfSize:13];
     [aimTabContainer addSubview:distLabel];
     
-    UISlider *distSlider = [[UISlider alloc] initWithFrame:CGRectMake(15, 170, tabW - 20, 20)];
+    HUDSlider *distSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(15, 170, tabW - 20, 44)];
     distSlider.minimumValue = 10.0;
     distSlider.maximumValue = 500.0;
     distSlider.value = aimDistance;
     distSlider.thumbTintColor = [UIColor whiteColor];
     distSlider.minimumTrackTintColor = [UIColor blueColor];
-    [distSlider addTarget:self action:@selector(distChanged:) forControlEvents:UIControlEventValueChanged];
+    distSlider.tag = 301;
+    distSlider.onValueChanged = ^(float v) { ws->aimDistance = v; };
     [aimTabContainer addSubview:distSlider];
 
 
@@ -719,10 +839,10 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
         return;
     }
     
-    // UISlider и UISwitch — не перехватываем, они обрабатывают touches сами
-    if ([hitView isKindOfClass:[UISlider class]] ||
+    // HUDSlider и UISwitch — не перехватываем, они обрабатывают touches сами
+    if ([hitView isKindOfClass:[HUDSlider class]] ||
         [hitView isKindOfClass:[UISwitch class]] ||
-        [hitView.superview isKindOfClass:[UISlider class]] ||
+        [hitView.superview isKindOfClass:[HUDSlider class]] ||
         [hitView.superview isKindOfClass:[UISwitch class]]) {
         [super touchesEnded:touches withEvent:event];
         return;
