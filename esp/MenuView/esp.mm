@@ -77,6 +77,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     UIView *mainTabContainer;
     UIView *aimTabContainer;
     UIView *settingTabContainer;
+    UIView *_sidebar;
 
     UIView *previewView;
     UIView *previewContentContainer;
@@ -114,32 +115,59 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     // Меню открыто
     if (menuContainer && !menuContainer.hidden) {
         CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
-        if ([menuContainer pointInside:pInMenu withEvent:event]) {
-            // Обходим все subviews menuContainer вручную (thread-safe)
-            for (UIView *sub in menuContainer.subviews.reverseObjectEnumerator) {
-                if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
-                CGPoint pInSub = [menuContainer convertPoint:pInMenu toView:sub];
-                if (![sub pointInside:pInSub withEvent:event]) continue;
-                // Проверяем subviews этого sub (напр. кнопки внутри sidebar)
-                for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
-                    if (leaf.hidden || !leaf.userInteractionEnabled || leaf.alpha < 0.01) continue;
-                    CGPoint pInLeaf = [sub convertPoint:pInSub toView:leaf];
-                    if ([leaf pointInside:pInLeaf withEvent:event]) {
-                        // Ещё один уровень — для CustomSwitch внутри featureBox
-                        for (UIView *deep in leaf.subviews.reverseObjectEnumerator) {
-                            if (deep.hidden || !deep.userInteractionEnabled || deep.alpha < 0.01) continue;
-                            CGPoint pInDeep = [leaf convertPoint:pInLeaf toView:deep];
-                            if ([deep pointInside:pInDeep withEvent:event]) return deep;
-                        }
-                        return leaf;
-                    }
+        if (![menuContainer pointInside:pInMenu withEvent:event]) goto checkButton;
+        
+        // 1. ПРИОРИТЕТ: sidebar с кнопками табов (Main/AIM/Setting)
+        if (_sidebar && !_sidebar.hidden) {
+            CGPoint pInSidebar = [menuContainer convertPoint:pInMenu toView:_sidebar];
+            if ([_sidebar pointInside:pInSidebar withEvent:event]) {
+                for (UIView *btn in _sidebar.subviews.reverseObjectEnumerator) {
+                    if (btn.hidden || !btn.userInteractionEnabled) continue;
+                    CGPoint pInBtn = [_sidebar convertPoint:pInSidebar toView:btn];
+                    if ([btn pointInside:pInBtn withEvent:event]) return btn;
                 }
-                return sub;
+                return _sidebar;
             }
-            return menuContainer;
         }
+        
+        // 2. Активный таб контейнер
+        UIView *activeTab = nil;
+        if (mainTabContainer && !mainTabContainer.hidden) activeTab = mainTabContainer;
+        else if (aimTabContainer && !aimTabContainer.hidden) activeTab = aimTabContainer;
+        else if (settingTabContainer && !settingTabContainer.hidden) activeTab = settingTabContainer;
+        
+        if (activeTab) {
+            CGPoint pInTab = [menuContainer convertPoint:pInMenu toView:activeTab];
+            if ([activeTab pointInside:pInTab withEvent:event]) {
+                // Ищем leaf view в табе
+                for (UIView *sub in activeTab.subviews.reverseObjectEnumerator) {
+                    if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
+                    CGPoint pInSub = [activeTab convertPoint:pInTab toView:sub];
+                    if (![sub pointInside:pInSub withEvent:event]) continue;
+                    for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
+                        if (leaf.hidden || !leaf.userInteractionEnabled || leaf.alpha < 0.01) continue;
+                        CGPoint pInLeaf = [sub convertPoint:pInSub toView:leaf];
+                        if ([leaf pointInside:pInLeaf withEvent:event]) return leaf;
+                    }
+                    return sub;
+                }
+                return activeTab;
+            }
+        }
+        
+        // 3. Остальное в menuContainer (header, close button)
+        for (UIView *sub in menuContainer.subviews.reverseObjectEnumerator) {
+            if (sub == _sidebar || sub == mainTabContainer || 
+                sub == aimTabContainer || sub == settingTabContainer) continue;
+            if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
+            CGPoint pInSub = [menuContainer convertPoint:pInMenu toView:sub];
+            if ([sub pointInside:pInSub withEvent:event]) return sub;
+        }
+        
+        return menuContainer;
     }
     
+checkButton:
     // Кнопка M
     if (floatingButton && !floatingButton.hidden) {
         CGPoint p = [self convertPoint:point toView:floatingButton];
@@ -262,6 +290,8 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - sidebarW - 10, 50, sidebarW, 250 * scale)];
     sidebar.backgroundColor = [UIColor colorWithWhite:0.8 alpha:1.0];
     sidebar.layer.cornerRadius = 10;
+    sidebar.userInteractionEnabled = YES;
+    _sidebar = sidebar;
     [menuContainer addSubview:sidebar];
     
     NSArray *tabs = @[@"Main", @"AIM", @"Setting"];
