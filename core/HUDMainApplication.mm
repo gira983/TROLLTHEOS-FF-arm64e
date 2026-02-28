@@ -772,25 +772,7 @@ static void DumpThreads(void)
 
 + (BOOL)_isSystemWindow { return YES; }
 - (BOOL)_isWindowServerHostingManaged { return NO; }
-- (BOOL)_ignoresHitTest { return NO; }
-- (BOOL)_isSecure { return YES; }
-- (BOOL)_shouldCreateContextAsSecure { return YES; }
-
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // Стандартный hitTest — UIKit сам найдёт нужный view
-    UIView *hit = [super hitTest:point withEvent:event];
-    // Пропускаем прозрачные контейнеры (window, rootVC view, contentView, blurView)
-    // Возвращаем nil только если hit — это одна из прозрачных оболочек
-    if (!hit) return nil;
-    if (hit.backgroundColor == nil || hit.backgroundColor == [UIColor clearColor]) {
-        // Проверяем — это контрол или view с gesture?
-        if ([hit isKindOfClass:[UIControl class]] || hit.gestureRecognizers.count > 0) {
-            return hit;
-        }
-        return nil;
-    }
-    return hit;
-}
+- (BOOL)_ignoresHitTest { return [HUDRootViewController passthroughMode]; }
 
 @end
 
@@ -1090,8 +1072,7 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     _contentView = [[UIView alloc] initWithFrame:self.view.bounds];
     _contentView.backgroundColor = [UIColor clearColor];
     _contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight; 
-    _contentView.translatesAutoresizingMaskIntoConstraints = YES;
-    _contentView.userInteractionEnabled = YES;
+    _contentView.translatesAutoresizingMaskIntoConstraints = YES; 
     [self.view addSubview:_contentView];
 
     _blurView = [[UIView alloc] initWithFrame:_contentView.bounds];
@@ -1107,12 +1088,11 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     ]];
     
     CGRect screenBounds = [[UIScreen mainScreen] bounds];
-    CGRect menuFrame = screenBounds;
+    CGRect menuFrame = screenBounds;  // полноэкранный фрейм — MenuView сама центрирует своё меню
 
     menuView = [[MenuView alloc] initWithFrame:menuFrame];
-    menuView.userInteractionEnabled = YES;
     menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [_contentView addSubview:menuView];  // в _contentView — поворачивается вместе с экраном
+    [_blurView addSubview:menuView];
     
     _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     [_blurView addSubview:_speedLabel];
@@ -1126,8 +1106,10 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     [_lockedView setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisVertical];
     [_blurView addSubview:_lockedView];
     
-    // tapGestureRecognizer отключён — мешает touches в menuView
-    // _tapGestureRecognizer оставлен как ivar для совместимости
+    _tapGestureRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapGestureRecognized:)];
+    _tapGestureRecognizer.numberOfTapsRequired = 1;
+    _tapGestureRecognizer.numberOfTouchesRequired = 1;
+    [_contentView addGestureRecognizer:_tapGestureRecognizer];
 
     [_contentView setUserInteractionEnabled:YES];
 
