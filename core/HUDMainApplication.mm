@@ -772,7 +772,11 @@ static void DumpThreads(void)
 
 + (BOOL)_isSystemWindow { return YES; }
 - (BOOL)_isWindowServerHostingManaged { return NO; }
-- (BOOL)_ignoresHitTest { return [HUDRootViewController passthroughMode]; }
+// НИКОГДА не игнорируем hitTest — иначе touches не доходят до кнопки M
+// MenuView.hitTest сама возвращает nil для пустых мест → touches проходят к игре
+- (BOOL)_ignoresHitTest { return NO; }
+- (BOOL)_isSecure { return YES; }
+- (BOOL)_shouldCreateContextAsSecure { return YES; }
 
 @end
 
