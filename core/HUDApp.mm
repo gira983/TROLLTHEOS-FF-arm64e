@@ -122,13 +122,6 @@ static __used void _HUDEventCallback(void *target, void *refcon, IOHIDServiceRef
                 }
             });
 
-            // hitTest на нашем окне — найдёт menuContainer или floatingButton если touch в них
-            UIView *keyView = [keyWindow hitTest:[rep location] withEvent:nil];
-            // Если hitTest вернул nil или само окно — используем rootVC.view
-            if (!keyView || keyView == keyWindow) {
-                keyView = keyWindow.rootViewController.view;
-            }
-            
             UITouchPhase phase = UITouchPhaseEnded;
             if ([rep isTouchDown])
                 phase = UITouchPhaseBegan;
@@ -140,8 +133,34 @@ static __used void _HUDEventCallback(void *target, void *refcon, IOHIDServiceRef
                 phase = UITouchPhaseEnded;
             
             NSInteger pointerId = [[[[rep handInfo] paths] firstObject] pathIdentity];
-            if (pointerId > 0)
-                [TSEventFetcher receiveAXEventID:MIN(MAX(pointerId, 1), 98) atGlobalCoordinate:[rep location] withTouchPhase:phase inWindow:keyWindow onView:keyView];
+            NSInteger clampedId = MIN(MAX(pointerId, 1), 98);
+            
+            // При Began — определяем keyView через hitTest и кешируем
+            // При Moved/Ended — используем тот же view (нужен для UISlider drag)
+            static NSMutableDictionary *activeViews = nil;
+            if (!activeViews) activeViews = [NSMutableDictionary dictionary];
+            
+            UIView *keyView = nil;
+            NSNumber *key = @(clampedId);
+            
+            if (phase == UITouchPhaseBegan) {
+                keyView = [keyWindow hitTest:[rep location] withEvent:nil];
+                if (!keyView || keyView == keyWindow)
+                    keyView = keyWindow.rootViewController.view;
+                if (keyView) activeViews[key] = keyView;
+            } else {
+                keyView = activeViews[key];
+                if (!keyView) {
+                    keyView = [keyWindow hitTest:[rep location] withEvent:nil];
+                    if (!keyView || keyView == keyWindow)
+                        keyView = keyWindow.rootViewController.view;
+                }
+                if (phase == UITouchPhaseEnded || phase == UITouchPhaseCancelled)
+                    [activeViews removeObjectForKey:key];
+            }
+            
+            if (pointerId > 0 && keyView)
+                [TSEventFetcher receiveAXEventID:clampedId atGlobalCoordinate:[rep location] withTouchPhase:phase inWindow:keyWindow onView:keyView];
         }
     }
     else {
