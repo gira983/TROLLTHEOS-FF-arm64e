@@ -139,15 +139,20 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
         if (activeTab) {
             CGPoint pInTab = [menuContainer convertPoint:pInMenu toView:activeTab];
             if ([activeTab pointInside:pInTab withEvent:event]) {
-                // Ищем leaf view в табе
                 for (UIView *sub in activeTab.subviews.reverseObjectEnumerator) {
                     if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
                     CGPoint pInSub = [activeTab convertPoint:pInTab toView:sub];
                     if (![sub pointInside:pInSub withEvent:event]) continue;
+                    // UISlider — возвращаем сразу, он сам обрабатывает drag
+                    if ([sub isKindOfClass:[UISlider class]]) return sub;
                     for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
                         if (leaf.hidden || !leaf.userInteractionEnabled || leaf.alpha < 0.01) continue;
                         CGPoint pInLeaf = [sub convertPoint:pInSub toView:leaf];
-                        if ([leaf pointInside:pInLeaf withEvent:event]) return leaf;
+                        if (![leaf pointInside:pInLeaf withEvent:event]) continue;
+                        // UISlider или UISwitch внутри контейнера
+                        if ([leaf isKindOfClass:[UISlider class]] ||
+                            [leaf isKindOfClass:[UISwitch class]]) return leaf;
+                        return leaf;
                     }
                     return sub;
                 }
@@ -161,7 +166,14 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
                 sub == aimTabContainer || sub == settingTabContainer) continue;
             if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
             CGPoint pInSub = [menuContainer convertPoint:pInMenu toView:sub];
-            if ([sub pointInside:pInSub withEvent:event]) return sub;
+            if (![sub pointInside:pInSub withEvent:event]) continue;
+            // Углубляемся в sub (напр. headerView → circle кнопки)
+            for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
+                if (leaf.hidden || leaf.alpha < 0.01) continue;
+                CGPoint pInLeaf = [sub convertPoint:pInSub toView:leaf];
+                if ([leaf pointInside:pInLeaf withEvent:event]) return leaf;
+            }
+            return sub;
         }
         
             return menuContainer;
@@ -658,10 +670,33 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     menuContainer.center = CGPointMake(bounds.size.width / 2, bounds.size.height / 2);
 }
 // Обработка touches напрямую — надёжнее чем gesture recognizers в HUD процессе
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    // Передаём вверх — UISlider/UISwitch сами начнут обработку
+    [super touchesBegan:touches withEvent:event];
+}
+
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    // Не перехватываем — UISlider получит drag
+    [super touchesMoved:touches withEvent:event];
+}
+
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesCancelled:touches withEvent:event];
+}
+
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = touches.anyObject;
     UIView *hitView = touch.view;
     if (!hitView) {
+        [super touchesEnded:touches withEvent:event];
+        return;
+    }
+    
+    // UISlider и UISwitch — не перехватываем, они обрабатывают touches сами
+    if ([hitView isKindOfClass:[UISlider class]] ||
+        [hitView isKindOfClass:[UISwitch class]] ||
+        [hitView.superview isKindOfClass:[UISlider class]] ||
+        [hitView.superview isKindOfClass:[UISwitch class]]) {
         [super touchesEnded:touches withEvent:event];
         return;
     }
@@ -676,12 +711,16 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
         return;
     }
     
-    // Close button (X)
-    if (tag == 200) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self hideMenu];
-        });
-        return;
+    // Close button X (tag=200) или его подпись (супerview имеет tag 200)
+    UIView *checkView = hitView;
+    while (checkView && checkView != menuContainer) {
+        if (checkView.tag == 200) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self hideMenu];
+            });
+            return;
+        }
+        checkView = checkView.superview;
     }
     
     [super touchesEnded:touches withEvent:event];
