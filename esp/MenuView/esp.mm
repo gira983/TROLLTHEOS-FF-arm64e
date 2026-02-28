@@ -118,8 +118,8 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
         CGPoint p = [self convertPoint:point toView:menuContainer];
         if ([menuContainer pointInside:p withEvent:event]) {
             UIView *hit = [self deepHitTest:p inView:menuContainer event:event];
-            if (hit) return hit;
-            return menuContainer;
+            // Возвращаем hit или menuContainer (он поглотит touch через absorbTap)
+            return hit ? hit : menuContainer;
         }
     }
     if (floatingButton && !floatingButton.hidden) {
@@ -185,6 +185,10 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     menuContainer.layer.borderWidth = 2;
     menuContainer.clipsToBounds = NO;
     menuContainer.hidden = YES;
+    // Поглощаем все touches на menuContainer — чтобы они не уходили выше по иерархии
+    UITapGestureRecognizer *absorbTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(_absorbTap:)];
+    absorbTap.cancelsTouchesInView = NO;
+    [menuContainer addGestureRecognizer:absorbTap];
     [self addSubview:menuContainer];
     
     // Header
@@ -573,6 +577,10 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
         [self centerMenu];
     }];
     [self updatePreviewVisibility];
+}
+
+- (void)_absorbTap:(UITapGestureRecognizer *)gr {
+    // Поглощаем tap — ничего не делаем, просто не даём touch уйти выше
 }
 
 - (void)hideMenu {
