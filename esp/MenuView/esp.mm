@@ -555,7 +555,6 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     fovLabel.font = [UIFont systemFontOfSize:13];
     [aimTabContainer addSubview:fovLabel];
     
-    __weak typeof(self) weakSelf = self;
     HUDSlider *fovSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(15, 110, tabW - 20, 44)];
     fovSlider.minimumValue = 10.0;
     fovSlider.maximumValue = 400.0;
@@ -563,7 +562,9 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     fovSlider.thumbTintColor = [UIColor whiteColor];
     fovSlider.minimumTrackTintColor = [UIColor redColor];
     fovSlider.tag = 300;
-    fovSlider.onValueChanged = ^(float v) { weakSelf->aimFov = v; };
+    // Используем прямую ссылку — слайдер живёт пока живёт MenuView
+    MenuView * __unsafe_unretained selfRef = self;
+    fovSlider.onValueChanged = ^(float v) { selfRef->aimFov = v; };
     [aimTabContainer addSubview:fovSlider];
     
     // Distance Slider
@@ -580,7 +581,7 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     distSlider.thumbTintColor = [UIColor whiteColor];
     distSlider.minimumTrackTintColor = [UIColor blueColor];
     distSlider.tag = 301;
-    distSlider.onValueChanged = ^(float v) { weakSelf->aimDistance = v; };
+    distSlider.onValueChanged = ^(float v) { selfRef->aimDistance = v; };
     [aimTabContainer addSubview:distSlider];
 
 
