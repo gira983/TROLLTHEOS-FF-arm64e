@@ -69,6 +69,8 @@ static bool isBone = YES;
 static bool isHealth = YES;
 static bool isName = YES;
 static bool isDis = YES;
+static bool isLine = NO;       // ESP Lines
+static int  lineOrigin = 1;    // 0 = Top, 1 = Center, 2 = Bottom
 
 // --- Aimbot Config ---
 static bool isAimbot = NO;
@@ -444,14 +446,18 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     CGFloat segW = (parent.bounds.size.width - padding * 2) / options.count;
     CGFloat segH = 28;
 
-    UILabel *titleLbl = [[UILabel alloc] initWithFrame:CGRectMake(padding, y, parent.bounds.size.width - padding * 2, 12)];
-    titleLbl.text = title;
-    titleLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    titleLbl.font = [UIFont systemFontOfSize:10];
-    titleLbl.userInteractionEnabled = NO;
-    [parent addSubview:titleLbl];
+    CGFloat titleH = (title.length > 0) ? 14 : 0;
 
-    UIView *segContainer = [[UIView alloc] initWithFrame:CGRectMake(padding, y + 14, parent.bounds.size.width - padding * 2, segH)];
+    if (title.length > 0) {
+        UILabel *titleLbl = [[UILabel alloc] initWithFrame:CGRectMake(padding, y, parent.bounds.size.width - padding * 2, 12)];
+        titleLbl.text = title;
+        titleLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+        titleLbl.font = [UIFont systemFontOfSize:10];
+        titleLbl.userInteractionEnabled = NO;
+        [parent addSubview:titleLbl];
+    }
+
+    UIView *segContainer = [[UIView alloc] initWithFrame:CGRectMake(padding, y + titleH, parent.bounds.size.width - padding * 2, segH)];
     segContainer.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.18 alpha:1.0];
     segContainer.layer.cornerRadius = 7;
     segContainer.clipsToBounds = YES;
@@ -464,6 +470,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             : [UIColor clearColor];
         segBtn.layer.cornerRadius = 5;
         segBtn.tag = baseTag * 100 + i;
+        segBtn.userInteractionEnabled = NO;
         [segContainer addSubview:segBtn];
 
         UILabel *lbl = [[UILabel alloc] initWithFrame:segBtn.bounds];
@@ -482,7 +489,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] init];
     tap.cancelsTouchesInView = NO;
-    objc_setAssociatedObject(tap, ENCRYPT("handler"), ^(UITapGestureRecognizer *t) {
+    static const char kSegHandlerKey = 0;
+    objc_setAssociatedObject(tap, &kSegHandlerKey, ^(UITapGestureRecognizer *t) {
         CGPoint loc = [t locationInView:segRef];
         int idx = (int)(loc.x / (segRef.bounds.size.width / capturedOptions.count));
         if (idx < 0) idx = 0;
@@ -655,6 +663,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addFeatureToView:featureBox withTitle:@"Health" atY:115 initialValue:isHealth andAction:@selector(toggleHealth:)];
     [self addFeatureToView:featureBox withTitle:@"Name" atY:150 initialValue:isName andAction:@selector(toggleName:)];
     [self addFeatureToView:featureBox withTitle:@"Distance" atY:185 initialValue:isDis andAction:@selector(toggleDist:)];
+    [self addFeatureToView:featureBox withTitle:@"Lines" atY:220 initialValue:isLine andAction:@selector(toggleLine:)];
+
+    NSArray *lineOriginOpts = @[@"Top", @"Center", @"Bottom"];
+    [self addSegmentTo:featureBox atY:256 title:@"" options:lineOriginOpts selectedRef:&lineOrigin tag:20];
 
     // Size slider убран — не влияет на функционал
 
@@ -926,6 +938,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleHealth:(CustomSwitch *)sender { isHealth = sender.isOn; healthBarContainer.hidden = !isHealth; }
 - (void)toggleName:(CustomSwitch *)sender { isName = sender.isOn; previewNameLabel.hidden = !isName; }
 - (void)toggleDist:(CustomSwitch *)sender { isDis = sender.isOn; previewDistLabel.hidden = !isDis; }
+- (void)toggleLine:(CustomSwitch *)sender { isLine = sender.isOn; }
 - (void)toggleAimbot:(CustomSwitch *)sender { isAimbot = sender.isOn; }
 
 
@@ -945,7 +958,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
-    void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, ENCRYPT("handler"));
+    static const char kSegHandlerKey = 0;
+    void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, &kSegHandlerKey);
     if (handler) handler(t);
 }
 
@@ -1281,137 +1295,130 @@ bool get_IsFiring(uint64_t player) {
         }
 
         float boxHeight = abs(w2sHead.y - w2sToe.y);
-        float boxWidth = boxHeight * 0.5f;
-        float x = w2sHead.x - boxWidth * 0.5f;
-        float y = w2sHead.y;
-        
-        if (isBox) {
-            UIColor *boxColor = [UIColor colorWithRed:0.2 green:1.0 blue:0.4 alpha:0.9];
+        float boxWidth  = boxHeight * 0.45f;
+        float bx = w2sHead.x - boxWidth * 0.5f;
+        float by = w2sHead.y;
 
-            // Уголки box (красивее чем просто прямоугольник)
-            float cLen = MIN(boxWidth, boxHeight) * 0.2f;
+        // Цвет зависит от дистанции: близко = красный, средне = жёлтый, далеко = белый
+        UIColor *accentColor;
+        if (dis < 30.0f)       accentColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0];
+        else if (dis < 80.0f)  accentColor = [UIColor colorWithRed:1.0 green:0.85 blue:0.0 alpha:1.0];
+        else                   accentColor = [UIColor colorWithRed:0.9 green:0.9 blue:0.9 alpha:0.85];
+
+        // === BOX: только уголки, тонкие, 1pt ===
+        if (isBox) {
+            float cLen = MIN(boxWidth, boxHeight) * 0.22f;
+            float lw = 1.2f;
             float pts[][4] = {
-                // TL
-                {x, y, x + cLen, y}, {x, y, x, y + cLen},
-                // TR
-                {x + boxWidth - cLen, y, x + boxWidth, y}, {x + boxWidth, y, x + boxWidth, y + cLen},
-                // BL
-                {x, y + boxHeight - cLen, x, y + boxHeight}, {x, y + boxHeight, x + cLen, y + boxHeight},
-                // BR
-                {x + boxWidth, y + boxHeight - cLen, x + boxWidth, y + boxHeight}, {x + boxWidth - cLen, y + boxHeight, x + boxWidth, y + boxHeight}
+                {bx, by, bx+cLen, by}, {bx, by, bx, by+cLen},
+                {bx+boxWidth-cLen, by, bx+boxWidth, by}, {bx+boxWidth, by, bx+boxWidth, by+cLen},
+                {bx, by+boxHeight-cLen, bx, by+boxHeight}, {bx, by+boxHeight, bx+cLen, by+boxHeight},
+                {bx+boxWidth, by+boxHeight-cLen, bx+boxWidth, by+boxHeight}, {bx+boxWidth-cLen, by+boxHeight, bx+boxWidth, by+boxHeight}
             };
             for (int ci = 0; ci < 8; ci++) {
-                CALayer *corner = [CALayer layer];
+                CALayer *c = [CALayer layer];
                 float cx = MIN(pts[ci][0], pts[ci][2]);
                 float cy = MIN(pts[ci][1], pts[ci][3]);
-                float cw = MAX(fabs(pts[ci][2] - pts[ci][0]), 1.5f);
-                float ch = MAX(fabs(pts[ci][3] - pts[ci][1]), 1.5f);
-                corner.frame = CGRectMake(cx, cy, cw, ch);
-                corner.backgroundColor = boxColor.CGColor;
-                [layers addObject:corner];
+                float cw = MAX(fabs(pts[ci][2]-pts[ci][0]), lw);
+                float ch = MAX(fabs(pts[ci][3]-pts[ci][1]), lw);
+                c.frame = CGRectMake(cx, cy, cw, ch);
+                c.backgroundColor = accentColor.CGColor;
+                [layers addObject:c];
             }
         }
-        
+
+        // === NAME: маленький, над головой, полупрозрачный фон ===
         if (isName) {
-            NSString *Name = GetNickName(PawnObject);
-            if (!Name || Name.length == 0) Name = @"Unknown";
+            NSString *name = GetNickName(PawnObject);
+            if (!name || name.length == 0) name = @"?";
+            float nW = MAX(boxWidth, 50.0f);
+            float nH = 11.0f;
+            float nX = bx + (boxWidth - nW) * 0.5f;
+            float nY = by - nH - 3.0f;
 
-            // Фон под именем (тёмный прямоугольник)
-            float nameY = y - 24.0f;
-            float nameBgW = boxWidth + 10;
-            float nameBgH = 13.0f;
-            float nameBgX = x + (boxWidth - nameBgW) / 2.0f;
+            CALayer *nbg = [CALayer layer];
+            nbg.frame = CGRectMake(nX, nY, nW, nH);
+            nbg.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.45].CGColor;
+            nbg.cornerRadius = 2.0f;
+            [layers addObject:nbg];
 
-            CALayer *nameBg = [CALayer layer];
-            nameBg.frame = CGRectMake(nameBgX, nameY - 1, nameBgW, nameBgH + 2);
-            nameBg.backgroundColor = [UIColor colorWithRed:0.024 green:0.035 blue:0.055 alpha:0.92].CGColor;
-            nameBg.cornerRadius = 2.0f;
-            [layers addObject:nameBg];
-
-            // Цветная линия снизу (accent)
-            CALayer *accentLine = [CALayer layer];
-            accentLine.frame = CGRectMake(nameBgX, nameY + nameBgH, nameBgW, 1.0f);
-            accentLine.backgroundColor = [UIColor colorWithRed:1.0 green:0.5 blue:1.0 alpha:1.0].CGColor;
-            [layers addObject:accentLine];
-
-            CATextLayer *nameLayer = [CATextLayer layer];
-            nameLayer.string = Name;
-            nameLayer.fontSize = 9;
-            nameLayer.frame = CGRectMake(nameBgX, nameY, nameBgW, nameBgH);
-            nameLayer.alignmentMode = kCAAlignmentCenter;
-            nameLayer.foregroundColor = [UIColor colorWithWhite:0.7 alpha:1.0].CGColor;
-            nameLayer.contentsScale = [UIScreen mainScreen].scale;
-            [layers addObject:nameLayer];
+            CATextLayer *nl = [CATextLayer layer];
+            nl.string = name;
+            nl.fontSize = 8.5f;
+            nl.frame = CGRectMake(nX, nY, nW, nH);
+            nl.alignmentMode = kCAAlignmentCenter;
+            nl.foregroundColor = [UIColor colorWithWhite:0.95 alpha:1.0].CGColor;
+            nl.contentsScale = [UIScreen mainScreen].scale;
+            [layers addObject:nl];
         }
-        
+
+        // === HEALTH: вертикальная полоска слева от box, тонкая ===
         if (isHealth) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
-                float hpRatio = (float)CurHP / (float)MaxHP;
-                if (hpRatio < 0) hpRatio = 0; if (hpRatio > 1) hpRatio = 1;
+                float ratio = fmaxf(0.0f, fminf(1.0f, (float)CurHP / MaxHP));
+                float bW = 2.5f;
+                float bH = boxHeight;
+                float bX = bx - bW - 2.0f;
+                float bY = by;
 
-                // HP bar: горизонтальная, над box, как в internal
-                float barW = boxWidth;
-                float barH = 4.0f;
-                float barX = x;
-                float barY = y - barH - 5.0f;
+                CALayer *bgH = [CALayer layer];
+                bgH.frame = CGRectMake(bX, bY, bW, bH);
+                bgH.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.5].CGColor;
+                bgH.cornerRadius = 1.0f;
+                [layers addObject:bgH];
 
-                // Фон
-                CALayer *bgBar = [CALayer layer];
-                bgBar.frame = CGRectMake(barX, barY, barW, barH);
-                bgBar.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6].CGColor;
-                bgBar.cornerRadius = barH / 2;
-                [layers addObject:bgBar];
+                UIColor *hpCol;
+                if (ratio > 0.6f)      hpCol = [UIColor colorWithRed:0.15 green:0.9 blue:0.35 alpha:1.0];
+                else if (ratio > 0.3f) hpCol = [UIColor colorWithRed:1.0 green:0.75 blue:0.0 alpha:1.0];
+                else                   hpCol = [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1.0];
 
-                // Fill
-                UIColor *hpColor;
-                if (CurHP >= (int)(MaxHP * 0.7f)) hpColor = [UIColor colorWithRed:0.0 green:0.9 blue:0.3 alpha:1.0];
-                else if (CurHP >= (int)(MaxHP * 0.35f)) hpColor = [UIColor colorWithRed:1.0 green:0.8 blue:0.0 alpha:1.0];
-                else hpColor = [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1.0];
-
-                CALayer *hpBar = [CALayer layer];
-                hpBar.frame = CGRectMake(barX, barY, barW * hpRatio, barH);
-                hpBar.backgroundColor = hpColor.CGColor;
-                hpBar.cornerRadius = barH / 2;
-                [layers addObject:hpBar];
-
-                // HP текст над баром
-                CATextLayer *hpText = [CATextLayer layer];
-                hpText.string = [NSString stringWithFormat:@"%d", CurHP];
-                hpText.fontSize = 8;
-                hpText.frame = CGRectMake(barX, barY - 10, barW, 10);
-                hpText.alignmentMode = kCAAlignmentCenter;
-                hpText.foregroundColor = [UIColor whiteColor].CGColor;
-                hpText.contentsScale = [UIScreen mainScreen].scale;
-                [layers addObject:hpText];
+                CALayer *fillH = [CALayer layer];
+                fillH.frame = CGRectMake(bX, bY + bH*(1.0f-ratio), bW, bH*ratio);
+                fillH.backgroundColor = hpCol.CGColor;
+                fillH.cornerRadius = 1.0f;
+                [layers addObject:fillH];
             }
         }
-        
+
+        // === DISTANCE: мелко под box ===
         if (isDis) {
-            CATextLayer *distLayer = [CATextLayer layer];
-            distLayer.string = [NSString stringWithFormat:@"[%.0fm]", dis];
-            distLayer.fontSize = 9;
-            distLayer.frame = CGRectMake(x - 10, y + boxHeight + 2, boxWidth + 20, 12);
-            distLayer.alignmentMode = kCAAlignmentCenter;
-            distLayer.foregroundColor = [UIColor whiteColor].CGColor;
-            [layers addObject:distLayer];
+            CATextLayer *dl = [CATextLayer layer];
+            dl.string = [NSString stringWithFormat:@"%.0fm", dis];
+            dl.fontSize = 8.0f;
+            dl.frame = CGRectMake(bx, by+boxHeight+1.0f, boxWidth, 10.0f);
+            dl.alignmentMode = kCAAlignmentCenter;
+            dl.foregroundColor = [UIColor colorWithWhite:0.7 alpha:0.8].CGColor;
+            dl.contentsScale = [UIScreen mainScreen].scale;
+            [layers addObject:dl];
+        }
+
+        // === ESP LINE: от края экрана до ног/центра/головы врага ===
+        if (isLine) {
+            CGFloat sw = self.bounds.size.width;
+            CGFloat sh = self.bounds.size.height;
+            CGPoint from;
+            if (lineOrigin == 0)      from = CGPointMake(sw*0.5f, 0);           // Top
+            else if (lineOrigin == 1) from = CGPointMake(sw*0.5f, sh*0.5f);     // Center
+            else                      from = CGPointMake(sw*0.5f, sh);           // Bottom
+
+            CGPoint to = CGPointMake(bx + boxWidth*0.5f, by + boxHeight);        // к ногам врага
+            DrawBoneLine(layers, from, to, [accentColor colorWithAlphaComponent:0.5], 0.8f);
         }
     }
 
-    // Aim Trigger: определяем нужно ли целиться сейчас
+    // Aim Trigger
     bool shouldAimNow = false;
     if (aimTrigger == 0) shouldAimNow = true;
     else if (aimTrigger == 1) shouldAimNow = isFire;
 
     if (isAimbot && isVaildPtr(bestTarget) && shouldAimNow) {
-        // Выбор кости цели для прицеливания
         Vector3 aimPos;
         if (aimTarget == 0) aimPos = getPositionExt(getHead(bestTarget));
-        else if (aimTarget == 1) aimPos = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.15f, 0); // Neck
-        else aimPos = getPositionExt(getHip(bestTarget)); // Hip
+        else if (aimTarget == 1) aimPos = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.15f, 0);
+        else aimPos = getPositionExt(getHip(bestTarget));
 
         Quaternion targetLook = GetRotationToLocation(aimPos, 0.1f, myLocation);
-
         set_aim(myPawnObject, targetLook);
     }
 }
