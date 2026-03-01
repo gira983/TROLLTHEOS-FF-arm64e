@@ -1486,14 +1486,7 @@ bool get_IsVisible(uint64_t player) {
 
         Quaternion targetLook = GetRotationToLocation(aimPos, 0.1f, myLocation);
 
-        if (aimSpeed >= 0.99f) {
-            set_aim(myPawnObject, targetLook);
-        } else {
-            // Smooth aim: lerp между текущим и целевым
-            Quaternion currentRot = GetRotation(myPawnObject);
-            Quaternion smoothed = Quaternion::Lerp(currentRot, targetLook, aimSpeed);
-            set_aim(myPawnObject, smoothed);
-        }
+        set_aim(myPawnObject, targetLook);
     }
 }
 
