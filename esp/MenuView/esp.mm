@@ -941,7 +941,7 @@ static bool isStreamerMode = NO;   // Stream Proof
     // Tap по всему контейнеру
     NSInteger capturedBase = baseTag;
     UIView * __unsafe_unretained segRef = segContainer;
-    int * __unsafe_unretained ref = selectedRef;
+    int * ref = selectedRef;
     NSArray *capturedOptions = options;
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] init];
@@ -963,11 +963,11 @@ static bool isStreamerMode = NO;   // Stream Proof
         }
     }, OBJC_ASSOCIATION_COPY_NONATOMIC);
 
-    [tap addTarget:self action:@selector(handleSegmentTap:)];
+    [tap addTarget:self action:@selector(handleSegmentTapGesture:)];
     [segContainer addGestureRecognizer:tap];
 }
 
-- (void)handleSegmentTap:(UITapGestureRecognizer *)t {
+- (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
     void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, "handler");
     if (handler) handler(t);
 }
@@ -1201,6 +1201,12 @@ void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
     
     WriteAddr<Quaternion>(player + 0x53C, rotation);
+}
+
+bool get_IsSighting(uint64_t player) {
+    // ADS/scope check — читаем тот же оффсет что и IsFiring но для scope
+    // Используем get_IsFiring как fallback если нет отдельного оффсета
+    return get_IsFiring(player); // TODO: заменить на правильный оффсет если есть
 }
 
 bool get_IsFiring(uint64_t player) {
@@ -1484,7 +1490,7 @@ bool get_IsVisible(uint64_t player) {
             set_aim(myPawnObject, targetLook);
         } else {
             // Smooth aim: lerp между текущим и целевым
-            Quaternion currentRot = GetSightRotation(myPawnObject);
+            Quaternion currentRot = GetRotation(myPawnObject);
             Quaternion smoothed = Quaternion::Lerp(currentRot, targetLook, aimSpeed);
             set_aim(myPawnObject, smoothed);
         }
