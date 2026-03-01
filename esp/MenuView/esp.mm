@@ -51,24 +51,50 @@ static bool isStreamerMode = NO;   // Stream Proof
 @property (nonatomic, assign, getter=isOn) BOOL on;
 @end
 
-@implementation CustomSwitch { UIView *_thumb; }
+@implementation CustomSwitch { UIView *_thumb; BOOL _touchActive; }
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
         self.backgroundColor = [UIColor clearColor];
+        self.userInteractionEnabled = YES;
         _thumb = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 22, 22)];
         _thumb.backgroundColor = [UIColor colorWithWhite:0.75 alpha:1.0];
         _thumb.layer.cornerRadius = 11;
+        _thumb.userInteractionEnabled = NO; // не перехватывает touches — иначе hitTest не найдёт CustomSwitch
         [self addSubview:_thumb];
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggle)];
-        [self addGestureRecognizer:tap];
+        // НЕТ UITapGestureRecognizer — конфликтует с UIScrollView pan и крашит при скролле
     }
     return self;
 }
+// Явный hitTest — всегда возвращаем себя, не thumb
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    if (self.hidden || !self.userInteractionEnabled || self.alpha < 0.01) return nil;
+    return [self pointInside:point withEvent:event] ? self : nil;
+}
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    _touchActive = YES;
+}
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    CGPoint pt = [touches.anyObject locationInView:self];
+    if (pt.x < -10 || pt.x > self.bounds.size.width + 10 ||
+        pt.y < -10 || pt.y > self.bounds.size.height + 10) {
+        _touchActive = NO;
+    }
+}
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (_touchActive) {
+        CGPoint pt = [touches.anyObject locationInView:self];
+        if ([self pointInside:pt withEvent:event]) [self toggle];
+    }
+    _touchActive = NO;
+}
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    _touchActive = NO; // scroll отменил touch — не переключаем
+}
 - (void)drawRect:(CGRect)rect {
-    CGContextRef context = UIGraphicsGetCurrentContext();
+    CGContextRef ctx = UIGraphicsGetCurrentContext();
     UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:self.bounds cornerRadius:self.bounds.size.height/2];
-    CGContextSetFillColorWithColor(context, (self.isOn ? [UIColor colorWithRed:0.0 green:0.8 blue:0.0 alpha:1.0] : [UIColor colorWithWhite:0.15 alpha:1.0]).CGColor);
+    CGContextSetFillColorWithColor(ctx, (self.isOn ? [UIColor colorWithRed:0.0 green:0.8 blue:0.0 alpha:1.0] : [UIColor colorWithWhite:0.15 alpha:1.0]).CGColor);
     [path fill];
 }
 - (void)setOn:(BOOL)on {
@@ -80,31 +106,40 @@ static bool isStreamerMode = NO;   // Stream Proof
 }
 - (void)updateThumbPosition {
     [UIView animateWithDuration:0.2 animations:^{
-        CGRect frame = self->_thumb.frame;
-        frame.origin.x = self.isOn ? self.bounds.size.width - frame.size.width - 2 : 2;
-        self->_thumb.frame = frame;
+        CGRect f = self->_thumb.frame;
+        f.origin.x = self.isOn ? self.bounds.size.width - f.size.width - 2 : 2;
+        self->_thumb.frame = f;
         self->_thumb.backgroundColor = self.isOn ? UIColor.whiteColor : [UIColor colorWithWhite:0.75 alpha:1.0];
     }];
 }
 @end
 
-// Кастомный UIScrollView — передаёт тапы на интерактивные controls (CustomSwitch, UIButton)
-// без задержек, при этом не ломает scroll gesture
+// Кастомный UIScrollView — передаёт тапы на UIControl (CustomSwitch, UIButton) внутри subviews
 @interface PassThroughScrollView : UIScrollView
 @end
 @implementation PassThroughScrollView
+// Рекурсивно ищет UIControl внутри view по точке
+- (UIView *)findControl:(UIView *)view atPoint:(CGPoint)point {
+    // Сначала проверяем сам view
+    if ([view isKindOfClass:[UIControl class]] && !view.hidden && view.userInteractionEnabled) {
+        CGPoint p = [self convertPoint:point toView:view];
+        if ([view pointInside:p withEvent:nil]) return view;
+    }
+    // Потом его subviews (в обратном порядке — верхние первыми)
+    for (UIView *sub in [view.subviews reverseObjectEnumerator]) {
+        UIView *hit = [self findControl:sub atPoint:point];
+        if (hit) return hit;
+    }
+    return nil;
+}
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // Проходим subviews в обратном порядке (верхние первыми)
+    // Ищем UIControl (CustomSwitch, UIButton) рекурсивно по всему дереву
     for (UIView *subview in [self.subviews reverseObjectEnumerator]) {
         if (subview.hidden || !subview.userInteractionEnabled || subview.alpha < 0.01) continue;
-        CGPoint converted = [self convertPoint:point toView:subview];
-        UIView *hit = [subview hitTest:converted withEvent:event];
-        // Возвращаем только UIControl (CustomSwitch, UIButton) — не обычные UIView
-        if (hit && [hit isKindOfClass:[UIControl class]]) {
-            return hit;
-        }
+        UIView *control = [self findControl:subview atPoint:point];
+        if (control) return control;
     }
-    // Для всего остального — стандартный hitTest (вернёт сам scrollView для скролла)
+    // Ничего не нашли — стандартный hitTest (scrollView берёт жест для скролла)
     return [super hitTest:point withEvent:event];
 }
 @end
@@ -296,90 +331,25 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
-    
-    // Меню открыто
+
+    // Меню открыто — делегируем стандартный hitTest UIKit через menuContainer
     if (menuContainer && !menuContainer.hidden) {
         CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
         if ([menuContainer pointInside:pInMenu withEvent:event]) {
-        
-        espLog([NSString stringWithFormat:@"[HITTEST] point=(%.0f,%.0f) menuContainer OK", pInMenu.x, pInMenu.y]);
-        
-        // 1. ПРИОРИТЕТ: sidebar с кнопками табов (Main/AIM/Setting)
-        if (_sidebar && !_sidebar.hidden) {
-            CGPoint pInSidebar = [menuContainer convertPoint:pInMenu toView:_sidebar];
-            if ([_sidebar pointInside:pInSidebar withEvent:event]) {
-                for (UIView *btn in _sidebar.subviews.reverseObjectEnumerator) {
-                    if (btn.hidden || !btn.userInteractionEnabled) continue;
-                    CGPoint pInBtn = [_sidebar convertPoint:pInSidebar toView:btn];
-                    if ([btn pointInside:pInBtn withEvent:event]) {
-                        espLog([NSString stringWithFormat:@"[HITTEST] → sidebar btn tag=%ld", (long)btn.tag]);
-                        return btn;
-                    }
-                }
-                espLog(@"[HITTEST] → sidebar itself");
-                return _sidebar;
-            }
-        }
-        
-        // 2. Активный таб контейнер
-        UIView *activeTab = nil;
-        if (mainTabContainer && !mainTabContainer.hidden) activeTab = mainTabContainer;
-        else if (aimTabContainer && !aimTabContainer.hidden) activeTab = aimTabContainer;
-        else if (settingTabContainer && !settingTabContainer.hidden) activeTab = settingTabContainer;
-        
-        if (activeTab) {
-            CGPoint pInTab = [menuContainer convertPoint:pInMenu toView:activeTab];
-            if ([activeTab pointInside:pInTab withEvent:event]) {
-                for (UIView *sub in activeTab.subviews.reverseObjectEnumerator) {
-                    if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
-                    CGPoint pInSub = [activeTab convertPoint:pInTab toView:sub];
-                    if (![sub pointInside:pInSub withEvent:event]) continue;
-                    // HUDSlider — возвращаем сразу, он сам обрабатывает drag через touchesMoved
-                    if ([sub isKindOfClass:[HUDSlider class]]) {
-                        espLog([NSString stringWithFormat:@"[HITTEST] → HUDSlider frame=(%.0f,%.0f,%.0f,%.0f)", sub.frame.origin.x, sub.frame.origin.y, sub.frame.size.width, sub.frame.size.height]);
-                        return sub;
-                    }
-                    for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
-                        if (leaf.hidden || !leaf.userInteractionEnabled || leaf.alpha < 0.01) continue;
-                        CGPoint pInLeaf = [sub convertPoint:pInSub toView:leaf];
-                        if (![leaf pointInside:pInLeaf withEvent:event]) continue;
-                        // UISlider или UISwitch внутри контейнера
-                        if ([leaf isKindOfClass:[UISlider class]] ||
-                            [leaf isKindOfClass:[UISwitch class]]) return leaf;
-                        return leaf;
-                    }
-                    return sub;
-                }
-                return activeTab;
-            }
-        }
-        
-        // 3. Остальное в menuContainer (header, close button)
-        for (UIView *sub in menuContainer.subviews.reverseObjectEnumerator) {
-            if (sub == _sidebar || sub == mainTabContainer || 
-                sub == aimTabContainer || sub == settingTabContainer) continue;
-            if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
-            CGPoint pInSub = [menuContainer convertPoint:pInMenu toView:sub];
-            if (![sub pointInside:pInSub withEvent:event]) continue;
-            // Углубляемся в sub (напр. headerView → circle кнопки)
-            for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
-                if (leaf.hidden || leaf.alpha < 0.01) continue;
-                CGPoint pInLeaf = [sub convertPoint:pInSub toView:leaf];
-                if ([leaf pointInside:pInLeaf withEvent:event]) return leaf;
-            }
-            return sub;
-        }
-        
+            espLog([NSString stringWithFormat:@"[HITTEST] point=(%.0f,%.0f) menuContainer OK", pInMenu.x, pInMenu.y]);
+            // Стандартный hitTest UIKit — он правильно найдёт нужный view
+            UIView *hit = [menuContainer hitTest:pInMenu withEvent:event];
+            if (hit) return hit;
             return menuContainer;
-        } // конец if pointInside menuContainer
+        }
     }
-    
-    // Кнопка M
+
+    // Кнопка M (floatingButton)
     if (floatingButton && !floatingButton.hidden) {
         CGPoint p = [self convertPoint:point toView:floatingButton];
         if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
     }
-    
+
     return nil;
 }
 
@@ -598,6 +568,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         if (i == 2) {
             btnIcon.text = @"X";
             circle.tag = 200; // tag 200 = close button
+            UITapGestureRecognizer *closeTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleCloseTap:)];
+            [circle addGestureRecognizer:closeTap];
         }
         [circle addSubview:btnIcon];
         [headerView addSubview:circle];
@@ -629,6 +601,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         btnLbl.textAlignment = NSTextAlignmentCenter;
         btnLbl.userInteractionEnabled = NO;
         [btn addSubview:btnLbl];
+        // Gesture recognizer — надёжнее чем touchesEnded для UIView (не UIButton)
+        UITapGestureRecognizer *tabTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTabTap:)];
+        [btn addGestureRecognizer:tabTap];
         [sidebar addSubview:btn];
     }
 
@@ -1084,68 +1059,32 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     }
     menuContainer.center = CGPointMake(bounds.size.width / 2, bounds.size.height / 2);
 }
-// MenuView перехватывает touches на уровне корневого view.
-// НЕ вызываем super — hitTest уже направил touch нужному view напрямую.
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // Намеренно пусто — не передаём super
+// Обработчики tap — используем gesture recognizers вместо ручного touchesEnded
+// Это надёжно работает со всей иерархией UIScrollView/PassThroughScrollView
+- (void)handleTabTap:(UITapGestureRecognizer *)gr {
+    NSInteger tag = gr.view.tag;
+    if (tag >= 100 && tag <= 102) {
+        espLog([NSString stringWithFormat:@"[TAP] sidebar btn tag=%ld", (long)tag]);
+        [self switchToTab:(int)(tag - 100)];
+    }
 }
 
+- (void)handleCloseTap:(UITapGestureRecognizer *)gr {
+    espLog(@"[TAP] close button");
+    [self hideMenu];
+}
+
+// touchesBegan/Moved/Cancelled/Ended в MenuView не нужны —
+// все touches обрабатываются gesture recognizers или напрямую через UIKit responder chain
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *t = touches.anyObject;
     espLog([NSString stringWithFormat:@"[MOVED] view=%@ class=%@", t.view, NSStringFromClass([t.view class])]);
-    // Намеренно пусто — не передаём super
 }
-
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // Намеренно пусто — не передаём super
-}
-
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = touches.anyObject;
-    UIView *hitView = touch.view;
-    espLog([NSString stringWithFormat:@"[ENDED] view=%@ class=%@ tag=%ld", hitView, NSStringFromClass([hitView class]), (long)hitView.tag]);
-    if (!hitView) return;
-    
-    // Игнорируем touches внутри UIScrollView — они уже обработаны scroll механизмом
-    // Без этого скролл в AIM tab крашит меню (touchesEnded вызывается с view=floatingButton)
-    UIView *v = hitView;
-    while (v) {
-        if ([v isKindOfClass:[UIScrollView class]]) return;
-        if (v == menuContainer) break;
-        v = v.superview;
-    }
-    
-    // HUDSlider — не перехватываем
-    if ([hitView isKindOfClass:[HUDSlider class]] ||
-        [hitView.superview isKindOfClass:[HUDSlider class]]) return;
-    
-    // CustomSwitch — не перехватываем, он сам обработал через touchesEnded
-    if ([hitView isKindOfClass:[CustomSwitch class]]) return;
-    
-    // UIButton (сегменты) — не перехватываем, UIControlEventTouchUpInside срабатывает сам
-    if ([hitView isKindOfClass:[UIButton class]]) return;
-    
-    NSInteger tag = hitView.tag;
-    
-    // Таб кнопки: 100=Main, 101=AIM, 102=Setting
-    if (tag >= 100 && tag <= 102) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self switchToTab:tag - 100];
-        });
-        return;
-    }
-    
-    // Close button X (tag=200) или его подпись (супerview имеет tag 200)
-    UIView *checkView = hitView;
-    while (checkView && checkView != menuContainer) {
-        if (checkView.tag == 200) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self hideMenu];
-            });
-            return;
-        }
-        checkView = checkView.superview;
-    }
+    espLog([NSString stringWithFormat:@"[ENDED] view=%@ class=%@ tag=%ld", touch.view, NSStringFromClass([touch.view class]), (long)touch.view.tag]);
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
