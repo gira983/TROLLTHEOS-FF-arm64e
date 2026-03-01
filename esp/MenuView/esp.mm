@@ -412,12 +412,13 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     lbl.userInteractionEnabled = NO;
     [row addSubview:lbl];
 
-    CustomSwitch *sw = [[CustomSwitch alloc] initWithFrame:CGRectMake(w - 58, 5, 50, 22)];
+    CustomSwitch *sw = [[CustomSwitch alloc] initWithFrame:CGRectMake(0, 0, 50, 22)];
     sw.on = isOn;
     sw.userInteractionEnabled = YES;
     [sw addTarget:self action:action forControlEvents:UIControlEventValueChanged];
-    [scroll addSubview:sw]; // добавляем ПРЯМО в scroll, не в row — hitTest находит сразу
-    sw.center = CGPointMake(row.frame.origin.x + w - 33, row.frame.origin.y + 16);
+    [scroll addSubview:sw]; // прямо в scroll — hitTest находит без рекурсии
+    // Позиция: правый край row (8+w) минус отступ 8 и ширина sw 50; Y: центр row
+    sw.frame = CGRectMake(8 + w - 58, *ay + 5, 50, 22);
     *ay += 36;
 }
 
