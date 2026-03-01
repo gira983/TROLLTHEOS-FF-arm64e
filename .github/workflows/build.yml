@@ -34,7 +34,7 @@ jobs:
       - name: Upload tipa
         uses: actions/upload-artifact@v4
         with:
-          name: Xyris-arm64e
+          name: Fryzz-arm64e
           path: packages/*.tipa
           if-no-files-found: warn
 
