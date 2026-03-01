@@ -51,7 +51,7 @@ static bool isStreamerMode = NO;   // Stream Proof
 @property (nonatomic, assign, getter=isOn) BOOL on;
 @end
 
-@implementation CustomSwitch { UIView *_thumb; }
+@implementation CustomSwitch { UIView *_thumb; CGPoint _touchStartPoint; BOOL _touchMoved; }
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
@@ -76,17 +76,37 @@ static bool isStreamerMode = NO;   // Stream Proof
     return nil;
 }
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // Принимаем touch сразу — ничего не передаём дальше чтобы scroll не перехватил
+    // Начинаем tracking — НЕ передаём super чтобы не активировать scroll сразу
+    _touchStartPoint = [touches.anyObject locationInView:self];
+    _touchMoved = NO;
+}
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    CGPoint pt = [touches.anyObject locationInView:self];
+    CGFloat dx = pt.x - _touchStartPoint.x;
+    CGFloat dy = pt.y - _touchStartPoint.y;
+    // Если значительное вертикальное движение — передаём scroll родителю
+    if (!_touchMoved && (fabs(dy) > 5 || fabs(dx) > 5)) {
+        _touchMoved = YES;
+    }
+    if (_touchMoved) {
+        // Передаём touches родителю (UIScrollView) для скролла
+        [self.nextResponder touchesMoved:touches withEvent:event];
+    }
 }
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    UITouch *touch = touches.anyObject;
-    CGPoint pt = [touch locationInView:self];
-    if ([self pointInside:pt withEvent:event]) {
-        [self toggle];
+    if (!_touchMoved) {
+        // Тап без движения — переключаем
+        UITouch *touch = touches.anyObject;
+        CGPoint pt = [touch locationInView:self];
+        if ([self pointInside:pt withEvent:event]) {
+            [self toggle];
+        }
+    } else {
+        [self.nextResponder touchesEnded:touches withEvent:event];
     }
 }
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // игнорируем отмены от scroll
+    [self.nextResponder touchesCancelled:touches withEvent:event];
 }
 - (void)drawRect:(CGRect)rect {
     CGContextRef context = UIGraphicsGetCurrentContext();
@@ -302,7 +322,7 @@ static bool isStreamerMode = NO;   // Stream Proof
             }
         }
         
-        // 2. Активный таб контейнер
+        // 2. Активный таб — стандартный hitTest UIKit для всего содержимого
         UIView *activeTab = nil;
         if (mainTabContainer && !mainTabContainer.hidden) activeTab = mainTabContainer;
         else if (aimTabContainer && !aimTabContainer.hidden) activeTab = aimTabContainer;
@@ -311,32 +331,19 @@ static bool isStreamerMode = NO;   // Stream Proof
         if (activeTab) {
             CGPoint pInTab = [menuContainer convertPoint:pInMenu toView:activeTab];
             if ([activeTab pointInside:pInTab withEvent:event]) {
+                // Для HUDSlider в mainTabContainer — прямой поиск
                 for (UIView *sub in activeTab.subviews.reverseObjectEnumerator) {
                     if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
                     CGPoint pInSub = [activeTab convertPoint:pInTab toView:sub];
                     if (![sub pointInside:pInSub withEvent:event]) continue;
-                    // HUDSlider — возвращаем сразу, он сам обрабатывает drag через touchesMoved
                     if ([sub isKindOfClass:[HUDSlider class]]) {
                         espLog([NSString stringWithFormat:@"[HITTEST] → HUDSlider frame=(%.0f,%.0f,%.0f,%.0f)", sub.frame.origin.x, sub.frame.origin.y, sub.frame.size.width, sub.frame.size.height]);
                         return sub;
                     }
-                    // UIScrollView — пусть сам делает hitTest рекурсивно
-                    if ([sub isKindOfClass:[UIScrollView class]]) {
-                        UIView *hit = [sub hitTest:pInSub withEvent:event];
-                        return hit ? hit : sub;
-                    }
-                    for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
-                        if (leaf.hidden || !leaf.userInteractionEnabled || leaf.alpha < 0.01) continue;
-                        CGPoint pInLeaf = [sub convertPoint:pInSub toView:leaf];
-                        if (![leaf pointInside:pInLeaf withEvent:event]) continue;
-                        // UISlider или UISwitch внутри контейнера
-                        if ([leaf isKindOfClass:[UISlider class]] ||
-                            [leaf isKindOfClass:[UISwitch class]]) return leaf;
-                        return leaf;
-                    }
-                    return sub;
                 }
-                return activeTab;
+                // Всё остальное — стандартный hitTest UIKit (UIScrollView, кнопки, свитчи)
+                UIView *hit = [activeTab hitTest:pInTab withEvent:event];
+                return hit ? hit : activeTab;
             }
         }
         
@@ -1087,37 +1094,36 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 // Обработка touches напрямую — надёжнее чем gesture recognizers в HUD процессе
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // Передаём вверх — UISlider/UISwitch сами начнут обработку
-    [super touchesBegan:touches withEvent:event];
+    // Не вызываем super — UIScrollView и дочерние view сами обрабатывают через hitTest
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *t = touches.anyObject;
     espLog([NSString stringWithFormat:@"[MOVED] view=%@ class=%@", t.view, NSStringFromClass([t.view class])]);
-    [super touchesMoved:touches withEvent:event];
+    // Не вызываем super
 }
 
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [super touchesCancelled:touches withEvent:event];
+    // Не вызываем super
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = touches.anyObject;
     UIView *hitView = touch.view;
     espLog([NSString stringWithFormat:@"[ENDED] view=%@ class=%@ tag=%ld", hitView, NSStringFromClass([hitView class]), (long)hitView.tag]);
-    if (!hitView) {
-        [super touchesEnded:touches withEvent:event];
-        return;
+    if (!hitView) return;
+    
+    // Если touch принадлежит UIScrollView или view внутри него — не трогаем, они сами обработали
+    UIView *v = hitView;
+    while (v) {
+        if ([v isKindOfClass:[UIScrollView class]]) return;
+        if (v == menuContainer) break;
+        v = v.superview;
     }
     
-    // HUDSlider и UISwitch — не перехватываем, они обрабатывают touches сами
+    // HUDSlider — не перехватываем
     if ([hitView isKindOfClass:[HUDSlider class]] ||
-        [hitView isKindOfClass:[UISwitch class]] ||
-        [hitView.superview isKindOfClass:[HUDSlider class]] ||
-        [hitView.superview isKindOfClass:[UISwitch class]]) {
-        [super touchesEnded:touches withEvent:event];
-        return;
-    }
+        [hitView.superview isKindOfClass:[HUDSlider class]]) return;
     
     NSInteger tag = hitView.tag;
     
@@ -1140,8 +1146,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         }
         checkView = checkView.superview;
     }
-    
-    [super touchesEnded:touches withEvent:event];
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
