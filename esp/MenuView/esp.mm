@@ -227,6 +227,23 @@ static bool isStreamerMode = NO;   // Stream Proof
 
 @end
 
+// Скрывает view от ReplayKit/скриншотов через приватный CALayer ключ disableUpdateMask.
+// View остаётся ВИДИМОЙ на экране пользователя.
+static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
+    static NSString *maskKey = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        // base64("disableUpdateMask")
+        NSData *data = [[NSData alloc] initWithBase64EncodedString:@"ZGlzYWJsZVVwZGF0ZU1hc2s="
+                                                            options:NSDataBase64DecodingIgnoreUnknownCharacters];
+        if (data) maskKey = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    });
+    if (!v || !maskKey || ![v.layer respondsToSelector:NSSelectorFromString(maskKey)]) return NO;
+    NSInteger value = hidden ? ((1 << 1) | (1 << 4)) : 0;
+    [v.layer setValue:@(value) forKey:maskKey];
+    return YES;
+}
+
 
 @implementation MenuView {
     UIView *menuContainer;
