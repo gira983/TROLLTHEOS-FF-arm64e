@@ -5,7 +5,8 @@
 extern void writeLog(NSString *msg);
 // Fallback если не линкуется
 static void espLog(NSString *msg) {
-    static NSString *path = @"/var/mobile/Library/Caches/hud_debug.log";
+#ifdef DEBUG
+    static NSString *path = NSSENCRYPT("/var/mobile/Library/Caches/hud_debug.log");
     NSString *line = [NSString stringWithFormat:@"%@\n", msg];
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
     if (!fh) {
@@ -15,8 +16,44 @@ static void espLog(NSString *msg) {
     [fh seekToEndOfFile];
     [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
     [fh closeFile];
+#endif
 }
 #import "mahoa.h"
+
+// --- Obfuscated offsets (compile-time encrypted, runtime decrypted) ---
+// Player fields
+#define OFF_ROTATION        ENCRYPTOFFSET("0x53C")
+#define OFF_FIRING          ENCRYPTOFFSET("0x750")
+#define OFF_IPRIDATAPOOL    ENCRYPTOFFSET("0x68")
+#define OFF_PLAYERID        ENCRYPTOFFSET("0x338")
+#define OFF_CAMERA_TRANSFORM ENCRYPTOFFSET("0x318")
+#define OFF_HEAD_NODE       ENCRYPTOFFSET("0x5B8")
+#define OFF_HIP_NODE        ENCRYPTOFFSET("0x5C0")
+#define OFF_LEFTANKLE_NODE  ENCRYPTOFFSET("0x5F0")
+#define OFF_RIGHTANKLE_NODE ENCRYPTOFFSET("0x5F8")
+#define OFF_RIGHTTOE_NODE   ENCRYPTOFFSET("0x608")
+#define OFF_LEFTARM_NODE    ENCRYPTOFFSET("0x620")
+#define OFF_LEFTFOREARM_NODE ENCRYPTOFFSET("0x648")
+#define OFF_LEFTHAND_NODE   ENCRYPTOFFSET("0x638")
+#define OFF_RIGHTARM_NODE   ENCRYPTOFFSET("0x628")
+#define OFF_RIGHTFOREARM_NODE ENCRYPTOFFSET("0x640")
+#define OFF_RIGHTHAND_NODE  ENCRYPTOFFSET("0x630")
+// Match/game fields
+#define OFF_MATCH           ENCRYPTOFFSET("0x90")
+#define OFF_LOCALPLAYER     ENCRYPTOFFSET("0xB0")
+#define OFF_CAMERA_MGR      ENCRYPTOFFSET("0xD8")
+#define OFF_CAMERA_MGR2     ENCRYPTOFFSET("0x18")
+#define OFF_MATRIX_BASE     ENCRYPTOFFSET("0xD8")
+#define OFF_CAM_V1          ENCRYPTOFFSET("0x10")
+#define OFF_PLAYERLIST      ENCRYPTOFFSET("0x120")
+#define OFF_PLAYERLIST_ARR  ENCRYPTOFFSET("0x28")
+#define OFF_PLAYERLIST_CNT  ENCRYPTOFFSET("0x18")
+#define OFF_PLAYERLIST_ITEM ENCRYPTOFFSET("0x20")
+// GameFacade
+#define OFF_GAMEFACADE_TI   ENCRYPTOFFSET("0xA4D2968")
+#define OFF_GAMEFACADE_ST   ENCRYPTOFFSET("0xB8")
+// BodyPart
+#define OFF_BODYPART_POS    ENCRYPTOFFSET("0x10")
 #import <QuartzCore/QuartzCore.h>
 #import <UIKit/UIKit.h> 
 #include <sys/mman.h>
@@ -39,8 +76,8 @@ static float aimFov = 150.0f; // Bán kính vòng tròn FOV
 static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 
 // --- Advanced Aimbot Config ---
-static bool isIgnoreKnocked = NO;  // Ignore knocked enemies
-static bool isVisibleOnly = NO;    // Visible only (raycast check)
+
+
 static int  aimMode = 1;           // 0 = Closest to Player, 1 = Closest to Crosshair
 static int  aimTrigger = 1;        // 0 = Always, 1 = Only Shooting, 2 = Only Aiming
 static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
@@ -324,7 +361,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (menuContainer && !menuContainer.hidden) {
         CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
         if ([menuContainer pointInside:pInMenu withEvent:event]) {
+#ifdef DEBUG
             espLog([NSString stringWithFormat:@"[HITTEST] point=(%.0f,%.0f) menuContainer OK", pInMenu.x, pInMenu.y]);
+#endif
             // Стандартный hitTest UIKit — он правильно найдёт нужный view
             UIView *hit = [menuContainer hitTest:pInMenu withEvent:event];
             if (hit) return hit;
@@ -443,7 +482,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] init];
     tap.cancelsTouchesInView = NO;
-    objc_setAssociatedObject(tap, "handler", ^(UITapGestureRecognizer *t) {
+    objc_setAssociatedObject(tap, ENCRYPT("handler"), ^(UITapGestureRecognizer *t) {
         CGPoint loc = [t locationInView:segRef];
         int idx = (int)(loc.x / (segRef.bounds.size.width / capturedOptions.count));
         if (idx < 0) idx = 0;
@@ -639,8 +678,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [aimTabContainer addSubview:aimSep1]; ay += 6;
 
     [self addFeatureToView:aimTabContainer withTitle:@"Enable Aimbot" atY:ay initialValue:isAimbot andAction:@selector(toggleAimbot:)]; ay += 30;
-    [self addFeatureToView:aimTabContainer withTitle:@"Ignore Knocked" atY:ay initialValue:isIgnoreKnocked andAction:@selector(toggleIgnoreKnocked:)]; ay += 30;
-    [self addFeatureToView:aimTabContainer withTitle:@"Visible Only" atY:ay initialValue:isVisibleOnly andAction:@selector(toggleVisibleOnly:)]; ay += 30;
 
     ay += 4;
     UIView *aimSep2 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
@@ -656,7 +693,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     NSArray *aimTargetOpts = @[@"Head", @"Neck", @"Hip"];
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTargetOpts selectedRef:&aimTarget tag:11]; ay += 32;
 
-    NSArray *aimTriggerOpts = @[@"Always", @"Shooting", @"Scope"];
+    NSArray *aimTriggerOpts = @[@"Always", @"Shooting"];
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTriggerOpts selectedRef:&aimTrigger tag:12];
 
 
@@ -890,8 +927,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleName:(CustomSwitch *)sender { isName = sender.isOn; previewNameLabel.hidden = !isName; }
 - (void)toggleDist:(CustomSwitch *)sender { isDis = sender.isOn; previewDistLabel.hidden = !isDis; }
 - (void)toggleAimbot:(CustomSwitch *)sender { isAimbot = sender.isOn; }
-- (void)toggleIgnoreKnocked:(CustomSwitch *)sender { isIgnoreKnocked = sender.isOn; }
-- (void)toggleVisibleOnly:(CustomSwitch *)sender { isVisibleOnly = sender.isOn; }
+
+
 - (void)toggleStreamerMode:(CustomSwitch *)sender {
     isStreamerMode = sender.isOn;
 
@@ -908,7 +945,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
-    void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, "handler");
+    void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, ENCRYPT("handler"));
     if (handler) handler(t);
 }
 
@@ -1002,28 +1039,21 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)handleTabTap:(UITapGestureRecognizer *)gr {
     NSInteger tag = gr.view.tag;
     if (tag >= 100 && tag <= 103) {
+#ifdef DEBUG
         espLog([NSString stringWithFormat:@"[TAP] sidebar btn tag=%ld", (long)tag]);
+#endif
         [self switchToTab:(int)(tag - 100)];
     }
 }
 
 - (void)handleCloseTap:(UITapGestureRecognizer *)gr {
-    espLog(@"[TAP] close button");
     [self hideMenu];
 }
 
-// touchesBegan/Moved/Cancelled/Ended в MenuView не нужны —
-// все touches обрабатываются gesture recognizers или напрямую через UIKit responder chain
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
-- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    UITouch *t = touches.anyObject;
-    espLog([NSString stringWithFormat:@"[MOVED] view=%@ class=%@", t.view, NSStringFromClass([t.view class])]);
-}
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    UITouch *touch = touches.anyObject;
-    espLog([NSString stringWithFormat:@"[ENDED] view=%@ class=%@ tag=%ld", touch.view, NSStringFromClass([touch.view class]), (long)touch.view.tag]);
-}
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
     UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
@@ -1042,7 +1072,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)SetUpBase {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        Moudule_Base = (uint64_t)GetGameModule_Base((char*)"freefireth");
+        Moudule_Base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
     });
 }
 
@@ -1112,41 +1142,17 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
     
-    WriteAddr<Quaternion>(player + 0x53C, rotation);
+    WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);
 }
 
 // IsFiring = стреляет (нажата кнопка огня)
 bool get_IsFiring(uint64_t player) {
     if (!isVaildPtr(player)) return false;
-    return ReadAddr<bool>(player + 0x750);
+    return ReadAddr<bool>(player + OFF_FIRING);
 }
 
-// IsSighting = в прицеле/скоупе (ADS) — другой offset чем IsFiring
-bool get_IsSighting(uint64_t player) {
-    if (!isVaildPtr(player)) return false;
-    return ReadAddr<bool>(player + 0x9AC);
-}
 
-// IsKnockedDownBleed — нокнутое состояние (bleeding out)
-// Проверяем два соседних bool offset на случай если один из них нокнут
-bool get_IsKnockedDown(uint64_t player) {
-    if (!isVaildPtr(player)) return false;
-    if (ReadAddr<bool>(player + 0x1110)) return true;
-    if (ReadAddr<bool>(player + 0x1114)) return true;
-    return false;
-}
 
-// IsVisible — виден ли враг (через флаги рендера)
-// Если offset невалиден → возвращаем true (fail-safe: не фильтруем)
-bool get_IsVisible(uint64_t player) {
-    if (!isVaildPtr(player)) return true;
-
-    uint64_t visibleObj = ReadAddr<uint64_t>(player + 0x9B0);
-    if (!isVaildPtr(visibleObj)) return true; // offset устарел — считаем видимым
-
-    int visibleFlags = ReadAddr<int>(visibleObj + 0x10);
-    return (visibleFlags & 0x1) == 0;
-}
 
 
 - (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers {
@@ -1175,12 +1181,12 @@ bool get_IsVisible(uint64_t player) {
     uint64_t myPawnObject = getLocalPlayer(match);
     if (!isVaildPtr(myPawnObject)) return;
     
-    uint64_t mainCameraTransform = ReadAddr<uint64_t>(myPawnObject + 0x318);
+    uint64_t mainCameraTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLocation = getPositionExt(mainCameraTransform);
     
-    uint64_t player = ReadAddr<uint64_t>(match + 0x120);
-    uint64_t tValue = ReadAddr<uint64_t>(player + 0x28);
-    int coutValue = ReadAddr<int>(tValue + 0x18);
+    uint64_t player = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
+    uint64_t tValue = ReadAddr<uint64_t>(player + OFF_PLAYERLIST_ARR);
+    int coutValue = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
     
     float *matrix = GetViewMatrix(camera);
     float viewWidth = self.bounds.size.width;
@@ -1190,14 +1196,11 @@ bool get_IsVisible(uint64_t player) {
     // Variables for Aimbot
     uint64_t bestTarget = 0;
     int minHP = 99999;
-    bool isVis = false;
     bool isFire = false;
-    bool isAiming = false;
-    isFire   = get_IsFiring(myPawnObject);    // читаем один раз до цикла
-    isAiming = get_IsSighting(myPawnObject);   // scope/ADS state нашего игрока
+    isFire   = get_IsFiring(myPawnObject);
 
     for (int i = 0; i < coutValue; i++) {
-        uint64_t PawnObject = ReadAddr<uint64_t>(tValue + 0x20 + 8 * i);
+        uint64_t PawnObject = ReadAddr<uint64_t>(tValue + OFF_PLAYERLIST_ITEM + 8 * i);
         if (!isVaildPtr(PawnObject)) continue;
 
         bool isLocalTeam = isLocalTeamMate(myPawnObject, PawnObject);
@@ -1211,32 +1214,24 @@ bool get_IsVisible(uint64_t player) {
         float dis = Vector3::Distance(myLocation, HeadPos);
         if (dis > 400.0f) continue;
 
-        // Ignore Knocked: IsKnockedDownBleed (0x1110/0x1114)
-        if (isIgnoreKnocked && get_IsKnockedDown(PawnObject)) continue;
-
         if (isAimbot && dis <= aimDistance) {
-            // Visible Only: фильтруем цели только для aimbot, не для ESP
-            bool visOk = !isVisibleOnly || get_IsVisible(PawnObject);
-            if (visOk) {
-                // Выбор кости цели
-                Vector3 aimPos = HeadPos;
-                if (aimTarget == 1) aimPos = HeadPos + Vector3(0, -0.15f, 0); // Neck
-                else if (aimTarget == 2) aimPos = getPositionExt(getHip(PawnObject)); // Hip
+            // Выбор кости цели
+            Vector3 aimPos = HeadPos;
+            if (aimTarget == 1) aimPos = HeadPos + Vector3(0, -0.15f, 0); // Neck
+            else if (aimTarget == 2) aimPos = getPositionExt(getHip(PawnObject)); // Hip
 
-                Vector3 w2sAim = WorldToScreen(aimPos, matrix, viewWidth, viewHeight);
+            Vector3 w2sAim = WorldToScreen(aimPos, matrix, viewWidth, viewHeight);
 
-                float deltaX = w2sAim.x - screenCenter.x;
-                float deltaY = w2sAim.y - screenCenter.y;
-                float distanceFromCenter = sqrt(deltaX * deltaX + deltaY * deltaY);
-                
-                if (distanceFromCenter <= aimFov) {
-                    // AimMode: 0 = closest to player (3D dist), 1 = closest to crosshair (2D dist)
-                    float score = (aimMode == 0) ? dis : distanceFromCenter;
-                    if (score < minHP) { // reuse minHP as score
-                        minHP = (int)score;
-                        isVis = get_IsVisible(PawnObject);
-                        bestTarget = PawnObject;
-                    }
+            float deltaX = w2sAim.x - screenCenter.x;
+            float deltaY = w2sAim.y - screenCenter.y;
+            float distanceFromCenter = sqrt(deltaX * deltaX + deltaY * deltaY);
+            
+            if (distanceFromCenter <= aimFov) {
+                // AimMode: 0 = closest to player (3D dist), 1 = closest to crosshair (2D dist)
+                float score = (aimMode == 0) ? dis : distanceFromCenter;
+                if (score < minHP) {
+                    minHP = (int)score;
+                    bestTarget = PawnObject;
                 }
             }
         }
@@ -1291,11 +1286,7 @@ bool get_IsVisible(uint64_t player) {
         float y = w2sHead.y;
         
         if (isBox) {
-            // Цвет: зелёный если visible, фиолетовый если нет (как в internal)
-            bool visible = get_IsVisible(PawnObject);
-            UIColor *boxColor = visible
-                ? [UIColor colorWithRed:0.2 green:1.0 blue:0.4 alpha:0.9]
-                : [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:0.85];
+            UIColor *boxColor = [UIColor colorWithRed:0.2 green:1.0 blue:0.4 alpha:0.9];
 
             // Уголки box (красивее чем просто прямоугольник)
             float cLen = MIN(boxWidth, boxHeight) * 0.2f;
@@ -1409,9 +1400,8 @@ bool get_IsVisible(uint64_t player) {
 
     // Aim Trigger: определяем нужно ли целиться сейчас
     bool shouldAimNow = false;
-    if (aimTrigger == 0) shouldAimNow = true;               // Always
-    else if (aimTrigger == 1) shouldAimNow = isFire;        // Only When Shooting
-    else if (aimTrigger == 2) shouldAimNow = isAiming;      // Only When Aiming
+    if (aimTrigger == 0) shouldAimNow = true;
+    else if (aimTrigger == 1) shouldAimNow = isFire;
 
     if (isAimbot && isVaildPtr(bestTarget) && shouldAimNow) {
         // Выбор кости цели для прицеливания
