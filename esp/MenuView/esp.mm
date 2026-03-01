@@ -115,6 +115,20 @@ static bool isStreamerMode = NO;   // Stream Proof
 @end
 
 // (PassThroughScrollView удалён — AIM таб больше не использует ScrollView)
+// ExpandedHitView: передаёт hitTest subviews даже если они выходят за bounds контейнера.
+@interface ExpandedHitView : UIView
+@end
+@implementation ExpandedHitView
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    if (self.hidden || !self.userInteractionEnabled || self.alpha < 0.01) return nil;
+    for (UIView *sub in [self.subviews reverseObjectEnumerator]) {
+        CGPoint local = [self convertPoint:point toView:sub];
+        UIView *hit = [sub hitTest:local withEvent:event];
+        if (hit) return hit;
+    }
+    return [self pointInside:point withEvent:event] ? self : nil;
+}
+@end
 
 
 @interface MenuView ()
@@ -455,7 +469,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
     CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
     CGFloat menuWidth = MIN(550, screenW - 10);
-    CGFloat menuHeight = MIN(320, screenH * 0.55);
+    CGFloat menuHeight = MIN(370, screenH * 0.55);
     
     // Масштаб для адаптации всех элементов
     CGFloat scale = menuWidth / 550.0;
@@ -546,7 +560,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     // --- MAIN TAB (ESP) ---
     CGFloat tabW = menuWidth - sidebarW - 25;
     CGFloat tabH = menuHeight - 55;
-    mainTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
+    mainTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     mainTabContainer.backgroundColor = [UIColor clearColor];
     [menuContainer addSubview:mainTabContainer];
 
@@ -606,7 +620,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     // Size slider убран — не влияет на функционал
 
     // --- AIM TAB ---
-    aimTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
+    aimTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     aimTabContainer.backgroundColor = [UIColor blackColor];
     aimTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
     aimTabContainer.layer.borderWidth = 1;
@@ -616,38 +630,38 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     // --- AIM TAB: toggles + сегменты, без ScrollView ---
     CGFloat aW = aimTabContainer.bounds.size.width;
-    CGFloat ay = 10;
+    CGFloat ay = 6;
 
     UILabel *aimTitle = [self makeSectionLabel:@"AIMBOT" atY:ay width:aW];
-    [aimTabContainer addSubview:aimTitle]; ay += 22;
+    [aimTabContainer addSubview:aimTitle]; ay += 18;
     UIView *aimSep1 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
     aimSep1.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
-    [aimTabContainer addSubview:aimSep1]; ay += 8;
+    [aimTabContainer addSubview:aimSep1]; ay += 6;
 
-    [self addFeatureToView:aimTabContainer withTitle:@"Enable Aimbot" atY:ay initialValue:isAimbot andAction:@selector(toggleAimbot:)]; ay += 34;
-    [self addFeatureToView:aimTabContainer withTitle:@"Ignore Knocked" atY:ay initialValue:isIgnoreKnocked andAction:@selector(toggleIgnoreKnocked:)]; ay += 34;
-    [self addFeatureToView:aimTabContainer withTitle:@"Visible Only" atY:ay initialValue:isVisibleOnly andAction:@selector(toggleVisibleOnly:)]; ay += 34;
+    [self addFeatureToView:aimTabContainer withTitle:@"Enable Aimbot" atY:ay initialValue:isAimbot andAction:@selector(toggleAimbot:)]; ay += 30;
+    [self addFeatureToView:aimTabContainer withTitle:@"Ignore Knocked" atY:ay initialValue:isIgnoreKnocked andAction:@selector(toggleIgnoreKnocked:)]; ay += 30;
+    [self addFeatureToView:aimTabContainer withTitle:@"Visible Only" atY:ay initialValue:isVisibleOnly andAction:@selector(toggleVisibleOnly:)]; ay += 30;
 
-    ay += 6;
+    ay += 4;
     UIView *aimSep2 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
     aimSep2.backgroundColor = aimSep1.backgroundColor;
-    [aimTabContainer addSubview:aimSep2]; ay += 8;
+    [aimTabContainer addSubview:aimSep2]; ay += 6;
 
     UILabel *aimModeTitle = [self makeSectionLabel:@"AIM MODE" atY:ay width:aW];
-    [aimTabContainer addSubview:aimModeTitle]; ay += 18;
+    [aimTabContainer addSubview:aimModeTitle]; ay += 16;
 
     NSArray *aimModeOpts = @[@"Closest Player", @"Crosshair"];
-    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimModeOpts selectedRef:&aimMode tag:10]; ay += 36;
+    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimModeOpts selectedRef:&aimMode tag:10]; ay += 32;
 
     NSArray *aimTargetOpts = @[@"Head", @"Neck", @"Hip"];
-    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTargetOpts selectedRef:&aimTarget tag:11]; ay += 36;
+    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTargetOpts selectedRef:&aimTarget tag:11]; ay += 32;
 
     NSArray *aimTriggerOpts = @[@"Always", @"Shooting", @"Aiming"];
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTriggerOpts selectedRef:&aimTrigger tag:12];
 
 
     // --- EXTRA TAB: слайдеры ---
-    extraTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
+    extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     extraTabContainer.backgroundColor = [UIColor blackColor];
     extraTabContainer.layer.borderColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0].CGColor;
     extraTabContainer.layer.borderWidth = 1;
@@ -717,7 +731,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
 
     // --- SETTING TAB ---
-    settingTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
+    settingTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     settingTabContainer.backgroundColor = [UIColor blackColor];
     settingTabContainer.layer.borderColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0].CGColor;
     settingTabContainer.layer.borderWidth = 1;
@@ -987,7 +1001,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 // Это надёжно работает со всей иерархией UIScrollView/PassThroughScrollView
 - (void)handleTabTap:(UITapGestureRecognizer *)gr {
     NSInteger tag = gr.view.tag;
-    if (tag >= 100 && tag <= 102) {
+    if (tag >= 100 && tag <= 103) {
         espLog([NSString stringWithFormat:@"[TAP] sidebar btn tag=%ld", (long)tag]);
         [self switchToTab:(int)(tag - 100)];
     }
