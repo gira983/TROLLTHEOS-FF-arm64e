@@ -656,7 +656,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     NSArray *aimTargetOpts = @[@"Head", @"Neck", @"Hip"];
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTargetOpts selectedRef:&aimTarget tag:11]; ay += 32;
 
-    NSArray *aimTriggerOpts = @[@"Always", @"Shooting", @"Aiming"];
+    NSArray *aimTriggerOpts = @[@"Always", @"Shooting", @"Scope"];
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTriggerOpts selectedRef:&aimTrigger tag:12];
 
 
@@ -1115,31 +1115,36 @@ void set_aim(uint64_t player, Quaternion rotation) {
     WriteAddr<Quaternion>(player + 0x53C, rotation);
 }
 
-bool get_IsSighting(uint64_t player) {
-    // ADS/scope check — читаем тот же оффсет что и IsFiring но для scope
-    // Используем get_IsFiring как fallback если нет отдельного оффсета
-    return get_IsFiring(player); // TODO: заменить на правильный оффсет если есть
-}
-
+// IsFiring = стреляет (нажата кнопка огня)
 bool get_IsFiring(uint64_t player) {
     if (!isVaildPtr(player)) return false;
-    bool fireState = ReadAddr<bool>(player + 0x750);
-    return fireState;
+    return ReadAddr<bool>(player + 0x750);
 }
 
-// Player::IsKnockedDownBleed offset 0x1110
+// IsSighting = в прицеле/скоупе (ADS) — другой offset чем IsFiring
+bool get_IsSighting(uint64_t player) {
+    if (!isVaildPtr(player)) return false;
+    return ReadAddr<bool>(player + 0x9AC);
+}
+
+// IsKnockedDownBleed — нокнутое состояние (bleeding out)
+// Проверяем два соседних bool offset на случай если один из них нокнут
 bool get_IsKnockedDown(uint64_t player) {
     if (!isVaildPtr(player)) return false;
-    return ReadAddr<bool>(player + 0x1110);
+    if (ReadAddr<bool>(player + 0x1110)) return true;
+    if (ReadAddr<bool>(player + 0x1114)) return true;
+    return false;
 }
 
+// IsVisible — виден ли враг (через флаги рендера)
+// Если offset невалиден → возвращаем true (fail-safe: не фильтруем)
 bool get_IsVisible(uint64_t player) {
-    if (!isVaildPtr(player)) return false;
-    
-    uint64_t visibleObj = ReadAddr<uint64_t>(player + 0x9B0);
-    if (!isVaildPtr(visibleObj)) return false;
+    if (!isVaildPtr(player)) return true;
 
-    int visibleFlags = ReadAddr<int>(visibleObj + 0x10); 
+    uint64_t visibleObj = ReadAddr<uint64_t>(player + 0x9B0);
+    if (!isVaildPtr(visibleObj)) return true; // offset устарел — считаем видимым
+
+    int visibleFlags = ReadAddr<int>(visibleObj + 0x10);
     return (visibleFlags & 0x1) == 0;
 }
 
@@ -1187,8 +1192,10 @@ bool get_IsVisible(uint64_t player) {
     int minHP = 99999;
     bool isVis = false;
     bool isFire = false;
-    bool isAiming = false;  // будет обновлён из gameLogic
-    
+    bool isAiming = false;
+    isFire   = get_IsFiring(myPawnObject);    // читаем один раз до цикла
+    isAiming = get_IsSighting(myPawnObject);   // scope/ADS state нашего игрока
+
     for (int i = 0; i < coutValue; i++) {
         uint64_t PawnObject = ReadAddr<uint64_t>(tValue + 0x20 + 8 * i);
         if (!isVaildPtr(PawnObject)) continue;
@@ -1200,13 +1207,11 @@ bool get_IsVisible(uint64_t player) {
         if (CurHP <= 0) continue; 
 
         Vector3 HeadPos     = getPositionExt(getHead(PawnObject));
-        isFire              = get_IsFiring(myPawnObject);
-        isAiming            = get_IsSighting(myPawnObject);
-        
+
         float dis = Vector3::Distance(myLocation, HeadPos);
         if (dis > 400.0f) continue;
 
-        // Ignore Knocked: используем IsKnockedDownBleed (0x1110) — точный флаг knocked state
+        // Ignore Knocked: IsKnockedDownBleed (0x1110/0x1114)
         if (isIgnoreKnocked && get_IsKnockedDown(PawnObject)) continue;
 
         if (isAimbot && dis <= aimDistance) {
