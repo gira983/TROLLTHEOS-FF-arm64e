@@ -424,7 +424,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     NSInteger capturedBase = baseTag;
     UIView * __unsafe_unretained segRef = segContainer;
-    int * __unsafe_unretained ref = selectedRef;
+    int *ref = selectedRef;
     NSArray *capturedOptions = options;
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] init];
@@ -893,72 +893,13 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     __applyHideCapture(self, isStreamerMode);
 }
 
-- (void)fovChanged:(UISlider *)sender { aimFov = sender.value; }
-- (void)distChanged:(UISlider *)sender { aimDistance = sender.value; }
-
-// Helper: сегментный переключатель для Aim Mode / Trigger / Bone
-- (void)addSegmentTo:(UIView *)parent atY:(CGFloat)y title:(NSString *)title options:(NSArray *)options selectedRef:(int *)selectedRef tag:(NSInteger)baseTag {
-    CGFloat padding = 15;
-    CGFloat segW = (parent.bounds.size.width - padding * 2) / options.count;
-    CGFloat segH = 28;
-
-    UIView *segContainer = [[UIView alloc] initWithFrame:CGRectMake(padding, y, parent.bounds.size.width - padding * 2, segH)];
-    segContainer.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.18 alpha:1.0];
-    segContainer.layer.cornerRadius = 7;
-    segContainer.clipsToBounds = YES;
-    [parent addSubview:segContainer];
-
-    for (int i = 0; i < (int)options.count; i++) {
-        UIView *segBtn = [[UIView alloc] initWithFrame:CGRectMake(i * segW + 2, 2, segW - 4, segH - 4)];
-        segBtn.backgroundColor = (*selectedRef == i)
-            ? [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0]
-            : [UIColor clearColor];
-        segBtn.layer.cornerRadius = 5;
-        segBtn.tag = baseTag * 100 + i;
-        [segContainer addSubview:segBtn];
-
-        UILabel *lbl = [[UILabel alloc] initWithFrame:segBtn.bounds];
-        lbl.text = options[i];
-        lbl.textAlignment = NSTextAlignmentCenter;
-        lbl.font = [UIFont boldSystemFontOfSize:10];
-        lbl.textColor = (*selectedRef == i) ? [UIColor blackColor] : [UIColor colorWithWhite:0.7 alpha:1.0];
-        lbl.userInteractionEnabled = NO;
-        [segBtn addSubview:lbl];
-    }
-
-    // Tap по всему контейнеру
-    NSInteger capturedBase = baseTag;
-    UIView * __unsafe_unretained segRef = segContainer;
-    int * ref = selectedRef;
-    NSArray *capturedOptions = options;
-
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] init];
-    tap.cancelsTouchesInView = NO;
-    objc_setAssociatedObject(tap, "handler", ^(UITapGestureRecognizer *t) {
-        CGPoint loc = [t locationInView:segRef];
-        int idx = (int)(loc.x / (segRef.bounds.size.width / capturedOptions.count));
-        if (idx < 0) idx = 0;
-        if (idx >= (int)capturedOptions.count) idx = (int)capturedOptions.count - 1;
-        *ref = idx;
-
-        for (int j = 0; j < (int)capturedOptions.count; j++) {
-            UIView *btn = [segRef viewWithTag:capturedBase * 100 + j];
-            btn.backgroundColor = (j == idx)
-                ? [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0]
-                : [UIColor clearColor];
-            UILabel *l = btn.subviews.firstObject;
-            l.textColor = (j == idx) ? [UIColor blackColor] : [UIColor colorWithWhite:0.7 alpha:1.0];
-        }
-    }, OBJC_ASSOCIATION_COPY_NONATOMIC);
-
-    [tap addTarget:self action:@selector(handleSegmentTapGesture:)];
-    [segContainer addGestureRecognizer:tap];
-}
-
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
     void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, "handler");
     if (handler) handler(t);
 }
+
+- (void)fovChanged:(UISlider *)sender { aimFov = sender.value; }
+- (void)distChanged:(UISlider *)sender { aimDistance = sender.value; }
 
 - (void)addLineRect:(CGRect)frame color:(UIColor *)color parent:(UIView *)parent {
     UIView *v = [[UIView alloc] initWithFrame:frame];
