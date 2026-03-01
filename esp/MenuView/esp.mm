@@ -1,4 +1,5 @@
 #import "esp.h"
+#import <objc/runtime.h>
 
 // Лог в файл (определён в HUDApp.mm)
 extern void writeLog(NSString *msg);
@@ -36,6 +37,15 @@ static bool isDis = YES;
 static bool isAimbot = NO;
 static float aimFov = 150.0f; // Bán kính vòng tròn FOV
 static float aimDistance = 200.0f; // Khoảng cách aim mặc định
+
+// --- Advanced Aimbot Config ---
+static bool isIgnoreKnocked = NO;  // Ignore knocked enemies
+static bool isVisibleOnly = NO;    // Visible only (raycast check)
+static int  aimMode = 1;           // 0 = Closest to Player, 1 = Closest to Crosshair
+static int  aimTrigger = 1;        // 0 = Always, 1 = Only Shooting, 2 = Only Aiming
+static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
+static float aimSpeed = 1.0f;      // Aim smoothing 0.05 - 1.0
+static bool isStreamerMode = NO;   // Stream Proof
 
 @interface CustomSwitch : UIControl
 @property (nonatomic, assign, getter=isOn) BOOL on;
@@ -378,6 +388,118 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     [view addSubview:customSwitch];
 }
 
+// ==================== HELPER UI BUILDERS ====================
+
+- (UILabel *)makeSectionLabel:(NSString *)title atY:(CGFloat)y width:(CGFloat)w {
+    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, y, w, 16)];
+    lbl.text = title;
+    lbl.textColor = [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0];
+    lbl.font = [UIFont boldSystemFontOfSize:10];
+    return lbl;
+}
+
+- (void)addFeatureToScrollView:(UIScrollView *)scroll withTitle:(NSString *)title atY:(CGFloat *)ay width:(CGFloat)w initialValue:(BOOL)isOn action:(SEL)action {
+    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(8, *ay, w, 32)];
+    row.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.12 alpha:0.8];
+    row.layer.cornerRadius = 6;
+    [scroll addSubview:row];
+
+    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, 7, w - 70, 18)];
+    lbl.text = title;
+    lbl.textColor = [UIColor colorWithWhite:0.85 alpha:1.0];
+    lbl.font = [UIFont systemFontOfSize:12];
+    [row addSubview:lbl];
+
+    CustomSwitch *sw = [[CustomSwitch alloc] initWithFrame:CGRectMake(w - 58, 5, 50, 22)];
+    sw.on = isOn;
+    [sw addTarget:self action:action forControlEvents:UIControlEventValueChanged];
+    [row addSubview:sw];
+    *ay += 36;
+}
+
+- (void)addSegmentToScrollView:(UIScrollView *)scroll title:(NSString *)title options:(NSArray *)options selected:(int)selected atY:(CGFloat *)ay width:(CGFloat)w onChange:(void(^)(int))onChange {
+    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, *ay, w, 14)];
+    lbl.text = title;
+    lbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    lbl.font = [UIFont systemFontOfSize:10];
+    [scroll addSubview:lbl]; *ay += 16;
+
+    UIView *segBg = [[UIView alloc] initWithFrame:CGRectMake(8, *ay, w, 28)];
+    segBg.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.12 alpha:0.8];
+    segBg.layer.cornerRadius = 6;
+    [scroll addSubview:segBg];
+
+    int count = (int)options.count;
+    float btnW = (w - 8) / count;
+    for (int i = 0; i < count; i++) {
+        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+        btn.frame = CGRectMake(4 + i * btnW, 2, btnW - 4, 24);
+        [btn setTitle:options[i] forState:UIControlStateNormal];
+        btn.titleLabel.font = [UIFont systemFontOfSize:10];
+        btn.layer.cornerRadius = 4;
+        btn.tag = i;
+
+        if (i == selected) {
+            btn.backgroundColor = [UIColor colorWithRed:0.5 green:0.3 blue:0.8 alpha:1.0];
+            [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        } else {
+            btn.backgroundColor = [UIColor clearColor];
+            [btn setTitleColor:[UIColor colorWithWhite:0.5 alpha:1.0] forState:UIControlStateNormal];
+        }
+
+        // Store onChange block via objc association
+        objc_setAssociatedObject(btn, "segOnChange", [onChange copy], OBJC_ASSOCIATION_COPY_NONATOMIC);
+        objc_setAssociatedObject(btn, "segContainer", segBg, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [btn addTarget:self action:@selector(handleSegmentTap:) forControlEvents:UIControlEventTouchUpInside];
+        [segBg addSubview:btn];
+    }
+    *ay += 32;
+}
+
+- (void)handleSegmentTap:(UIButton *)sender {
+    UIView *container = objc_getAssociatedObject(sender, "segContainer");
+    void (^onChange)(int) = objc_getAssociatedObject(sender, "segOnChange");
+    for (UIButton *btn in container.subviews) {
+        if (![btn isKindOfClass:[UIButton class]]) continue;
+        BOOL selected = btn.tag == sender.tag;
+        btn.backgroundColor = selected ? [UIColor colorWithRed:0.5 green:0.3 blue:0.8 alpha:1.0] : [UIColor clearColor];
+        [btn setTitleColor:selected ? [UIColor whiteColor] : [UIColor colorWithWhite:0.5 alpha:1.0] forState:UIControlStateNormal];
+    }
+    if (onChange) onChange((int)sender.tag);
+}
+
+- (void)addHUDSliderToScrollView:(UIScrollView *)scroll title:(NSString *)title min:(float)minV max:(float)maxV value:(float)val color:(UIColor *)color atY:(CGFloat *)ay width:(CGFloat)w onChange:(void(^)(float))onChange {
+    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, *ay, w - 50, 14)];
+    lbl.text = title;
+    lbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    lbl.font = [UIFont systemFontOfSize:10];
+    [scroll addSubview:lbl];
+
+    UILabel *valLbl = [[UILabel alloc] initWithFrame:CGRectMake(w - 40, *ay, 40, 14)];
+    valLbl.text = [NSString stringWithFormat:@"%.0f", val];
+    valLbl.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    valLbl.font = [UIFont systemFontOfSize:10];
+    valLbl.textAlignment = NSTextAlignmentRight;
+    [scroll addSubview:valLbl];
+    *ay += 16;
+
+    HUDSlider *slider = [[HUDSlider alloc] initWithFrame:CGRectMake(8, *ay, w, 36)];
+    slider.minimumValue = minV;
+    slider.maximumValue = maxV;
+    slider.value = val;
+    slider.minimumTrackTintColor = color;
+    slider.thumbTintColor = [UIColor whiteColor];
+    UILabel * __unsafe_unretained vlRef = valLbl;
+    slider.onValueChanged = ^(float v) {
+        if (onChange) onChange(v);
+        vlRef.text = [NSString stringWithFormat:@"%.0f", v];
+    };
+    [scroll addSubview:slider];
+    *ay += 40;
+}
+
+// ============================================================
+
 - (void)setupMenuUI {
     CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
     CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
@@ -536,71 +658,92 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
     aimTabContainer.hidden = YES;
     [menuContainer addSubview:aimTabContainer];
     
-    UILabel *aimTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, 200, 20)];
-    aimTitle.text = @"Aimbot Logic";
-    aimTitle.textColor = [UIColor whiteColor];
-    aimTitle.font = [UIFont boldSystemFontOfSize:16];
-    [aimTabContainer addSubview:aimTitle];
-    
-    UIView *aimLine = [[UIView alloc] initWithFrame:CGRectMake(15, 35, tabW - 20, 1)];
-    aimLine.backgroundColor = [UIColor whiteColor];
-    [aimTabContainer addSubview:aimLine];
-    
-    [self addFeatureToView:aimTabContainer withTitle:@"Enable Aimbot" atY:45 initialValue:isAimbot andAction:@selector(toggleAimbot:)];
-    
-    // FOV Slider
-    UILabel *fovLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 85, 200, 20)];
-    fovLabel.text = @"FOV Radius:";
-    fovLabel.textColor = [UIColor whiteColor];
-    fovLabel.font = [UIFont systemFontOfSize:13];
-    [aimTabContainer addSubview:fovLabel];
-    
-    HUDSlider *fovSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(15, 110, tabW - 20, 44)];
-    fovSlider.minimumValue = 10.0;
-    fovSlider.maximumValue = 400.0;
-    fovSlider.value = aimFov;
-    fovSlider.thumbTintColor = [UIColor whiteColor];
-    fovSlider.minimumTrackTintColor = [UIColor redColor];
-    fovSlider.tag = 300;
-    // Используем прямую ссылку — слайдер живёт пока живёт MenuView
-    fovSlider.onValueChanged = ^(float v) { aimFov = v; };
-    [aimTabContainer addSubview:fovSlider];
-    
-    // Distance Slider
-    UILabel *distLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 145, 200, 20)];
-    distLabel.text = @"Aim Distance (m):";
-    distLabel.textColor = [UIColor whiteColor];
-    distLabel.font = [UIFont systemFontOfSize:13];
-    [aimTabContainer addSubview:distLabel];
-    
-    HUDSlider *distSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(15, 170, tabW - 20, 44)];
-    distSlider.minimumValue = 10.0;
-    distSlider.maximumValue = 500.0;
-    distSlider.value = aimDistance;
-    distSlider.thumbTintColor = [UIColor whiteColor];
-    distSlider.minimumTrackTintColor = [UIColor blueColor];
-    distSlider.tag = 301;
-    distSlider.onValueChanged = ^(float v) { aimDistance = v; };
-    [aimTabContainer addSubview:distSlider];
+    // --- AIM TAB: Scrollable ---
+    UIScrollView *aimScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, aimTabContainer.bounds.size.width, aimTabContainer.bounds.size.height)];
+    aimScroll.backgroundColor = [UIColor clearColor];
+    aimScroll.showsVerticalScrollIndicator = YES;
+    [aimTabContainer addSubview:aimScroll];
+
+    CGFloat aW = aimTabContainer.bounds.size.width - 20;
+    CGFloat ay = 8;
+
+    // Section: AIMBOT
+    UILabel *aimTitle = [self makeSectionLabel:@"AIMBOT" atY:ay width:aW];
+    [aimScroll addSubview:aimTitle]; ay += 22;
+
+    UIView *aimSep1 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW, 1)];
+    aimSep1.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
+    [aimScroll addSubview:aimSep1]; ay += 6;
+
+    [self addFeatureToScrollView:aimScroll withTitle:@"Enable Aimbot" atY:&ay width:aW initialValue:isAimbot action:@selector(toggleAimbot:)];
+    [self addFeatureToScrollView:aimScroll withTitle:@"Ignore Knocked" atY:&ay width:aW initialValue:isIgnoreKnocked action:@selector(toggleIgnoreKnocked:)];
+    [self addFeatureToScrollView:aimScroll withTitle:@"Visible Only" atY:&ay width:aW initialValue:isVisibleOnly action:@selector(toggleVisibleOnly:)];
+
+    ay += 8;
+    UIView *aimSep2 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW, 1)];
+    aimSep2.backgroundColor = aimSep1.backgroundColor;
+    [aimScroll addSubview:aimSep2]; ay += 10;
+
+    // Section: AIM MODE
+    UILabel *aimModeTitle = [self makeSectionLabel:@"AIM MODE" atY:ay width:aW];
+    [aimScroll addSubview:aimModeTitle]; ay += 24;
+
+    NSArray *aimModeOpts = @[@"Closest to Player", @"Closest to Crosshair"];
+    [self addSegmentToScrollView:aimScroll title:@"Aim Mode" options:aimModeOpts selected:aimMode atY:&ay width:aW onChange:^(int v){ aimMode = v; }];
+
+    NSArray *aimTargetOpts = @[@"Head", @"Neck", @"Hip"];
+    [self addSegmentToScrollView:aimScroll title:@"Target Bone" options:aimTargetOpts selected:aimTarget atY:&ay width:aW onChange:^(int v){ aimTarget = v; }];
+
+    NSArray *aimTriggerOpts = @[@"Always", @"Shooting", @"Aiming"];
+    [self addSegmentToScrollView:aimScroll title:@"Aim Trigger" options:aimTriggerOpts selected:aimTrigger atY:&ay width:aW onChange:^(int v){ aimTrigger = v; }];
+
+    ay += 8;
+    UIView *aimSep3 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW, 1)];
+    aimSep3.backgroundColor = aimSep1.backgroundColor;
+    [aimScroll addSubview:aimSep3]; ay += 10;
+
+    // Section: SLIDERS
+    UILabel *aimSliderTitle = [self makeSectionLabel:@"PARAMETERS" atY:ay width:aW];
+    [aimScroll addSubview:aimSliderTitle]; ay += 24;
+
+    [self addHUDSliderToScrollView:aimScroll title:@"FOV Radius" min:10 max:400 value:aimFov color:[UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0] atY:&ay width:aW onChange:^(float v){ aimFov = v; }];
+    [self addHUDSliderToScrollView:aimScroll title:@"Aim Distance" min:10 max:500 value:aimDistance color:[UIColor colorWithRed:0.4 green:0.6 blue:1.0 alpha:1.0] atY:&ay width:aW onChange:^(float v){ aimDistance = v; }];
+    [self addHUDSliderToScrollView:aimScroll title:@"Aim Speed" min:0.05 max:1.0 value:aimSpeed color:[UIColor colorWithRed:0.5 green:1.0 blue:0.5 alpha:1.0] atY:&ay width:aW onChange:^(float v){ aimSpeed = v; }];
+
+    ay += 10;
+    aimScroll.contentSize = CGSizeMake(aimTabContainer.bounds.size.width, ay);
 
 
-    // --- SETTING TAB (Empty for now) ---
+    // --- SETTING TAB ---
     settingTabContainer = [[UIView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     settingTabContainer.backgroundColor = [UIColor blackColor];
-    settingTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
+    settingTabContainer.layer.borderColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0].CGColor;
     settingTabContainer.layer.borderWidth = 1;
     settingTabContainer.layer.cornerRadius = 10;
     settingTabContainer.hidden = YES;
     [menuContainer addSubview:settingTabContainer];
-    
+
+    UILabel *stSectionTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 12, tabW - 30, 18)];
+    stSectionTitle.text = @"SETTINGS";
+    stSectionTitle.textColor = [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0];
+    stSectionTitle.font = [UIFont boldSystemFontOfSize:11];
+    [settingTabContainer addSubview:stSectionTitle];
+
+    UIView *stSep = [[UIView alloc] initWithFrame:CGRectMake(15, 33, tabW - 30, 1)];
+    stSep.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
+    [settingTabContainer addSubview:stSep];
+
+    [self addFeatureToView:settingTabContainer withTitle:@"Stream Proof" atY:40 initialValue:isStreamerMode andAction:@selector(toggleStreamerMode:)];
+
+    UILabel *stDesc = [[UILabel alloc] initWithFrame:CGRectMake(15, 80, tabW - 30, 32)];
+    stDesc.text = @"Hides the overlay from screen recordings & screenshots.";
+    stDesc.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    stDesc.font = [UIFont systemFontOfSize:10];
+    stDesc.numberOfLines = 2;
+    [settingTabContainer addSubview:stDesc];
+
     // Поднять sidebar поверх всех табов
     [menuContainer bringSubviewToFront:sidebar];
-    
-    UILabel *stTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, 200, 20)];
-    stTitle.text = @"Settings";
-    stTitle.textColor = [UIColor whiteColor];
-    stTitle.font = [UIFont boldSystemFontOfSize:16];
-    [settingTabContainer addSubview:stTitle];
 }
 
 - (void)switchToTab:(NSInteger)tabIndex {
@@ -728,9 +871,106 @@ static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 - (void)toggleName:(CustomSwitch *)sender { isName = sender.isOn; previewNameLabel.hidden = !isName; }
 - (void)toggleDist:(CustomSwitch *)sender { isDis = sender.isOn; previewDistLabel.hidden = !isDis; }
 - (void)toggleAimbot:(CustomSwitch *)sender { isAimbot = sender.isOn; }
+- (void)toggleIgnoreKnocked:(CustomSwitch *)sender { isIgnoreKnocked = sender.isOn; }
+- (void)toggleVisibleOnly:(CustomSwitch *)sender { isVisibleOnly = sender.isOn; }
+- (void)toggleStreamerMode:(CustomSwitch *)sender {
+    isStreamerMode = sender.isOn;
+    // Применяем streamproof через secureTextEntry на overlay window
+    UIWindow *hudWin = nil;
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        if ([w.rootViewController isKindOfClass:[NSClassFromString(@"HUDRootViewController") class]]) {
+            hudWin = w; break;
+        }
+    }
+    if (hudWin) {
+        if (isStreamerMode) {
+            UITextField *tf = [[UITextField alloc] initWithFrame:CGRectZero];
+            tf.secureTextEntry = YES;
+            [hudWin addSubview:tf];
+            [tf becomeFirstResponder];
+            [tf resignFirstResponder];
+            [tf removeFromSuperview];
+            hudWin.layer.filters = nil;
+        }
+        // UIScreen capture notification approach
+        [[NSNotificationCenter defaultCenter] removeObserver:hudWin name:UIScreenCapturedDidChangeNotification object:nil];
+        if (isStreamerMode) {
+            hudWin.hidden = [UIScreen mainScreen].isCaptured;
+            [[NSNotificationCenter defaultCenter] addObserverForName:UIScreenCapturedDidChangeNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
+                hudWin.hidden = [UIScreen mainScreen].isCaptured;
+            }];
+        } else {
+            hudWin.hidden = NO;
+        }
+    }
+}
 
 - (void)fovChanged:(UISlider *)sender { aimFov = sender.value; }
 - (void)distChanged:(UISlider *)sender { aimDistance = sender.value; }
+
+// Helper: сегментный переключатель для Aim Mode / Trigger / Bone
+- (void)addSegmentTo:(UIView *)parent atY:(CGFloat)y title:(NSString *)title options:(NSArray *)options selectedRef:(int *)selectedRef tag:(NSInteger)baseTag {
+    CGFloat padding = 15;
+    CGFloat segW = (parent.bounds.size.width - padding * 2) / options.count;
+    CGFloat segH = 28;
+
+    UIView *segContainer = [[UIView alloc] initWithFrame:CGRectMake(padding, y, parent.bounds.size.width - padding * 2, segH)];
+    segContainer.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.18 alpha:1.0];
+    segContainer.layer.cornerRadius = 7;
+    segContainer.clipsToBounds = YES;
+    [parent addSubview:segContainer];
+
+    for (int i = 0; i < (int)options.count; i++) {
+        UIView *segBtn = [[UIView alloc] initWithFrame:CGRectMake(i * segW + 2, 2, segW - 4, segH - 4)];
+        segBtn.backgroundColor = (*selectedRef == i)
+            ? [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0]
+            : [UIColor clearColor];
+        segBtn.layer.cornerRadius = 5;
+        segBtn.tag = baseTag * 100 + i;
+        [segContainer addSubview:segBtn];
+
+        UILabel *lbl = [[UILabel alloc] initWithFrame:segBtn.bounds];
+        lbl.text = options[i];
+        lbl.textAlignment = NSTextAlignmentCenter;
+        lbl.font = [UIFont boldSystemFontOfSize:10];
+        lbl.textColor = (*selectedRef == i) ? [UIColor blackColor] : [UIColor colorWithWhite:0.7 alpha:1.0];
+        lbl.userInteractionEnabled = NO;
+        [segBtn addSubview:lbl];
+    }
+
+    // Tap по всему контейнеру
+    NSInteger capturedBase = baseTag;
+    UIView * __unsafe_unretained segRef = segContainer;
+    int * __unsafe_unretained ref = selectedRef;
+    NSArray *capturedOptions = options;
+
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] init];
+    tap.cancelsTouchesInView = NO;
+    objc_setAssociatedObject(tap, "handler", ^(UITapGestureRecognizer *t) {
+        CGPoint loc = [t locationInView:segRef];
+        int idx = (int)(loc.x / (segRef.bounds.size.width / capturedOptions.count));
+        if (idx < 0) idx = 0;
+        if (idx >= (int)capturedOptions.count) idx = (int)capturedOptions.count - 1;
+        *ref = idx;
+
+        for (int j = 0; j < (int)capturedOptions.count; j++) {
+            UIView *btn = [segRef viewWithTag:capturedBase * 100 + j];
+            btn.backgroundColor = (j == idx)
+                ? [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0]
+                : [UIColor clearColor];
+            UILabel *l = btn.subviews.firstObject;
+            l.textColor = (j == idx) ? [UIColor blackColor] : [UIColor colorWithWhite:0.7 alpha:1.0];
+        }
+    }, OBJC_ASSOCIATION_COPY_NONATOMIC);
+
+    [tap addTarget:self action:@selector(handleSegmentTap:)];
+    [segContainer addGestureRecognizer:tap];
+}
+
+- (void)handleSegmentTap:(UITapGestureRecognizer *)t {
+    void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, "handler");
+    if (handler) handler(t);
+}
 
 - (void)addLineRect:(CGRect)frame color:(UIColor *)color parent:(UIView *)parent {
     UIView *v = [[UIView alloc] initWithFrame:frame];
@@ -1011,6 +1251,7 @@ bool get_IsVisible(uint64_t player) {
     int minHP = 99999;
     bool isVis = false;
     bool isFire = false;
+    bool isAiming = false;  // будет обновлён из gameLogic
     
     for (int i = 0; i < coutValue; i++) {
         uint64_t PawnObject = ReadAddr<uint64_t>(tValue + 0x20 + 8 * i);
@@ -1024,27 +1265,38 @@ bool get_IsVisible(uint64_t player) {
 
         Vector3 HeadPos     = getPositionExt(getHead(PawnObject));
         isFire              = get_IsFiring(myPawnObject);
+        isAiming            = get_IsSighting(myPawnObject);
         
         float dis = Vector3::Distance(myLocation, HeadPos);
         if (dis > 400.0f) continue;
 
-        
+        int hp = get_CurHP(PawnObject);
+        // Ignore Knocked: пропустить если knocked (HP == 0 = поваленный)
+        if (isIgnoreKnocked && hp <= 0) continue;
+        // Visible Only: пропустить если враг не виден через raycast
+        if (isVisibleOnly && !get_IsVisible(PawnObject)) continue;
+
         if (isAimbot && dis <= aimDistance) {
-            Vector3 w2sAim = WorldToScreen(HeadPos, matrix, viewWidth, viewHeight);
+            // Выбор кости цели
+            Vector3 aimPos = HeadPos;
+            if (aimTarget == 1) aimPos = HeadPos + Vector3(0, -0.15f, 0); // Neck
+            else if (aimTarget == 2) aimPos = getPositionExt(getHip(PawnObject)); // Hip
+
+            Vector3 w2sAim = WorldToScreen(aimPos, matrix, viewWidth, viewHeight);
 
             float deltaX = w2sAim.x - screenCenter.x;
             float deltaY = w2sAim.y - screenCenter.y;
             float distanceFromCenter = sqrt(deltaX * deltaX + deltaY * deltaY);
             
             if (distanceFromCenter <= aimFov) {
-                if (CurHP < minHP) {
-                    minHP = CurHP;
-                    
+                // AimMode: 0 = closest to player (3D dist), 1 = closest to crosshair (2D dist)
+                float score = (aimMode == 0) ? dis : distanceFromCenter;
+                if (score < minHP) { // reuse minHP as score
+                    minHP = (int)score;
                     isVis = get_IsVisible(PawnObject);
                     bestTarget = PawnObject;
                 }
             }
-            
         }
 
         if (dis > 220.0f) continue; 
@@ -1097,25 +1349,66 @@ bool get_IsVisible(uint64_t player) {
         float y = w2sHead.y;
         
         if (isBox) {
-            CALayer *boxLayer = [CALayer layer];
-            boxLayer.frame = CGRectMake(x, y, boxWidth, boxHeight);
-            boxLayer.borderColor = [UIColor redColor].CGColor;
-            boxLayer.borderWidth = 1.0;
-            boxLayer.cornerRadius = 3.0;
-            [layers addObject:boxLayer];
+            // Цвет: зелёный если visible, фиолетовый если нет (как в internal)
+            bool visible = get_IsVisible(PawnObject);
+            UIColor *boxColor = visible
+                ? [UIColor colorWithRed:0.2 green:1.0 blue:0.4 alpha:0.9]
+                : [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:0.85];
+
+            // Уголки box (красивее чем просто прямоугольник)
+            float cLen = MIN(boxWidth, boxHeight) * 0.2f;
+            float pts[][4] = {
+                // TL
+                {x, y, x + cLen, y}, {x, y, x, y + cLen},
+                // TR
+                {x + boxWidth - cLen, y, x + boxWidth, y}, {x + boxWidth, y, x + boxWidth, y + cLen},
+                // BL
+                {x, y + boxHeight - cLen, x, y + boxHeight}, {x, y + boxHeight, x + cLen, y + boxHeight},
+                // BR
+                {x + boxWidth, y + boxHeight - cLen, x + boxWidth, y + boxHeight}, {x + boxWidth - cLen, y + boxHeight, x + boxWidth, y + boxHeight}
+            };
+            for (int ci = 0; ci < 8; ci++) {
+                CALayer *corner = [CALayer layer];
+                float cx = MIN(pts[ci][0], pts[ci][2]);
+                float cy = MIN(pts[ci][1], pts[ci][3]);
+                float cw = MAX(fabs(pts[ci][2] - pts[ci][0]), 1.5f);
+                float ch = MAX(fabs(pts[ci][3] - pts[ci][1]), 1.5f);
+                corner.frame = CGRectMake(cx, cy, cw, ch);
+                corner.backgroundColor = boxColor.CGColor;
+                [layers addObject:corner];
+            }
         }
         
         if (isName) {
             NSString *Name = GetNickName(PawnObject);
-            if (Name.length > 0) {
-                CATextLayer *nameLayer = [CATextLayer layer];
-                nameLayer.string = Name;
-                nameLayer.fontSize = 10;
-                nameLayer.frame = CGRectMake(x - 20, y - 15, boxWidth + 40, 15);
-                nameLayer.alignmentMode = kCAAlignmentCenter;
-                nameLayer.foregroundColor = [UIColor greenColor].CGColor;
-                [layers addObject:nameLayer];
-            }
+            if (!Name || Name.length == 0) Name = @"Unknown";
+
+            // Фон под именем (тёмный прямоугольник)
+            float nameY = y - 24.0f;
+            float nameBgW = boxWidth + 10;
+            float nameBgH = 13.0f;
+            float nameBgX = x + (boxWidth - nameBgW) / 2.0f;
+
+            CALayer *nameBg = [CALayer layer];
+            nameBg.frame = CGRectMake(nameBgX, nameY - 1, nameBgW, nameBgH + 2);
+            nameBg.backgroundColor = [UIColor colorWithRed:0.024 green:0.035 blue:0.055 alpha:0.92].CGColor;
+            nameBg.cornerRadius = 2.0f;
+            [layers addObject:nameBg];
+
+            // Цветная линия снизу (accent)
+            CALayer *accentLine = [CALayer layer];
+            accentLine.frame = CGRectMake(nameBgX, nameY + nameBgH, nameBgW, 1.0f);
+            accentLine.backgroundColor = [UIColor colorWithRed:1.0 green:0.5 blue:1.0 alpha:1.0].CGColor;
+            [layers addObject:accentLine];
+
+            CATextLayer *nameLayer = [CATextLayer layer];
+            nameLayer.string = Name;
+            nameLayer.fontSize = 9;
+            nameLayer.frame = CGRectMake(nameBgX, nameY, nameBgW, nameBgH);
+            nameLayer.alignmentMode = kCAAlignmentCenter;
+            nameLayer.foregroundColor = [UIColor colorWithWhite:0.7 alpha:1.0].CGColor;
+            nameLayer.contentsScale = [UIScreen mainScreen].scale;
+            [layers addObject:nameLayer];
         }
         
         if (isHealth) {
@@ -1123,20 +1416,41 @@ bool get_IsVisible(uint64_t player) {
             if (MaxHP > 0) {
                 float hpRatio = (float)CurHP / (float)MaxHP;
                 if (hpRatio < 0) hpRatio = 0; if (hpRatio > 1) hpRatio = 1;
-                
-                float barWidth = 4.0;
-                float barHeight = boxHeight;
-                float filledHeight = barHeight * hpRatio;
-                
+
+                // HP bar: горизонтальная, над box, как в internal
+                float barW = boxWidth;
+                float barH = 4.0f;
+                float barX = x;
+                float barY = y - barH - 5.0f;
+
+                // Фон
                 CALayer *bgBar = [CALayer layer];
-                bgBar.frame = CGRectMake(x - barWidth - 2, y, barWidth, barHeight);
-                bgBar.backgroundColor = [UIColor redColor].CGColor;
+                bgBar.frame = CGRectMake(barX, barY, barW, barH);
+                bgBar.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6].CGColor;
+                bgBar.cornerRadius = barH / 2;
                 [layers addObject:bgBar];
-                
+
+                // Fill
+                UIColor *hpColor;
+                if (hp >= (int)(MaxHP * 0.7f)) hpColor = [UIColor colorWithRed:0.0 green:0.9 blue:0.3 alpha:1.0];
+                else if (hp >= (int)(MaxHP * 0.35f)) hpColor = [UIColor colorWithRed:1.0 green:0.8 blue:0.0 alpha:1.0];
+                else hpColor = [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1.0];
+
                 CALayer *hpBar = [CALayer layer];
-                hpBar.frame = CGRectMake(x - barWidth - 2, y + (barHeight - filledHeight), barWidth, filledHeight);
-                hpBar.backgroundColor = [UIColor greenColor].CGColor;
+                hpBar.frame = CGRectMake(barX, barY, barW * hpRatio, barH);
+                hpBar.backgroundColor = hpColor.CGColor;
+                hpBar.cornerRadius = barH / 2;
                 [layers addObject:hpBar];
+
+                // HP текст над баром
+                CATextLayer *hpText = [CATextLayer layer];
+                hpText.string = [NSString stringWithFormat:@"%d", CurHP];
+                hpText.fontSize = 8;
+                hpText.frame = CGRectMake(barX, barY - 10, barW, 10);
+                hpText.alignmentMode = kCAAlignmentCenter;
+                hpText.foregroundColor = [UIColor whiteColor].CGColor;
+                hpText.contentsScale = [UIScreen mainScreen].scale;
+                [layers addObject:hpText];
             }
         }
         
@@ -1151,14 +1465,29 @@ bool get_IsVisible(uint64_t player) {
         }
     }
 
-    if (isAimbot && isVaildPtr(bestTarget) && isFire) {
-        Vector3 EnemyHead = getPositionExt(getHead(bestTarget));
+    // Aim Trigger: определяем нужно ли целиться сейчас
+    bool shouldAimNow = false;
+    if (aimTrigger == 0) shouldAimNow = true;               // Always
+    else if (aimTrigger == 1) shouldAimNow = isFire;        // Only When Shooting
+    else if (aimTrigger == 2) shouldAimNow = isAiming;      // Only When Aiming
 
-        Quaternion targetLook = GetRotationToLocation(EnemyHead, 0.1f, myLocation);
+    if (isAimbot && isVaildPtr(bestTarget) && shouldAimNow) {
+        // Выбор кости цели для прицеливания
+        Vector3 aimPos;
+        if (aimTarget == 0) aimPos = getPositionExt(getHead(bestTarget));
+        else if (aimTarget == 1) aimPos = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.15f, 0); // Neck
+        else aimPos = getPositionExt(getHip(bestTarget)); // Hip
 
-        set_aim(myPawnObject, targetLook);
-        
-        
+        Quaternion targetLook = GetRotationToLocation(aimPos, 0.1f, myLocation);
+
+        if (aimSpeed >= 0.99f) {
+            set_aim(myPawnObject, targetLook);
+        } else {
+            // Smooth aim: lerp между текущим и целевым
+            Quaternion currentRot = GetSightRotation(myPawnObject);
+            Quaternion smoothed = Quaternion::Lerp(currentRot, targetLook, aimSpeed);
+            set_aim(myPawnObject, smoothed);
+        }
     }
 }
 
