@@ -56,14 +56,37 @@ static bool isStreamerMode = NO;   // Stream Proof
     self = [super initWithFrame:frame];
     if (self) {
         self.backgroundColor = [UIColor clearColor];
+        self.userInteractionEnabled = YES;
         _thumb = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 22, 22)];
         _thumb.backgroundColor = [UIColor colorWithWhite:0.75 alpha:1.0];
         _thumb.layer.cornerRadius = 11;
+        _thumb.userInteractionEnabled = NO;
         [self addSubview:_thumb];
-        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggle)];
-        [self addGestureRecognizer:tap];
+        // Не используем UITapGestureRecognizer — он конфликтует с UIScrollView
+        // Обработка через touchesEnded напрямую
     }
     return self;
+}
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    if (self.userInteractionEnabled && !self.isHidden && self.alpha > 0.01) {
+        if ([self pointInside:point withEvent:event]) {
+            return self;
+        }
+    }
+    return nil;
+}
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    // Принимаем touch сразу — ничего не передаём дальше чтобы scroll не перехватил
+}
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *touch = touches.anyObject;
+    CGPoint pt = [touch locationInView:self];
+    if ([self pointInside:pt withEvent:event]) {
+        [self toggle];
+    }
+}
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    // игнорируем отмены от scroll
 }
 - (void)drawRect:(CGRect)rect {
     CGContextRef context = UIGraphicsGetCurrentContext();
@@ -296,6 +319,11 @@ static bool isStreamerMode = NO;   // Stream Proof
                     if ([sub isKindOfClass:[HUDSlider class]]) {
                         espLog([NSString stringWithFormat:@"[HITTEST] → HUDSlider frame=(%.0f,%.0f,%.0f,%.0f)", sub.frame.origin.x, sub.frame.origin.y, sub.frame.size.width, sub.frame.size.height]);
                         return sub;
+                    }
+                    // UIScrollView — пусть сам делает hitTest рекурсивно
+                    if ([sub isKindOfClass:[UIScrollView class]]) {
+                        UIView *hit = [sub hitTest:pInSub withEvent:event];
+                        return hit ? hit : sub;
                     }
                     for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
                         if (leaf.hidden || !leaf.userInteractionEnabled || leaf.alpha < 0.01) continue;
@@ -662,6 +690,8 @@ static bool isStreamerMode = NO;   // Stream Proof
     UIScrollView *aimScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, aimTabContainer.bounds.size.width, aimTabContainer.bounds.size.height)];
     aimScroll.backgroundColor = [UIColor clearColor];
     aimScroll.showsVerticalScrollIndicator = YES;
+    aimScroll.delaysContentTouches = NO;      // Fix: CustomSwitch и кнопки срабатывают сразу
+    aimScroll.canCancelContentTouches = NO;   // Fix: НЕ отменять touches у контролов (CustomSwitch)
     [aimTabContainer addSubview:aimScroll];
 
     CGFloat aW = aimTabContainer.bounds.size.width - 20;
@@ -873,36 +903,37 @@ static bool isStreamerMode = NO;   // Stream Proof
 - (void)toggleAimbot:(CustomSwitch *)sender { isAimbot = sender.isOn; }
 - (void)toggleIgnoreKnocked:(CustomSwitch *)sender { isIgnoreKnocked = sender.isOn; }
 - (void)toggleVisibleOnly:(CustomSwitch *)sender { isVisibleOnly = sender.isOn; }
+// Применяет/снимает защиту от захвата экрана через приватный CALayer ключ disableUpdateMask
+// Значение (1<<1)|(1<<4) = 18 скрывает view от ReplayKit / скриншотов
+static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
+    static NSString *maskKey = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        // "ZGlzYWJsZVVwZGF0ZU1hc2s=" = base64("disableUpdateMask")
+        NSData *data = [[NSData alloc] initWithBase64EncodedString:@"ZGlzYWJsZVVwZGF0ZU1hc2s="
+                                                            options:NSDataBase64DecodingIgnoreUnknownCharacters];
+        if (data) maskKey = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    });
+    if (!v || !maskKey || ![v.layer respondsToSelector:NSSelectorFromString(maskKey)]) return NO;
+    NSInteger value = hidden ? ((1 << 1) | (1 << 4)) : 0;
+    [v.layer setValue:@(value) forKey:maskKey];
+    return YES;
+}
+
 - (void)toggleStreamerMode:(CustomSwitch *)sender {
     isStreamerMode = sender.isOn;
-    // Применяем streamproof через secureTextEntry на overlay window
-    UIWindow *hudWin = nil;
-    for (UIWindow *w in [UIApplication sharedApplication].windows) {
-        if ([w.rootViewController isKindOfClass:[NSClassFromString(@"HUDRootViewController") class]]) {
-            hudWin = w; break;
-        }
+
+    // Применяем disableUpdateMask к menuContainer и floatingButton напрямую.
+    // disableUpdateMask скрывает view от ReplayKit/скриншотов, но view остаётся ВИДИМОЙ на экране.
+    // Применяем к нашим views — не к window целиком (иначе скрывается ОТ пользователя тоже).
+    if (menuContainer) {
+        __applyHideCapture(menuContainer, isStreamerMode);
     }
-    if (hudWin) {
-        if (isStreamerMode) {
-            UITextField *tf = [[UITextField alloc] initWithFrame:CGRectZero];
-            tf.secureTextEntry = YES;
-            [hudWin addSubview:tf];
-            [tf becomeFirstResponder];
-            [tf resignFirstResponder];
-            [tf removeFromSuperview];
-            hudWin.layer.filters = nil;
-        }
-        // UIScreen capture notification approach
-        [[NSNotificationCenter defaultCenter] removeObserver:hudWin name:UIScreenCapturedDidChangeNotification object:nil];
-        if (isStreamerMode) {
-            hudWin.hidden = [UIScreen mainScreen].isCaptured;
-            [[NSNotificationCenter defaultCenter] addObserverForName:UIScreenCapturedDidChangeNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
-                hudWin.hidden = [UIScreen mainScreen].isCaptured;
-            }];
-        } else {
-            hudWin.hidden = NO;
-        }
+    if (floatingButton) {
+        __applyHideCapture(floatingButton, isStreamerMode);
     }
+    // Также применяем к self (MenuView) как страховка
+    __applyHideCapture(self, isStreamerMode);
 }
 
 - (void)fovChanged:(UISlider *)sender { aimFov = sender.value; }
