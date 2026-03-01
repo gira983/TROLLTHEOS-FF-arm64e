@@ -99,8 +99,8 @@ static bool isStreamerMode = NO;   // Stream Proof
         if (subview.hidden || !subview.userInteractionEnabled || subview.alpha < 0.01) continue;
         CGPoint converted = [self convertPoint:point toView:subview];
         UIView *hit = [subview hitTest:converted withEvent:event];
-        // Возвращаем только если попали на UIControl (CustomSwitch/UIButton) — не на обычный UIView
-        if (hit && ([hit isKindOfClass:[UIControl class]] || [hit isKindOfClass:[HUDSlider class]])) {
+        // Возвращаем только UIControl (CustomSwitch, UIButton) — не обычные UIView
+        if (hit && [hit isKindOfClass:[UIControl class]]) {
             return hit;
         }
     }
