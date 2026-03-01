@@ -6,7 +6,7 @@ extern void writeLog(NSString *msg);
 // Fallback если не линкуется
 static void espLog(NSString *msg) {
 #ifdef DEBUG
-    static NSString *path = NSSENCRYPT("/var/mobile/Library/Caches/hud_debug.log");
+    static NSString *path = @"/var/mobile/Library/Caches/hud_debug.log";
     NSString *line = [NSString stringWithFormat:@"%@\n", msg];
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
     if (!fh) {
