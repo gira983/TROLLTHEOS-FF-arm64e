@@ -130,6 +130,12 @@ static bool isStreamerMode = NO;   // Stream Proof
     }
     return [super hitTest:point withEvent:event];
 }
+// Разрешаем UIScrollView отменять touch у UIButton когда начинается скролл
+// Без этого UIButton держит Moved и крашит при скролле
+- (BOOL)touchesShouldCancelInContentView:(UIView *)view {
+    if ([view isKindOfClass:[UIButton class]]) return YES;
+    return [super touchesShouldCancelInContentView:view];
+}
 @end
 
 @interface MenuView ()
@@ -457,7 +463,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
         objc_setAssociatedObject(btn, "segOnChange", [onChange copy], OBJC_ASSOCIATION_COPY_NONATOMIC);
         objc_setAssociatedObject(btn, "segContainer", segBg, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [btn addTarget:self action:@selector(handleSegmentTap:) forControlEvents:UIControlEventTouchUpInside];
+        // TouchDown вместо TouchUpInside — срабатывает сразу без ожидания UIScrollView
+        [btn addTarget:self action:@selector(handleSegmentTap:) forControlEvents:UIControlEventTouchDown];
         [scroll addSubview:btn]; // прямо в scroll — не в segBg
     }
     *ay += 32;
@@ -678,7 +685,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     PassThroughScrollView *aimScroll = [[PassThroughScrollView alloc] initWithFrame:CGRectMake(0, 0, aimTabContainer.bounds.size.width, aimTabContainer.bounds.size.height)];
     aimScroll.backgroundColor = [UIColor clearColor];
     aimScroll.showsVerticalScrollIndicator = YES;
-    aimScroll.delaysContentTouches = NO;  // Controls получают touches немедленно
+    aimScroll.delaysContentTouches = YES;  // нужно для touchesShouldCancelInContentView — иначе UIButton крашит при скролле
     // canCancelContentTouches = YES (дефолт) — не меняем, иначе UIButton ломается при скролле
     [aimTabContainer addSubview:aimScroll];
 
