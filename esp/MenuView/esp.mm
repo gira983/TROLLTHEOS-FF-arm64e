@@ -88,19 +88,23 @@ static bool isStreamerMode = NO;   // Stream Proof
 }
 @end
 
-// Кастомный UIScrollView — передаёт тапы на subviews (CustomSwitch, UIButton) без задержек
+// Кастомный UIScrollView — передаёт тапы на интерактивные controls (CustomSwitch, UIButton)
+// без задержек, при этом не ломает scroll gesture
 @interface PassThroughScrollView : UIScrollView
 @end
 @implementation PassThroughScrollView
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // Сначала проверяем subviews — если тап попадает на интерактивный элемент, отдаём ему
+    // Проходим subviews в обратном порядке (верхние первыми)
     for (UIView *subview in [self.subviews reverseObjectEnumerator]) {
         if (subview.hidden || !subview.userInteractionEnabled || subview.alpha < 0.01) continue;
         CGPoint converted = [self convertPoint:point toView:subview];
         UIView *hit = [subview hitTest:converted withEvent:event];
-        if (hit) return hit;
+        // Возвращаем только если попали на UIControl (CustomSwitch/UIButton) — не на обычный UIView
+        if (hit && ([hit isKindOfClass:[UIControl class]] || [hit isKindOfClass:[HUDSlider class]])) {
+            return hit;
+        }
     }
-    // Иначе отдаём scrollView (для скролла)
+    // Для всего остального — стандартный hitTest (вернёт сам scrollView для скролла)
     return [super hitTest:point withEvent:event];
 }
 @end
@@ -703,9 +707,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     PassThroughScrollView *aimScroll = [[PassThroughScrollView alloc] initWithFrame:CGRectMake(0, 0, aimTabContainer.bounds.size.width, aimTabContainer.bounds.size.height)];
     aimScroll.backgroundColor = [UIColor clearColor];
     aimScroll.showsVerticalScrollIndicator = YES;
-    // Критично: без этого UIScrollView перехватывает все тапы на CustomSwitch и UIButton внутри
-    aimScroll.delaysContentTouches = NO;
-    aimScroll.canCancelContentTouches = NO;
+    aimScroll.delaysContentTouches = NO;  // Controls получают touches немедленно
+    // canCancelContentTouches = YES (дефолт) — не меняем, иначе UIButton ломается при скролле
     [aimTabContainer addSubview:aimScroll];
 
     CGFloat aW = aimTabContainer.bounds.size.width - 20;
@@ -1081,39 +1084,46 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     }
     menuContainer.center = CGPointMake(bounds.size.width / 2, bounds.size.height / 2);
 }
-// Обработка touches напрямую — надёжнее чем gesture recognizers в HUD процессе
+// MenuView перехватывает touches на уровне корневого view.
+// НЕ вызываем super — hitTest уже направил touch нужному view напрямую.
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // Передаём вверх — UISlider/UISwitch сами начнут обработку
-    [super touchesBegan:touches withEvent:event];
+    // Намеренно пусто — не передаём super
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *t = touches.anyObject;
     espLog([NSString stringWithFormat:@"[MOVED] view=%@ class=%@", t.view, NSStringFromClass([t.view class])]);
-    [super touchesMoved:touches withEvent:event];
+    // Намеренно пусто — не передаём super
 }
 
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [super touchesCancelled:touches withEvent:event];
+    // Намеренно пусто — не передаём super
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = touches.anyObject;
     UIView *hitView = touch.view;
     espLog([NSString stringWithFormat:@"[ENDED] view=%@ class=%@ tag=%ld", hitView, NSStringFromClass([hitView class]), (long)hitView.tag]);
-    if (!hitView) {
-        [super touchesEnded:touches withEvent:event];
-        return;
+    if (!hitView) return;
+    
+    // Игнорируем touches внутри UIScrollView — они уже обработаны scroll механизмом
+    // Без этого скролл в AIM tab крашит меню (touchesEnded вызывается с view=floatingButton)
+    UIView *v = hitView;
+    while (v) {
+        if ([v isKindOfClass:[UIScrollView class]]) return;
+        if (v == menuContainer) break;
+        v = v.superview;
     }
     
-    // HUDSlider и UISwitch — не перехватываем, они обрабатывают touches сами
+    // HUDSlider — не перехватываем
     if ([hitView isKindOfClass:[HUDSlider class]] ||
-        [hitView isKindOfClass:[UISwitch class]] ||
-        [hitView.superview isKindOfClass:[HUDSlider class]] ||
-        [hitView.superview isKindOfClass:[UISwitch class]]) {
-        [super touchesEnded:touches withEvent:event];
-        return;
-    }
+        [hitView.superview isKindOfClass:[HUDSlider class]]) return;
+    
+    // CustomSwitch — не перехватываем, он сам обработал через touchesEnded
+    if ([hitView isKindOfClass:[CustomSwitch class]]) return;
+    
+    // UIButton (сегменты) — не перехватываем, UIControlEventTouchUpInside срабатывает сам
+    if ([hitView isKindOfClass:[UIButton class]]) return;
     
     NSInteger tag = hitView.tag;
     
@@ -1136,8 +1146,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         }
         checkView = checkView.superview;
     }
-    
-    [super touchesEnded:touches withEvent:event];
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
