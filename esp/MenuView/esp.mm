@@ -114,29 +114,8 @@ static bool isStreamerMode = NO;   // Stream Proof
 }
 @end
 
-// CustomSwitch и UIButton (сегменты) теперь прямые subviews scroll.
-// hitTest просто ищет UIControl среди прямых детей — рекурсия не нужна.
-@interface PassThroughScrollView : UIScrollView
-@end
-@implementation PassThroughScrollView
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    for (UIView *sub in [self.subviews reverseObjectEnumerator]) {
-        if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
-        // UIControl = CustomSwitch, UIButton; tag>=300 = HUDSlider
-        BOOL isInteractive = [sub isKindOfClass:[UIControl class]] || sub.tag >= 300;
-        if (!isInteractive) continue;
-        CGPoint local = [self convertPoint:point toView:sub];
-        if ([sub pointInside:local withEvent:event]) return sub;
-    }
-    return [super hitTest:point withEvent:event];
-}
-// Разрешаем UIScrollView отменять touch у UIButton когда начинается скролл
-// Без этого UIButton держит Moved и крашит при скролле
-- (BOOL)touchesShouldCancelInContentView:(UIView *)view {
-    if ([view isKindOfClass:[UIButton class]]) return YES;
-    return [super touchesShouldCancelInContentView:view];
-}
-@end
+// (PassThroughScrollView удалён — AIM таб больше не использует ScrollView)
+
 
 @interface MenuView ()
 @property (nonatomic, strong) CADisplayLink *displayLink;
@@ -404,119 +383,72 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     return lbl;
 }
 
-- (void)addFeatureToScrollView:(UIScrollView *)scroll withTitle:(NSString *)title atY:(CGFloat *)ay width:(CGFloat)w initialValue:(BOOL)isOn action:(SEL)action {
-    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(8, *ay, w, 32)];
-    row.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.12 alpha:0.8];
-    row.layer.cornerRadius = 6;
-    row.userInteractionEnabled = NO; // row не перехватывает touches — CustomSwitch получает напрямую
-    [scroll addSubview:row];
+// addSegmentTo: — старая рабочая реализация без ScrollView.
+// UITapGestureRecognizer на segContainer, cancelsTouchesInView=NO.
+- (void)addSegmentTo:(UIView *)parent atY:(CGFloat)y title:(NSString *)title options:(NSArray *)options selectedRef:(int *)selectedRef tag:(NSInteger)baseTag {
+    CGFloat padding = 10;
+    CGFloat segW = (parent.bounds.size.width - padding * 2) / options.count;
+    CGFloat segH = 28;
 
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, 7, w - 70, 18)];
-    lbl.text = title;
-    lbl.textColor = [UIColor colorWithWhite:0.85 alpha:1.0];
-    lbl.font = [UIFont systemFontOfSize:12];
-    lbl.userInteractionEnabled = NO;
-    [row addSubview:lbl];
+    UILabel *titleLbl = [[UILabel alloc] initWithFrame:CGRectMake(padding, y, parent.bounds.size.width - padding * 2, 12)];
+    titleLbl.text = title;
+    titleLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    titleLbl.font = [UIFont systemFontOfSize:10];
+    titleLbl.userInteractionEnabled = NO;
+    [parent addSubview:titleLbl];
 
-    CustomSwitch *sw = [[CustomSwitch alloc] initWithFrame:CGRectMake(0, 0, 50, 22)];
-    sw.on = isOn;
-    sw.userInteractionEnabled = YES;
-    [sw addTarget:self action:action forControlEvents:UIControlEventValueChanged];
-    [scroll addSubview:sw]; // прямо в scroll — hitTest находит без рекурсии
-    // Позиция: правый край row (8+w) минус отступ 8 и ширина sw 50; Y: центр row
-    sw.frame = CGRectMake(8 + w - 58, *ay + 5, 50, 22);
-    *ay += 36;
-}
+    UIView *segContainer = [[UIView alloc] initWithFrame:CGRectMake(padding, y + 14, parent.bounds.size.width - padding * 2, segH)];
+    segContainer.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.18 alpha:1.0];
+    segContainer.layer.cornerRadius = 7;
+    segContainer.clipsToBounds = YES;
+    [parent addSubview:segContainer];
 
-- (void)addSegmentToScrollView:(UIScrollView *)scroll title:(NSString *)title options:(NSArray *)options selected:(int)selected atY:(CGFloat *)ay width:(CGFloat)w onChange:(void(^)(int))onChange {
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, *ay, w, 14)];
-    lbl.text = title;
-    lbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    lbl.font = [UIFont systemFontOfSize:10];
-    [scroll addSubview:lbl]; *ay += 16;
+    for (int i = 0; i < (int)options.count; i++) {
+        UIView *segBtn = [[UIView alloc] initWithFrame:CGRectMake(i * segW + 2, 2, segW - 4, segH - 4)];
+        segBtn.backgroundColor = (*selectedRef == i)
+            ? [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0]
+            : [UIColor clearColor];
+        segBtn.layer.cornerRadius = 5;
+        segBtn.tag = baseTag * 100 + i;
+        [segContainer addSubview:segBtn];
 
-    UIView *segBg = [[UIView alloc] initWithFrame:CGRectMake(8, *ay, w, 28)];
-    segBg.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.12 alpha:0.8];
-    segBg.layer.cornerRadius = 6;
-    segBg.userInteractionEnabled = NO; // segBg не перехватывает — кнопки добавляем прямо в scroll
-    [scroll addSubview:segBg];
+        UILabel *lbl = [[UILabel alloc] initWithFrame:segBtn.bounds];
+        lbl.text = options[i];
+        lbl.textAlignment = NSTextAlignmentCenter;
+        lbl.font = [UIFont boldSystemFontOfSize:10];
+        lbl.textColor = (*selectedRef == i) ? [UIColor blackColor] : [UIColor colorWithWhite:0.7 alpha:1.0];
+        lbl.userInteractionEnabled = NO;
+        [segBtn addSubview:lbl];
+    }
 
-    int count = (int)options.count;
-    float btnW = (w - 8) / count;
-    for (int i = 0; i < count; i++) {
-        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-        // Позиция относительно scroll (segBg.origin + локальный offset)
-        btn.frame = CGRectMake(segBg.frame.origin.x + 4 + i * btnW, segBg.frame.origin.y + 2, btnW - 4, 24);
-        [btn setTitle:options[i] forState:UIControlStateNormal];
-        btn.titleLabel.font = [UIFont systemFontOfSize:10];
-        btn.layer.cornerRadius = 4;
-        btn.tag = i;
-        btn.adjustsImageWhenHighlighted = NO; // не зависаем в highlighted state
+    NSInteger capturedBase = baseTag;
+    UIView * __unsafe_unretained segRef = segContainer;
+    int * __unsafe_unretained ref = selectedRef;
+    NSArray *capturedOptions = options;
 
-        if (i == selected) {
-            btn.backgroundColor = [UIColor colorWithRed:0.5 green:0.3 blue:0.8 alpha:1.0];
-            [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        } else {
-            btn.backgroundColor = [UIColor clearColor];
-            [btn setTitleColor:[UIColor colorWithWhite:0.5 alpha:1.0] forState:UIControlStateNormal];
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] init];
+    tap.cancelsTouchesInView = NO;
+    objc_setAssociatedObject(tap, "handler", ^(UITapGestureRecognizer *t) {
+        CGPoint loc = [t locationInView:segRef];
+        int idx = (int)(loc.x / (segRef.bounds.size.width / capturedOptions.count));
+        if (idx < 0) idx = 0;
+        if (idx >= (int)capturedOptions.count) idx = (int)capturedOptions.count - 1;
+        *ref = idx;
+        for (int j = 0; j < (int)capturedOptions.count; j++) {
+            UIView *btn = [segRef viewWithTag:capturedBase * 100 + j];
+            btn.backgroundColor = (j == idx)
+                ? [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0]
+                : [UIColor clearColor];
+            UILabel *l = btn.subviews.firstObject;
+            l.textColor = (j == idx) ? [UIColor blackColor] : [UIColor colorWithWhite:0.7 alpha:1.0];
         }
-
-        objc_setAssociatedObject(btn, "segOnChange", [onChange copy], OBJC_ASSOCIATION_COPY_NONATOMIC);
-        objc_setAssociatedObject(btn, "segContainer", segBg, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        // TouchDown вместо TouchUpInside — срабатывает сразу без ожидания UIScrollView
-        [btn addTarget:self action:@selector(handleSegmentTap:) forControlEvents:UIControlEventTouchDown];
-        [scroll addSubview:btn]; // прямо в scroll — не в segBg
-    }
-    *ay += 32;
-}
-
-- (void)handleSegmentTap:(UIButton *)sender {
-    UIView *container = objc_getAssociatedObject(sender, "segContainer");
-    void (^onChange)(int) = objc_getAssociatedObject(sender, "segOnChange");
-    // Кнопки теперь прямые subviews scroll — ищем среди siblings по segContainer
-    UIView *scroll = sender.superview;
-    for (UIView *sub in scroll.subviews) {
-        if (![sub isKindOfClass:[UIButton class]]) continue;
-        UIButton *btn = (UIButton *)sub;
-        if (objc_getAssociatedObject(btn, "segContainer") != container) continue;
-        BOOL selected = btn.tag == sender.tag;
-        btn.backgroundColor = selected ? [UIColor colorWithRed:0.5 green:0.3 blue:0.8 alpha:1.0] : [UIColor clearColor];
-        [btn setTitleColor:selected ? [UIColor whiteColor] : [UIColor colorWithWhite:0.5 alpha:1.0] forState:UIControlStateNormal];
-    }
-    if (onChange) onChange((int)sender.tag);
-}
-
-- (void)addHUDSliderToScrollView:(UIScrollView *)scroll title:(NSString *)title min:(float)minV max:(float)maxV value:(float)val color:(UIColor *)color atY:(CGFloat *)ay width:(CGFloat)w onChange:(void(^)(float))onChange {
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, *ay, w - 50, 14)];
-    lbl.text = title;
-    lbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    lbl.font = [UIFont systemFontOfSize:10];
-    [scroll addSubview:lbl];
-
-    UILabel *valLbl = [[UILabel alloc] initWithFrame:CGRectMake(w - 40, *ay, 40, 14)];
-    valLbl.text = [NSString stringWithFormat:@"%.0f", val];
-    valLbl.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    valLbl.font = [UIFont systemFontOfSize:10];
-    valLbl.textAlignment = NSTextAlignmentRight;
-    [scroll addSubview:valLbl];
-    *ay += 16;
-
-    HUDSlider *slider = [[HUDSlider alloc] initWithFrame:CGRectMake(8, *ay, w, 36)];
-    slider.minimumValue = minV;
-    slider.maximumValue = maxV;
-    slider.value = val;
-    slider.minimumTrackTintColor = color;
-    slider.thumbTintColor = [UIColor whiteColor];
-    UILabel * __unsafe_unretained vlRef = valLbl;
-    slider.onValueChanged = ^(float v) {
-        if (onChange) onChange(v);
-        vlRef.text = [NSString stringWithFormat:@"%.0f", v];
-    };
-    [scroll addSubview:slider];
-    *ay += 40;
+    }, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    [tap addTarget:self action:@selector(handleSegmentTapGesture:)];
+    [segContainer addGestureRecognizer:tap];
 }
 
 // ============================================================
+
 
 - (void)setupMenuUI {
     CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
@@ -680,63 +612,97 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     aimTabContainer.layer.cornerRadius = 10;
     aimTabContainer.hidden = YES;
     [menuContainer addSubview:aimTabContainer];
-    
-    // --- AIM TAB: Scrollable ---
-    PassThroughScrollView *aimScroll = [[PassThroughScrollView alloc] initWithFrame:CGRectMake(0, 0, aimTabContainer.bounds.size.width, aimTabContainer.bounds.size.height)];
-    aimScroll.backgroundColor = [UIColor clearColor];
-    aimScroll.showsVerticalScrollIndicator = YES;
-    aimScroll.delaysContentTouches = YES;  // нужно для touchesShouldCancelInContentView — иначе UIButton крашит при скролле
-    // canCancelContentTouches = YES (дефолт) — не меняем, иначе UIButton ломается при скролле
-    [aimTabContainer addSubview:aimScroll];
 
-    CGFloat aW = aimTabContainer.bounds.size.width - 20;
-    CGFloat ay = 8;
+    // --- AIM TAB: без ScrollView, прямо в aimTabContainer ---
+    CGFloat aW = aimTabContainer.bounds.size.width;
+    CGFloat ay = 10;
 
-    // Section: AIMBOT
     UILabel *aimTitle = [self makeSectionLabel:@"AIMBOT" atY:ay width:aW];
-    [aimScroll addSubview:aimTitle]; ay += 22;
+    [aimTabContainer addSubview:aimTitle]; ay += 22;
 
-    UIView *aimSep1 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW, 1)];
+    UIView *aimSep1 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
     aimSep1.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
-    [aimScroll addSubview:aimSep1]; ay += 6;
+    [aimTabContainer addSubview:aimSep1]; ay += 8;
 
-    [self addFeatureToScrollView:aimScroll withTitle:@"Enable Aimbot" atY:&ay width:aW initialValue:isAimbot action:@selector(toggleAimbot:)];
-    [self addFeatureToScrollView:aimScroll withTitle:@"Ignore Knocked" atY:&ay width:aW initialValue:isIgnoreKnocked action:@selector(toggleIgnoreKnocked:)];
-    [self addFeatureToScrollView:aimScroll withTitle:@"Visible Only" atY:&ay width:aW initialValue:isVisibleOnly action:@selector(toggleVisibleOnly:)];
+    [self addFeatureToView:aimTabContainer withTitle:@"Enable Aimbot" atY:ay initialValue:isAimbot andAction:@selector(toggleAimbot:)]; ay += 36;
+    [self addFeatureToView:aimTabContainer withTitle:@"Ignore Knocked" atY:ay initialValue:isIgnoreKnocked andAction:@selector(toggleIgnoreKnocked:)]; ay += 36;
+    [self addFeatureToView:aimTabContainer withTitle:@"Visible Only" atY:ay initialValue:isVisibleOnly andAction:@selector(toggleVisibleOnly:)]; ay += 36;
 
-    ay += 8;
-    UIView *aimSep2 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW, 1)];
+    ay += 4;
+    UIView *aimSep2 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
     aimSep2.backgroundColor = aimSep1.backgroundColor;
-    [aimScroll addSubview:aimSep2]; ay += 10;
+    [aimTabContainer addSubview:aimSep2]; ay += 10;
 
-    // Section: AIM MODE
     UILabel *aimModeTitle = [self makeSectionLabel:@"AIM MODE" atY:ay width:aW];
-    [aimScroll addSubview:aimModeTitle]; ay += 24;
+    [aimTabContainer addSubview:aimModeTitle]; ay += 20;
 
-    NSArray *aimModeOpts = @[@"Closest to Player", @"Closest to Crosshair"];
-    [self addSegmentToScrollView:aimScroll title:@"Aim Mode" options:aimModeOpts selected:aimMode atY:&ay width:aW onChange:^(int v){ aimMode = v; }];
+    NSArray *aimModeOpts = @[@"Closest Player", @"Closest Crosshair"];
+    [self addSegmentTo:aimTabContainer atY:ay title:@"Aim Mode" options:aimModeOpts selectedRef:&aimMode tag:10]; ay += 38;
 
     NSArray *aimTargetOpts = @[@"Head", @"Neck", @"Hip"];
-    [self addSegmentToScrollView:aimScroll title:@"Target Bone" options:aimTargetOpts selected:aimTarget atY:&ay width:aW onChange:^(int v){ aimTarget = v; }];
+    [self addSegmentTo:aimTabContainer atY:ay title:@"Target Bone" options:aimTargetOpts selectedRef:&aimTarget tag:11]; ay += 38;
 
     NSArray *aimTriggerOpts = @[@"Always", @"Shooting", @"Aiming"];
-    [self addSegmentToScrollView:aimScroll title:@"Aim Trigger" options:aimTriggerOpts selected:aimTrigger atY:&ay width:aW onChange:^(int v){ aimTrigger = v; }];
+    [self addSegmentTo:aimTabContainer atY:ay title:@"Aim Trigger" options:aimTriggerOpts selectedRef:&aimTrigger tag:12]; ay += 38;
 
-    ay += 8;
-    UIView *aimSep3 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW, 1)];
+    ay += 4;
+    UIView *aimSep3 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
     aimSep3.backgroundColor = aimSep1.backgroundColor;
-    [aimScroll addSubview:aimSep3]; ay += 10;
+    [aimTabContainer addSubview:aimSep3]; ay += 10;
 
-    // Section: SLIDERS
     UILabel *aimSliderTitle = [self makeSectionLabel:@"PARAMETERS" atY:ay width:aW];
-    [aimScroll addSubview:aimSliderTitle]; ay += 24;
+    [aimTabContainer addSubview:aimSliderTitle]; ay += 20;
 
-    [self addHUDSliderToScrollView:aimScroll title:@"FOV Radius" min:10 max:400 value:aimFov color:[UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0] atY:&ay width:aW onChange:^(float v){ aimFov = v; }];
-    [self addHUDSliderToScrollView:aimScroll title:@"Aim Distance" min:10 max:500 value:aimDistance color:[UIColor colorWithRed:0.4 green:0.6 blue:1.0 alpha:1.0] atY:&ay width:aW onChange:^(float v){ aimDistance = v; }];
-    [self addHUDSliderToScrollView:aimScroll title:@"Aim Speed" min:0.05 max:1.0 value:aimSpeed color:[UIColor colorWithRed:0.5 green:1.0 blue:0.5 alpha:1.0] atY:&ay width:aW onChange:^(float v){ aimSpeed = v; }];
+    // FOV Slider
+    UILabel *fovLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ay, aW - 60, 14)];
+    fovLbl.text = @"FOV Radius"; fovLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    fovLbl.font = [UIFont systemFontOfSize:10]; [aimTabContainer addSubview:fovLbl];
+    UILabel *fovVal = [[UILabel alloc] initWithFrame:CGRectMake(aW - 45, ay, 40, 14)];
+    fovVal.text = [NSString stringWithFormat:@"%.0f", aimFov];
+    fovVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    fovVal.font = [UIFont systemFontOfSize:10]; fovVal.textAlignment = NSTextAlignmentRight;
+    [aimTabContainer addSubview:fovVal]; ay += 16;
+    HUDSlider *fovSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 36)];
+    fovSlider.minimumValue = 10; fovSlider.maximumValue = 400; fovSlider.value = aimFov;
+    fovSlider.minimumTrackTintColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0];
+    fovSlider.thumbTintColor = [UIColor whiteColor]; fovSlider.tag = 300;
+    UILabel * __unsafe_unretained fvRef = fovVal;
+    fovSlider.onValueChanged = ^(float v){ aimFov = v; fvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
+    [aimTabContainer addSubview:fovSlider]; ay += 40;
 
-    ay += 10;
-    aimScroll.contentSize = CGSizeMake(aimTabContainer.bounds.size.width, ay);
+    // Distance Slider
+    UILabel *distLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ay, aW - 60, 14)];
+    distLbl.text = @"Aim Distance"; distLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    distLbl.font = [UIFont systemFontOfSize:10]; [aimTabContainer addSubview:distLbl];
+    UILabel *distVal = [[UILabel alloc] initWithFrame:CGRectMake(aW - 45, ay, 40, 14)];
+    distVal.text = [NSString stringWithFormat:@"%.0f", aimDistance];
+    distVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    distVal.font = [UIFont systemFontOfSize:10]; distVal.textAlignment = NSTextAlignmentRight;
+    [aimTabContainer addSubview:distVal]; ay += 16;
+    HUDSlider *distSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 36)];
+    distSlider.minimumValue = 10; distSlider.maximumValue = 500; distSlider.value = aimDistance;
+    distSlider.minimumTrackTintColor = [UIColor colorWithRed:0.4 green:0.6 blue:1.0 alpha:1.0];
+    distSlider.thumbTintColor = [UIColor whiteColor]; distSlider.tag = 301;
+    UILabel * __unsafe_unretained dvRef = distVal;
+    distSlider.onValueChanged = ^(float v){ aimDistance = v; dvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
+    [aimTabContainer addSubview:distSlider]; ay += 40;
+
+    // Speed Slider
+    UILabel *spdLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ay, aW - 60, 14)];
+    spdLbl.text = @"Aim Speed"; spdLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    spdLbl.font = [UIFont systemFontOfSize:10]; [aimTabContainer addSubview:spdLbl];
+    UILabel *spdVal = [[UILabel alloc] initWithFrame:CGRectMake(aW - 45, ay, 40, 14)];
+    spdVal.text = [NSString stringWithFormat:@"%.2f", aimSpeed];
+    spdVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    spdVal.font = [UIFont systemFontOfSize:10]; spdVal.textAlignment = NSTextAlignmentRight;
+    [aimTabContainer addSubview:spdVal]; ay += 16;
+    HUDSlider *spdSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 36)];
+    spdSlider.minimumValue = 0.05; spdSlider.maximumValue = 1.0; spdSlider.value = aimSpeed;
+    spdSlider.minimumTrackTintColor = [UIColor colorWithRed:0.5 green:1.0 blue:0.5 alpha:1.0];
+    spdSlider.thumbTintColor = [UIColor whiteColor]; spdSlider.tag = 302;
+    UILabel * __unsafe_unretained svRef = spdVal;
+    spdSlider.onValueChanged = ^(float v){ aimSpeed = v; svRef.text = [NSString stringWithFormat:@"%.2f", v]; };
+    [aimTabContainer addSubview:spdSlider];
 
 
     // --- SETTING TAB ---
