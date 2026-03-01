@@ -7,15 +7,15 @@ include $(THEOS)/makefiles/common.mk
 
 IS_NEW_ABI := 1
 
-APPLICATION_NAME := Xyris
+APPLICATION_NAME := Fryzz
 PACKAGE_NAME := xyris
 
-Xyris_USE_MODULES := 0
-Xyris_FILES += platform_stub.c
-Xyris_FILES += $(wildcard core/*.mm core/*.m)
-Xyris_FILES += $(wildcard esp/lib/*.mm) $(wildcard esp/lib/*.cpp) $(wildcard esp/MenuView/*.cpp) $(wildcard esp/MenuView/*.mm)
+Fryzz_USE_MODULES := 0
+Fryzz_FILES += platform_stub.c
+Fryzz_FILES += $(wildcard core/*.mm core/*.m)
+Fryzz_FILES += $(wildcard esp/lib/*.mm) $(wildcard esp/lib/*.cpp) $(wildcard esp/MenuView/*.cpp) $(wildcard esp/MenuView/*.mm)
 
-Xyris_CFLAGS += -fobjc-arc \
+Fryzz_CFLAGS += -fobjc-arc \
 -Wno-unused-function \
 -Wno-deprecated-declarations \
 -Wno-unused-variable \
@@ -23,22 +23,22 @@ Xyris_CFLAGS += -fobjc-arc \
 -Wno-module-import-in-extern-c \
 -Wno-unused-but-set-variable
 
-Xyris_CFLAGS += -Iinclude
-Xyris_CFLAGS += -include hud-prefix.pch
-# Xyris_CFLAGS += -I/usr/lib/llvm-16/lib/clang/16.0.0/include
-# Xyris_CFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
+Fryzz_CFLAGS += -Iinclude
+Fryzz_CFLAGS += -include hud-prefix.pch
+# Fryzz_CFLAGS += -I/usr/lib/llvm-16/lib/clang/16.0.0/include
+# Fryzz_CFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
 
-Xyris_CCFLAGS += -std=c++14
-# Xyris_CCFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
-Xyris_CCFLAGS += -DNOTIFY_LAUNCHED_HUD=\"ch.xxtou.notification.hud.launched\"
-Xyris_CCFLAGS += -DNOTIFY_DISMISSAL_HUD=\"ch.xxtou.notification.hud.dismissal\"
-Xyris_CCFLAGS += -DNOTIFY_RELOAD_HUD=\"ch.xxtou.notification.hud.reload\"
-Xyris_CCFLAGS += -DNOTIFY_RELOAD_APP=\"ch.xxtou.notification.app.reload\"
+Fryzz_CCFLAGS += -std=c++14
+# Fryzz_CCFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
+Fryzz_CCFLAGS += -DNOTIFY_LAUNCHED_HUD=\"ch.xxtou.notification.hud.launched\"
+Fryzz_CCFLAGS += -DNOTIFY_DISMISSAL_HUD=\"ch.xxtou.notification.hud.dismissal\"
+Fryzz_CCFLAGS += -DNOTIFY_RELOAD_HUD=\"ch.xxtou.notification.hud.reload\"
+Fryzz_CCFLAGS += -DNOTIFY_RELOAD_APP=\"ch.xxtou.notification.app.reload\"
 
-Xyris_FRAMEWORKS += CoreGraphics QuartzCore UIKit Foundation
-Xyris_PRIVATE_FRAMEWORKS += BackBoardServices GraphicsServices IOKit SpringBoardServices
+Fryzz_FRAMEWORKS += CoreGraphics QuartzCore UIKit Foundation
+Fryzz_PRIVATE_FRAMEWORKS += BackBoardServices GraphicsServices IOKit SpringBoardServices
 
-Xyris_CODESIGN_FLAGS += -Sent.plist
+Fryzz_CODESIGN_FLAGS += -Sent.plist
 
 include $(THEOS_MAKE_PATH)/application.mk
 include $(THEOS_MAKE_PATH)/aggregate.mk
