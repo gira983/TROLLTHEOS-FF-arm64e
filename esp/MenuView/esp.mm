@@ -114,32 +114,20 @@ static bool isStreamerMode = NO;   // Stream Proof
 }
 @end
 
-// Кастомный UIScrollView — передаёт тапы на UIControl (CustomSwitch, UIButton) внутри subviews
+// CustomSwitch и UIButton (сегменты) теперь прямые subviews scroll.
+// hitTest просто ищет UIControl среди прямых детей — рекурсия не нужна.
 @interface PassThroughScrollView : UIScrollView
 @end
 @implementation PassThroughScrollView
-// Рекурсивно ищет UIControl внутри view по точке
-- (UIView *)findControl:(UIView *)view atPoint:(CGPoint)point {
-    // Сначала проверяем сам view
-    if ([view isKindOfClass:[UIControl class]] && !view.hidden && view.userInteractionEnabled) {
-        CGPoint p = [self convertPoint:point toView:view];
-        if ([view pointInside:p withEvent:nil]) return view;
-    }
-    // Потом его subviews (в обратном порядке — верхние первыми)
-    for (UIView *sub in [view.subviews reverseObjectEnumerator]) {
-        UIView *hit = [self findControl:sub atPoint:point];
-        if (hit) return hit;
-    }
-    return nil;
-}
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    // Ищем UIControl (CustomSwitch, UIButton) рекурсивно по всему дереву
-    for (UIView *subview in [self.subviews reverseObjectEnumerator]) {
-        if (subview.hidden || !subview.userInteractionEnabled || subview.alpha < 0.01) continue;
-        UIView *control = [self findControl:subview atPoint:point];
-        if (control) return control;
+    for (UIView *sub in [self.subviews reverseObjectEnumerator]) {
+        if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
+        // UIControl = CustomSwitch, UIButton; tag>=300 = HUDSlider
+        BOOL isInteractive = [sub isKindOfClass:[UIControl class]] || sub.tag >= 300;
+        if (!isInteractive) continue;
+        CGPoint local = [self convertPoint:point toView:sub];
+        if ([sub pointInside:local withEvent:event]) return sub;
     }
-    // Ничего не нашли — стандартный hitTest (scrollView берёт жест для скролла)
     return [super hitTest:point withEvent:event];
 }
 @end
@@ -414,7 +402,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *row = [[UIView alloc] initWithFrame:CGRectMake(8, *ay, w, 32)];
     row.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.12 alpha:0.8];
     row.layer.cornerRadius = 6;
-    row.userInteractionEnabled = YES;
+    row.userInteractionEnabled = NO; // row не перехватывает touches — CustomSwitch получает напрямую
     [scroll addSubview:row];
 
     UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, 7, w - 70, 18)];
@@ -428,7 +416,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     sw.on = isOn;
     sw.userInteractionEnabled = YES;
     [sw addTarget:self action:action forControlEvents:UIControlEventValueChanged];
-    [row addSubview:sw];
+    [scroll addSubview:sw]; // добавляем ПРЯМО в scroll, не в row — hitTest находит сразу
+    sw.center = CGPointMake(row.frame.origin.x + w - 33, row.frame.origin.y + 16);
     *ay += 36;
 }
 
@@ -442,17 +431,20 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *segBg = [[UIView alloc] initWithFrame:CGRectMake(8, *ay, w, 28)];
     segBg.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.12 alpha:0.8];
     segBg.layer.cornerRadius = 6;
+    segBg.userInteractionEnabled = NO; // segBg не перехватывает — кнопки добавляем прямо в scroll
     [scroll addSubview:segBg];
 
     int count = (int)options.count;
     float btnW = (w - 8) / count;
     for (int i = 0; i < count; i++) {
         UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-        btn.frame = CGRectMake(4 + i * btnW, 2, btnW - 4, 24);
+        // Позиция относительно scroll (segBg.origin + локальный offset)
+        btn.frame = CGRectMake(segBg.frame.origin.x + 4 + i * btnW, segBg.frame.origin.y + 2, btnW - 4, 24);
         [btn setTitle:options[i] forState:UIControlStateNormal];
         btn.titleLabel.font = [UIFont systemFontOfSize:10];
         btn.layer.cornerRadius = 4;
         btn.tag = i;
+        btn.adjustsImageWhenHighlighted = NO; // не зависаем в highlighted state
 
         if (i == selected) {
             btn.backgroundColor = [UIColor colorWithRed:0.5 green:0.3 blue:0.8 alpha:1.0];
@@ -462,11 +454,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             [btn setTitleColor:[UIColor colorWithWhite:0.5 alpha:1.0] forState:UIControlStateNormal];
         }
 
-        // Store onChange block via objc association
         objc_setAssociatedObject(btn, "segOnChange", [onChange copy], OBJC_ASSOCIATION_COPY_NONATOMIC);
         objc_setAssociatedObject(btn, "segContainer", segBg, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [btn addTarget:self action:@selector(handleSegmentTap:) forControlEvents:UIControlEventTouchUpInside];
-        [segBg addSubview:btn];
+        [scroll addSubview:btn]; // прямо в scroll — не в segBg
     }
     *ay += 32;
 }
@@ -474,8 +465,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)handleSegmentTap:(UIButton *)sender {
     UIView *container = objc_getAssociatedObject(sender, "segContainer");
     void (^onChange)(int) = objc_getAssociatedObject(sender, "segOnChange");
-    for (UIButton *btn in container.subviews) {
-        if (![btn isKindOfClass:[UIButton class]]) continue;
+    // Кнопки теперь прямые subviews scroll — ищем среди siblings по segContainer
+    UIView *scroll = sender.superview;
+    for (UIView *sub in scroll.subviews) {
+        if (![sub isKindOfClass:[UIButton class]]) continue;
+        UIButton *btn = (UIButton *)sub;
+        if (objc_getAssociatedObject(btn, "segContainer") != container) continue;
         BOOL selected = btn.tag == sender.tag;
         btn.backgroundColor = selected ? [UIColor colorWithRed:0.5 green:0.3 blue:0.8 alpha:1.0] : [UIColor clearColor];
         [btn setTitleColor:selected ? [UIColor whiteColor] : [UIColor colorWithWhite:0.5 alpha:1.0] forState:UIControlStateNormal];
