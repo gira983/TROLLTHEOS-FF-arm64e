@@ -51,62 +51,19 @@ static bool isStreamerMode = NO;   // Stream Proof
 @property (nonatomic, assign, getter=isOn) BOOL on;
 @end
 
-@implementation CustomSwitch { UIView *_thumb; CGPoint _touchStartPoint; BOOL _touchMoved; }
+@implementation CustomSwitch { UIView *_thumb; }
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
         self.backgroundColor = [UIColor clearColor];
-        self.userInteractionEnabled = YES;
         _thumb = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 22, 22)];
         _thumb.backgroundColor = [UIColor colorWithWhite:0.75 alpha:1.0];
         _thumb.layer.cornerRadius = 11;
-        _thumb.userInteractionEnabled = NO;
         [self addSubview:_thumb];
-        // Не используем UITapGestureRecognizer — он конфликтует с UIScrollView
-        // Обработка через touchesEnded напрямую
+        UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggle)];
+        [self addGestureRecognizer:tap];
     }
     return self;
-}
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (self.userInteractionEnabled && !self.isHidden && self.alpha > 0.01) {
-        if ([self pointInside:point withEvent:event]) {
-            return self;
-        }
-    }
-    return nil;
-}
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // Начинаем tracking — НЕ передаём super чтобы не активировать scroll сразу
-    _touchStartPoint = [touches.anyObject locationInView:self];
-    _touchMoved = NO;
-}
-- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    CGPoint pt = [touches.anyObject locationInView:self];
-    CGFloat dx = pt.x - _touchStartPoint.x;
-    CGFloat dy = pt.y - _touchStartPoint.y;
-    // Если значительное вертикальное движение — передаём scroll родителю
-    if (!_touchMoved && (fabs(dy) > 5 || fabs(dx) > 5)) {
-        _touchMoved = YES;
-    }
-    if (_touchMoved) {
-        // Передаём touches родителю (UIScrollView) для скролла
-        [self.nextResponder touchesMoved:touches withEvent:event];
-    }
-}
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    if (!_touchMoved) {
-        // Тап без движения — переключаем
-        UITouch *touch = touches.anyObject;
-        CGPoint pt = [touch locationInView:self];
-        if ([self pointInside:pt withEvent:event]) {
-            [self toggle];
-        }
-    } else {
-        [self.nextResponder touchesEnded:touches withEvent:event];
-    }
-}
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [self.nextResponder touchesCancelled:touches withEvent:event];
 }
 - (void)drawRect:(CGRect)rect {
     CGContextRef context = UIGraphicsGetCurrentContext();
@@ -128,6 +85,23 @@ static bool isStreamerMode = NO;   // Stream Proof
         self->_thumb.frame = frame;
         self->_thumb.backgroundColor = self.isOn ? UIColor.whiteColor : [UIColor colorWithWhite:0.75 alpha:1.0];
     }];
+}
+@end
+
+// Кастомный UIScrollView — передаёт тапы на subviews (CustomSwitch, UIButton) без задержек
+@interface PassThroughScrollView : UIScrollView
+@end
+@implementation PassThroughScrollView
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    // Сначала проверяем subviews — если тап попадает на интерактивный элемент, отдаём ему
+    for (UIView *subview in [self.subviews reverseObjectEnumerator]) {
+        if (subview.hidden || !subview.userInteractionEnabled || subview.alpha < 0.01) continue;
+        CGPoint converted = [self convertPoint:point toView:subview];
+        UIView *hit = [subview hitTest:converted withEvent:event];
+        if (hit) return hit;
+    }
+    // Иначе отдаём scrollView (для скролла)
+    return [super hitTest:point withEvent:event];
 }
 @end
 
@@ -272,6 +246,10 @@ static bool isStreamerMode = NO;   // Stream Proof
     UILabel *previewDistLabel;
     UIView *healthBarContainer;
     UIView *boxContainer;
+    
+    // HUD freeze detection
+    uint64_t _lastMatchPtr;     // отслеживаем смену матча
+    NSTimeInterval _lastValidFrame; // время последнего валидного фрейма
     UIView *skeletonContainer;
     
     float previewScale;
@@ -322,7 +300,7 @@ static bool isStreamerMode = NO;   // Stream Proof
             }
         }
         
-        // 2. Активный таб — стандартный hitTest UIKit для всего содержимого
+        // 2. Активный таб контейнер
         UIView *activeTab = nil;
         if (mainTabContainer && !mainTabContainer.hidden) activeTab = mainTabContainer;
         else if (aimTabContainer && !aimTabContainer.hidden) activeTab = aimTabContainer;
@@ -331,19 +309,27 @@ static bool isStreamerMode = NO;   // Stream Proof
         if (activeTab) {
             CGPoint pInTab = [menuContainer convertPoint:pInMenu toView:activeTab];
             if ([activeTab pointInside:pInTab withEvent:event]) {
-                // Для HUDSlider в mainTabContainer — прямой поиск
                 for (UIView *sub in activeTab.subviews.reverseObjectEnumerator) {
                     if (sub.hidden || !sub.userInteractionEnabled || sub.alpha < 0.01) continue;
                     CGPoint pInSub = [activeTab convertPoint:pInTab toView:sub];
                     if (![sub pointInside:pInSub withEvent:event]) continue;
+                    // HUDSlider — возвращаем сразу, он сам обрабатывает drag через touchesMoved
                     if ([sub isKindOfClass:[HUDSlider class]]) {
                         espLog([NSString stringWithFormat:@"[HITTEST] → HUDSlider frame=(%.0f,%.0f,%.0f,%.0f)", sub.frame.origin.x, sub.frame.origin.y, sub.frame.size.width, sub.frame.size.height]);
                         return sub;
                     }
+                    for (UIView *leaf in sub.subviews.reverseObjectEnumerator) {
+                        if (leaf.hidden || !leaf.userInteractionEnabled || leaf.alpha < 0.01) continue;
+                        CGPoint pInLeaf = [sub convertPoint:pInSub toView:leaf];
+                        if (![leaf pointInside:pInLeaf withEvent:event]) continue;
+                        // UISlider или UISwitch внутри контейнера
+                        if ([leaf isKindOfClass:[UISlider class]] ||
+                            [leaf isKindOfClass:[UISwitch class]]) return leaf;
+                        return leaf;
+                    }
+                    return sub;
                 }
-                // Всё остальное — стандартный hitTest UIKit (UIScrollView, кнопки, свитчи)
-                UIView *hit = [activeTab hitTest:pInTab withEvent:event];
-                return hit ? hit : activeTab;
+                return activeTab;
             }
         }
         
@@ -437,16 +423,19 @@ static bool isStreamerMode = NO;   // Stream Proof
     UIView *row = [[UIView alloc] initWithFrame:CGRectMake(8, *ay, w, 32)];
     row.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.12 alpha:0.8];
     row.layer.cornerRadius = 6;
+    row.userInteractionEnabled = YES;
     [scroll addSubview:row];
 
     UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, 7, w - 70, 18)];
     lbl.text = title;
     lbl.textColor = [UIColor colorWithWhite:0.85 alpha:1.0];
     lbl.font = [UIFont systemFontOfSize:12];
+    lbl.userInteractionEnabled = NO;
     [row addSubview:lbl];
 
     CustomSwitch *sw = [[CustomSwitch alloc] initWithFrame:CGRectMake(w - 58, 5, 50, 22)];
     sw.on = isOn;
+    sw.userInteractionEnabled = YES;
     [sw addTarget:self action:action forControlEvents:UIControlEventValueChanged];
     [row addSubview:sw];
     *ay += 36;
@@ -694,11 +683,12 @@ static bool isStreamerMode = NO;   // Stream Proof
     [menuContainer addSubview:aimTabContainer];
     
     // --- AIM TAB: Scrollable ---
-    UIScrollView *aimScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, aimTabContainer.bounds.size.width, aimTabContainer.bounds.size.height)];
+    PassThroughScrollView *aimScroll = [[PassThroughScrollView alloc] initWithFrame:CGRectMake(0, 0, aimTabContainer.bounds.size.width, aimTabContainer.bounds.size.height)];
     aimScroll.backgroundColor = [UIColor clearColor];
     aimScroll.showsVerticalScrollIndicator = YES;
-    aimScroll.delaysContentTouches = NO;      // Fix: CustomSwitch и кнопки срабатывают сразу
-    aimScroll.canCancelContentTouches = NO;   // Fix: НЕ отменять touches у контролов (CustomSwitch)
+    // Критично: без этого UIScrollView перехватывает все тапы на CustomSwitch и UIButton внутри
+    aimScroll.delaysContentTouches = NO;
+    aimScroll.canCancelContentTouches = NO;
     [aimTabContainer addSubview:aimScroll];
 
     CGFloat aW = aimTabContainer.bounds.size.width - 20;
@@ -910,29 +900,11 @@ static bool isStreamerMode = NO;   // Stream Proof
 - (void)toggleAimbot:(CustomSwitch *)sender { isAimbot = sender.isOn; }
 - (void)toggleIgnoreKnocked:(CustomSwitch *)sender { isIgnoreKnocked = sender.isOn; }
 - (void)toggleVisibleOnly:(CustomSwitch *)sender { isVisibleOnly = sender.isOn; }
-// Применяет/снимает защиту от захвата экрана через приватный CALayer ключ disableUpdateMask
-// Значение (1<<1)|(1<<4) = 18 скрывает view от ReplayKit / скриншотов
-static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
-    static NSString *maskKey = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        // "ZGlzYWJsZVVwZGF0ZU1hc2s=" = base64("disableUpdateMask")
-        NSData *data = [[NSData alloc] initWithBase64EncodedString:@"ZGlzYWJsZVVwZGF0ZU1hc2s="
-                                                            options:NSDataBase64DecodingIgnoreUnknownCharacters];
-        if (data) maskKey = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    });
-    if (!v || !maskKey || ![v.layer respondsToSelector:NSSelectorFromString(maskKey)]) return NO;
-    NSInteger value = hidden ? ((1 << 1) | (1 << 4)) : 0;
-    [v.layer setValue:@(value) forKey:maskKey];
-    return YES;
-}
-
 - (void)toggleStreamerMode:(CustomSwitch *)sender {
     isStreamerMode = sender.isOn;
 
     // Применяем disableUpdateMask к menuContainer и floatingButton напрямую.
     // disableUpdateMask скрывает view от ReplayKit/скриншотов, но view остаётся ВИДИМОЙ на экране.
-    // Применяем к нашим views — не к window целиком (иначе скрывается ОТ пользователя тоже).
     if (menuContainer) {
         __applyHideCapture(menuContainer, isStreamerMode);
     }
@@ -1094,36 +1066,37 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 // Обработка touches напрямую — надёжнее чем gesture recognizers в HUD процессе
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // Не вызываем super — UIScrollView и дочерние view сами обрабатывают через hitTest
+    // Передаём вверх — UISlider/UISwitch сами начнут обработку
+    [super touchesBegan:touches withEvent:event];
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *t = touches.anyObject;
     espLog([NSString stringWithFormat:@"[MOVED] view=%@ class=%@", t.view, NSStringFromClass([t.view class])]);
-    // Не вызываем super
+    [super touchesMoved:touches withEvent:event];
 }
 
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    // Не вызываем super
+    [super touchesCancelled:touches withEvent:event];
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = touches.anyObject;
     UIView *hitView = touch.view;
     espLog([NSString stringWithFormat:@"[ENDED] view=%@ class=%@ tag=%ld", hitView, NSStringFromClass([hitView class]), (long)hitView.tag]);
-    if (!hitView) return;
-    
-    // Если touch принадлежит UIScrollView или view внутри него — не трогаем, они сами обработали
-    UIView *v = hitView;
-    while (v) {
-        if ([v isKindOfClass:[UIScrollView class]]) return;
-        if (v == menuContainer) break;
-        v = v.superview;
+    if (!hitView) {
+        [super touchesEnded:touches withEvent:event];
+        return;
     }
     
-    // HUDSlider — не перехватываем
+    // HUDSlider и UISwitch — не перехватываем, они обрабатывают touches сами
     if ([hitView isKindOfClass:[HUDSlider class]] ||
-        [hitView.superview isKindOfClass:[HUDSlider class]]) return;
+        [hitView isKindOfClass:[UISwitch class]] ||
+        [hitView.superview isKindOfClass:[HUDSlider class]] ||
+        [hitView.superview isKindOfClass:[UISwitch class]]) {
+        [super touchesEnded:touches withEvent:event];
+        return;
+    }
     
     NSInteger tag = hitView.tag;
     
@@ -1146,6 +1119,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         }
         checkView = checkView.superview;
     }
+    
+    [super touchesEnded:touches withEvent:event];
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
@@ -1250,6 +1225,11 @@ bool get_IsFiring(uint64_t player) {
     return fireState;
 }
 
+// Player::IsKnockedDownBleed offset 0x1110
+bool get_IsKnockedDown(uint64_t player) {
+    if (!isVaildPtr(player)) return false;
+    return ReadAddr<bool>(player + 0x1110);
+}
 
 bool get_IsVisible(uint64_t player) {
     if (!isVaildPtr(player)) return false;
@@ -1271,6 +1251,19 @@ bool get_IsVisible(uint64_t player) {
 
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
+
+    // HUD freeze fix: если матч сменился — сбрасываем все слои
+    if (match != _lastMatchPtr) {
+        _lastMatchPtr = match;
+        // Принудительно очищаем все CALayer (на случай если updateFrame не успел)
+        dispatch_async(dispatch_get_main_queue(), ^{
+            for (CALayer *layer in self.drawingLayers) {
+                [layer removeFromSuperlayer];
+            }
+            [self.drawingLayers removeAllObjects];
+        });
+        return; // Пропускаем этот фрейм — следующий будет чистым
+    }
 
     uint64_t myPawnObject = getLocalPlayer(match);
     if (!isVaildPtr(myPawnObject)) return;
@@ -1311,31 +1304,32 @@ bool get_IsVisible(uint64_t player) {
         float dis = Vector3::Distance(myLocation, HeadPos);
         if (dis > 400.0f) continue;
 
-        int hp = get_CurHP(PawnObject);
-        // Ignore Knocked: пропустить если knocked (HP == 0 = поваленный)
-        if (isIgnoreKnocked && hp <= 0) continue;
-        // Visible Only: пропустить если враг не виден через raycast
-        if (isVisibleOnly && !get_IsVisible(PawnObject)) continue;
+        // Ignore Knocked: используем IsKnockedDownBleed (0x1110) — точный флаг knocked state
+        if (isIgnoreKnocked && get_IsKnockedDown(PawnObject)) continue;
 
         if (isAimbot && dis <= aimDistance) {
-            // Выбор кости цели
-            Vector3 aimPos = HeadPos;
-            if (aimTarget == 1) aimPos = HeadPos + Vector3(0, -0.15f, 0); // Neck
-            else if (aimTarget == 2) aimPos = getPositionExt(getHip(PawnObject)); // Hip
+            // Visible Only: фильтруем цели только для aimbot, не для ESP
+            bool visOk = !isVisibleOnly || get_IsVisible(PawnObject);
+            if (visOk) {
+                // Выбор кости цели
+                Vector3 aimPos = HeadPos;
+                if (aimTarget == 1) aimPos = HeadPos + Vector3(0, -0.15f, 0); // Neck
+                else if (aimTarget == 2) aimPos = getPositionExt(getHip(PawnObject)); // Hip
 
-            Vector3 w2sAim = WorldToScreen(aimPos, matrix, viewWidth, viewHeight);
+                Vector3 w2sAim = WorldToScreen(aimPos, matrix, viewWidth, viewHeight);
 
-            float deltaX = w2sAim.x - screenCenter.x;
-            float deltaY = w2sAim.y - screenCenter.y;
-            float distanceFromCenter = sqrt(deltaX * deltaX + deltaY * deltaY);
-            
-            if (distanceFromCenter <= aimFov) {
-                // AimMode: 0 = closest to player (3D dist), 1 = closest to crosshair (2D dist)
-                float score = (aimMode == 0) ? dis : distanceFromCenter;
-                if (score < minHP) { // reuse minHP as score
-                    minHP = (int)score;
-                    isVis = get_IsVisible(PawnObject);
-                    bestTarget = PawnObject;
+                float deltaX = w2sAim.x - screenCenter.x;
+                float deltaY = w2sAim.y - screenCenter.y;
+                float distanceFromCenter = sqrt(deltaX * deltaX + deltaY * deltaY);
+                
+                if (distanceFromCenter <= aimFov) {
+                    // AimMode: 0 = closest to player (3D dist), 1 = closest to crosshair (2D dist)
+                    float score = (aimMode == 0) ? dis : distanceFromCenter;
+                    if (score < minHP) { // reuse minHP as score
+                        minHP = (int)score;
+                        isVis = get_IsVisible(PawnObject);
+                        bestTarget = PawnObject;
+                    }
                 }
             }
         }
@@ -1473,8 +1467,8 @@ bool get_IsVisible(uint64_t player) {
 
                 // Fill
                 UIColor *hpColor;
-                if (hp >= (int)(MaxHP * 0.7f)) hpColor = [UIColor colorWithRed:0.0 green:0.9 blue:0.3 alpha:1.0];
-                else if (hp >= (int)(MaxHP * 0.35f)) hpColor = [UIColor colorWithRed:1.0 green:0.8 blue:0.0 alpha:1.0];
+                if (CurHP >= (int)(MaxHP * 0.7f)) hpColor = [UIColor colorWithRed:0.0 green:0.9 blue:0.3 alpha:1.0];
+                else if (CurHP >= (int)(MaxHP * 0.35f)) hpColor = [UIColor colorWithRed:1.0 green:0.8 blue:0.0 alpha:1.0];
                 else hpColor = [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1.0];
 
                 CALayer *hpBar = [CALayer layer];
