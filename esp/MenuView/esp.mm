@@ -63,6 +63,9 @@ static void espLog(NSString *msg) {
 
 uint64_t Moudule_Base = -1;
 
+// Глобальный ключ для objc_associated object — один адрес для set и get
+static const char kSegHandlerKey = 0;
+
 // --- ESP Config ---
 static bool isBox = YES;
 static bool isBone = YES;
@@ -489,7 +492,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] init];
     tap.cancelsTouchesInView = NO;
-    static const char kSegHandlerKey = 0;
     objc_setAssociatedObject(tap, &kSegHandlerKey, ^(UITapGestureRecognizer *t) {
         CGPoint loc = [t locationInView:segRef];
         int idx = (int)(loc.x / (segRef.bounds.size.width / capturedOptions.count));
@@ -958,7 +960,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
-    static const char kSegHandlerKey = 0;
     void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, &kSegHandlerKey);
     if (handler) handler(t);
 }
