@@ -175,8 +175,7 @@ static bool isStreamerMode = NO;   // Stream Proof
 
 @interface MenuView ()
 @property (nonatomic, strong) CADisplayLink *displayLink;
-@property (nonatomic, strong) NSMutableArray<CALayer *> *drawingLayers;
-- (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers;
+- (void)renderESP;
 @end
 
 // Кастомный слайдер — обрабатывает touches с правильным конвертированием координат
@@ -334,11 +333,17 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *boxContainer;
     
     // HUD freeze detection
-    uint64_t _lastMatchPtr;     // отслеживаем смену матча
-    NSTimeInterval _lastValidFrame; // время последнего валидного фрейма
+    uint64_t _lastMatchPtr;
+    NSTimeInterval _lastValidFrame;
     UIView *skeletonContainer;
     
     float previewScale;
+
+    // Оптимизация рендера
+    NSMutableArray<CALayer *> *_layerPool;   // пул переиспользуемых слоёв
+    NSUInteger _poolUsed;                     // сколько слоёв занято в этом кадре
+    CAShapeLayer *_fovCircleLayer;            // FOV круг — создаём один раз
+    NSUInteger _frameSkip;                    // счётчик для троттлинга
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -346,10 +351,31 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (self) {
         self.userInteractionEnabled = YES;
         self.backgroundColor = [UIColor clearColor];
-        self.drawingLayers = [NSMutableArray array];
-        
+
+        // Пул слоёв — преаллоцируем 128 штук, избегаем alloc каждый кадр
+        _layerPool = [NSMutableArray arrayWithCapacity:128];
+        for (int i = 0; i < 128; i++) {
+            [_layerPool addObject:[CALayer layer]];
+        }
+        _poolUsed = 0;
+
+        // FOV круг — один раз, обновляем только radius/visibility
+        _fovCircleLayer = [CAShapeLayer layer];
+        _fovCircleLayer.fillColor   = [UIColor clearColor].CGColor;
+        _fovCircleLayer.strokeColor = [UIColor colorWithRed:1.0 green:1.0 blue:1.0 alpha:0.4].CGColor;
+        _fovCircleLayer.lineWidth   = 1.0;
+        _fovCircleLayer.hidden      = YES;
+        [self.layer addSublayer:_fovCircleLayer];
+
         [self SetUpBase];
+
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
+        // 20fps достаточно для ESP — экономим CPU/GPU в 3x
+        if (@available(iOS 15.0, *)) {
+            self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(15, 20, 20);
+        } else {
+            self.displayLink.preferredFramesPerSecond = 20;
+        }
         [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 
         [self setupFloatingButton];
@@ -1091,36 +1117,59 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     });
 }
 
+// Получить слой из пула (или создать новый если пул исчерпан)
+- (CALayer *)pooledLayer {
+    if (_poolUsed < _layerPool.count) {
+        return _layerPool[_poolUsed++];
+    }
+    // Пул исчерпан — расширяем
+    CALayer *l = [CALayer layer];
+    [_layerPool addObject:l];
+    _poolUsed++;
+    return l;
+}
+
 - (void)updateFrame {
     if (!self.window) return;
+
+    // Скрываем все слои из пула (быстрее чем removeFromSuperlayer)
+    for (NSUInteger i = 0; i < _poolUsed; i++) {
+        _layerPool[i].hidden = YES;
+    }
+    _poolUsed = 0;
+
+    // FOV круг — обновляем только если нужно
+    if (isAimbot) {
+        float cx = self.bounds.size.width  * 0.5f;
+        float cy = self.bounds.size.height * 0.5f;
+        UIBezierPath *p = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy)
+                                                         radius:aimFov
+                                                     startAngle:0
+                                                       endAngle:2 * M_PI
+                                                      clockwise:YES];
+        _fovCircleLayer.path   = p.CGPath;
+        _fovCircleLayer.hidden = NO;
+    } else {
+        _fovCircleLayer.hidden = YES;
+    }
+
+    // Рендерим ESP через пул
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    for (CALayer *layer in self.drawingLayers) {
-        [layer removeFromSuperlayer];
-    }
-    [self.drawingLayers removeAllObjects];
-    
-    // Draw FOV Circle
-    if (isAimbot) {
-        float screenX = self.bounds.size.width / 2;
-        float screenY = self.bounds.size.height / 2;
-        
-        CAShapeLayer *circleLayer = [CAShapeLayer layer];
-        UIBezierPath *path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(screenX, screenY) radius:aimFov startAngle:0 endAngle:2 * M_PI clockwise:YES];
-        circleLayer.path = path.CGPath;
-        circleLayer.fillColor = [UIColor clearColor].CGColor;
-        circleLayer.strokeColor = [UIColor colorWithRed:1.0 green:1.0 blue:1.0 alpha:0.5].CGColor;
-        circleLayer.lineWidth = 1.0;
-        [self.drawingLayers addObject:circleLayer];
-    }
-    
-    [self renderESPToLayers:self.drawingLayers];
-    
-    for (CALayer *layer in self.drawingLayers) {
-        [self.layer addSublayer:layer];
-    }
+    [self renderESP];
     [CATransaction commit];
-    [self setNeedsDisplay];
+}
+
+// Хелпер для рендера — добавляет слой из пула в иерархию
+- (void)addPooledLayerToParent:(CALayer *)parent frame:(CGRect)f color:(CGColorRef)c radius:(CGFloat)r {
+    CALayer *l = [self pooledLayer];
+    l.frame           = f;
+    l.backgroundColor = c;
+    l.cornerRadius    = r;
+    l.hidden          = NO;
+    if (l.superlayer != parent) {
+        [parent addSublayer:l];
+    }
 }
 
 - (void)dealloc {
@@ -1129,7 +1178,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 static inline void DrawBoneLine(
-    NSMutableArray<CALayer *> *layers,
+    MenuView *mv,
     CGPoint p1,
     CGPoint p2,
     UIColor *color,
@@ -1140,13 +1189,14 @@ static inline void DrawBoneLine(
     CGFloat len = sqrt(dx*dx + dy*dy);
     if (len < 2.0f) return;
 
-    CALayer *line = [CALayer layer];
+    CALayer *line = [mv pooledLayer];
     line.backgroundColor = color.CGColor;
-    line.bounds = CGRectMake(0, 0, len, width);
-    line.position = p1;
+    line.bounds    = CGRectMake(0, 0, len, width);
+    line.position  = p1;
     line.anchorPoint = CGPointMake(0, 0.5);
     line.transform = CATransform3DMakeRotation(atan2(dy, dx), 0, 0, 1);
-    [layers addObject:line];
+    line.hidden    = NO;
+    if (line.superlayer != mv.layer) [mv.layer addSublayer:line];
 }
 
 
@@ -1170,7 +1220,7 @@ bool get_IsFiring(uint64_t player) {
 
 
 
-- (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers {
+- (void)renderESP {
     if (Moudule_Base == -1) return;
 
     uint64_t matchGame = getMatchGame(Moudule_Base);
@@ -1180,17 +1230,10 @@ bool get_IsFiring(uint64_t player) {
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
 
-    // HUD freeze fix: если матч сменился — сбрасываем все слои
+    // HUD freeze fix: если матч сменился — пропускаем кадр
     if (match != _lastMatchPtr) {
         _lastMatchPtr = match;
-        // Принудительно очищаем все CALayer (на случай если updateFrame не успел)
-        dispatch_async(dispatch_get_main_queue(), ^{
-            for (CALayer *layer in self.drawingLayers) {
-                [layer removeFromSuperlayer];
-            }
-            [self.drawingLayers removeAllObjects];
-        });
-        return; // Пропускаем этот фрейм — следующий будет чистым
+        return;
     }
 
     uint64_t myPawnObject = getLocalPlayer(match);
@@ -1207,7 +1250,6 @@ bool get_IsFiring(uint64_t player) {
     float viewWidth = self.bounds.size.width;
     float viewHeight = self.bounds.size.height;
     CGPoint screenCenter = CGPointMake(viewWidth / 2, viewHeight / 2);
-
     // Variables for Aimbot
     uint64_t bestTarget = 0;
     int minHP = 99999;
@@ -1285,14 +1327,14 @@ bool get_IsFiring(uint64_t player) {
             UIColor *boneColor = [UIColor whiteColor];
             CGFloat boneWidth = 1.0f;
 
-            DrawBoneLine(layers, CGPointMake(wHead.x, wHead.y), CGPointMake(wHip.x, wHip.y), boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wLS.x, wLS.y), CGPointMake(wRS.x, wRS.y), boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wLS.x, wLS.y), CGPointMake(wLE.x, wLE.y), boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wLE.x, wLE.y), CGPointMake(wLH.x, wLH.y), boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wRS.x, wRS.y), CGPointMake(wRE.x, wRE.y), boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wRE.x, wRE.y), CGPointMake(wRH.x, wRH.y), boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wLA.x, wLA.y), boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wRA.x, wRA.y), boneColor, boneWidth);
+            DrawBoneLine(self, CGPointMake(wHead.x, wHead.y), CGPointMake(wHip.x,  wHip.y),  boneColor, boneWidth);
+            DrawBoneLine(self, CGPointMake(wLS.x,   wLS.y),   CGPointMake(wRS.x,   wRS.y),   boneColor, boneWidth);
+            DrawBoneLine(self, CGPointMake(wLS.x,   wLS.y),   CGPointMake(wLE.x,   wLE.y),   boneColor, boneWidth);
+            DrawBoneLine(self, CGPointMake(wLE.x,   wLE.y),   CGPointMake(wLH.x,   wLH.y),   boneColor, boneWidth);
+            DrawBoneLine(self, CGPointMake(wRS.x,   wRS.y),   CGPointMake(wRE.x,   wRE.y),   boneColor, boneWidth);
+            DrawBoneLine(self, CGPointMake(wRE.x,   wRE.y),   CGPointMake(wRH.x,   wRH.y),   boneColor, boneWidth);
+            DrawBoneLine(self, CGPointMake(wHip.x,  wHip.y),  CGPointMake(wLA.x,   wLA.y),   boneColor, boneWidth);
+            DrawBoneLine(self, CGPointMake(wHip.x,  wHip.y),  CGPointMake(wRA.x,   wRA.y),   boneColor, boneWidth);
         }
 
         float boxHeight = abs(w2sHead.y - w2sToe.y);
@@ -1300,13 +1342,15 @@ bool get_IsFiring(uint64_t player) {
         float bx = w2sHead.x - boxWidth * 0.5f;
         float by = w2sHead.y;
 
-        // Цвет зависит от дистанции: близко = красный, средне = жёлтый, далеко = белый
-        UIColor *accentColor;
-        if (dis < 30.0f)       accentColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0];
-        else if (dis < 80.0f)  accentColor = [UIColor colorWithRed:1.0 green:0.85 blue:0.0 alpha:1.0];
-        else                   accentColor = [UIColor colorWithRed:0.9 green:0.9 blue:0.9 alpha:0.85];
+        // Цвет зависит от дистанции
+        CGColorRef accentCG;
+        UIColor *accentUI;
+        if (dis < 30.0f)      { accentUI = [UIColor colorWithRed:1.0 green:0.3  blue:0.3  alpha:1.0]; }
+        else if (dis < 80.0f) { accentUI = [UIColor colorWithRed:1.0 green:0.85 blue:0.0  alpha:1.0]; }
+        else                  { accentUI = [UIColor colorWithRed:0.9 green:0.9  blue:0.9  alpha:0.85]; }
+        accentCG = accentUI.CGColor;
 
-        // === BOX: только уголки, тонкие, 1pt ===
+        // === BOX: уголки из пула ===
         if (isBox) {
             float cLen = MIN(boxWidth, boxHeight) * 0.22f;
             float lw = 1.2f;
@@ -1317,18 +1361,15 @@ bool get_IsFiring(uint64_t player) {
                 {bx+boxWidth, by+boxHeight-cLen, bx+boxWidth, by+boxHeight}, {bx+boxWidth-cLen, by+boxHeight, bx+boxWidth, by+boxHeight}
             };
             for (int ci = 0; ci < 8; ci++) {
-                CALayer *c = [CALayer layer];
                 float cx = MIN(pts[ci][0], pts[ci][2]);
                 float cy = MIN(pts[ci][1], pts[ci][3]);
                 float cw = MAX(fabs(pts[ci][2]-pts[ci][0]), lw);
                 float ch = MAX(fabs(pts[ci][3]-pts[ci][1]), lw);
-                c.frame = CGRectMake(cx, cy, cw, ch);
-                c.backgroundColor = accentColor.CGColor;
-                [layers addObject:c];
+                [self addPooledLayerToParent:self.layer frame:CGRectMake(cx,cy,cw,ch) color:accentCG radius:0];
             }
         }
 
-        // === NAME: маленький, над головой, полупрозрачный фон ===
+        // === NAME: фон + текст ===
         if (isName) {
             NSString *name = GetNickName(PawnObject);
             if (!name || name.length == 0) name = @"?";
@@ -1337,74 +1378,82 @@ bool get_IsFiring(uint64_t player) {
             float nX = bx + (boxWidth - nW) * 0.5f;
             float nY = by - nH - 3.0f;
 
-            CALayer *nbg = [CALayer layer];
-            nbg.frame = CGRectMake(nX, nY, nW, nH);
-            nbg.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.45].CGColor;
-            nbg.cornerRadius = 2.0f;
-            [layers addObject:nbg];
+            // фон
+            [self addPooledLayerToParent:self.layer
+                                   frame:CGRectMake(nX, nY, nW, nH)
+                                   color:[UIColor colorWithWhite:0.0 alpha:0.45].CGColor
+                                  radius:2.0f];
 
-            CATextLayer *nl = [CATextLayer layer];
-            nl.string = name;
-            nl.fontSize = 8.5f;
-            nl.frame = CGRectMake(nX, nY, nW, nH);
+            // текст — CATextLayer тоже из пула, но нужна проверка типа
+            CALayer *pl = [self pooledLayer];
+            if (![pl isKindOfClass:[CATextLayer class]]) {
+                // слой в пуле не текстовый — заменяем
+                pl = [CATextLayer layer];
+                _layerPool[_poolUsed - 1] = (CALayer *)pl;
+            }
+            CATextLayer *nl = (CATextLayer *)pl;
+            nl.string       = name;
+            nl.fontSize     = 8.5f;
+            nl.frame        = CGRectMake(nX, nY, nW, nH);
             nl.alignmentMode = kCAAlignmentCenter;
             nl.foregroundColor = [UIColor colorWithWhite:0.95 alpha:1.0].CGColor;
             nl.contentsScale = [UIScreen mainScreen].scale;
-            [layers addObject:nl];
+            nl.hidden       = NO;
+            if (nl.superlayer != self.layer) [self.layer addSublayer:nl];
         }
 
-        // === HEALTH: вертикальная полоска слева от box, тонкая ===
+        // === HEALTH: вертикальная полоска слева ===
         if (isHealth) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
                 float ratio = fmaxf(0.0f, fminf(1.0f, (float)CurHP / MaxHP));
-                float bW = 2.5f;
-                float bH = boxHeight;
-                float bX = bx - bW - 2.0f;
-                float bY = by;
-
-                CALayer *bgH = [CALayer layer];
-                bgH.frame = CGRectMake(bX, bY, bW, bH);
-                bgH.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.5].CGColor;
-                bgH.cornerRadius = 1.0f;
-                [layers addObject:bgH];
-
-                UIColor *hpCol;
-                if (ratio > 0.6f)      hpCol = [UIColor colorWithRed:0.15 green:0.9 blue:0.35 alpha:1.0];
-                else if (ratio > 0.3f) hpCol = [UIColor colorWithRed:1.0 green:0.75 blue:0.0 alpha:1.0];
-                else                   hpCol = [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1.0];
-
-                CALayer *fillH = [CALayer layer];
-                fillH.frame = CGRectMake(bX, bY + bH*(1.0f-ratio), bW, bH*ratio);
-                fillH.backgroundColor = hpCol.CGColor;
-                fillH.cornerRadius = 1.0f;
-                [layers addObject:fillH];
+                float bW = 2.5f, bH = boxHeight;
+                float bX = bx - bW - 2.0f, bY = by;
+                // bg
+                [self addPooledLayerToParent:self.layer
+                                       frame:CGRectMake(bX, bY, bW, bH)
+                                       color:[UIColor colorWithWhite:0.0 alpha:0.5].CGColor
+                                      radius:1.0f];
+                // fill
+                CGColorRef hpCG;
+                if (ratio > 0.6f)      hpCG = [UIColor colorWithRed:0.15 green:0.9  blue:0.35 alpha:1.0].CGColor;
+                else if (ratio > 0.3f) hpCG = [UIColor colorWithRed:1.0  green:0.75 blue:0.0  alpha:1.0].CGColor;
+                else                   hpCG = [UIColor colorWithRed:1.0  green:0.2  blue:0.2  alpha:1.0].CGColor;
+                [self addPooledLayerToParent:self.layer
+                                       frame:CGRectMake(bX, bY + bH*(1.0f-ratio), bW, bH*ratio)
+                                       color:hpCG
+                                      radius:1.0f];
             }
         }
 
-        // === DISTANCE: мелко под box ===
+        // === DISTANCE ===
         if (isDis) {
-            CATextLayer *dl = [CATextLayer layer];
-            dl.string = [NSString stringWithFormat:@"%.0fm", dis];
-            dl.fontSize = 8.0f;
-            dl.frame = CGRectMake(bx, by+boxHeight+1.0f, boxWidth, 10.0f);
+            CALayer *pl = [self pooledLayer];
+            if (![pl isKindOfClass:[CATextLayer class]]) {
+                pl = [CATextLayer layer];
+                _layerPool[_poolUsed - 1] = (CALayer *)pl;
+            }
+            CATextLayer *dl = (CATextLayer *)pl;
+            dl.string       = [NSString stringWithFormat:@"%.0fm", dis];
+            dl.fontSize     = 8.0f;
+            dl.frame        = CGRectMake(bx, by+boxHeight+1.0f, boxWidth, 10.0f);
             dl.alignmentMode = kCAAlignmentCenter;
             dl.foregroundColor = [UIColor colorWithWhite:0.7 alpha:0.8].CGColor;
             dl.contentsScale = [UIScreen mainScreen].scale;
-            [layers addObject:dl];
+            dl.hidden       = NO;
+            if (dl.superlayer != self.layer) [self.layer addSublayer:dl];
         }
 
-        // === ESP LINE: от края экрана до ног/центра/головы врага ===
+        // === ESP LINE ===
         if (isLine) {
             CGFloat sw = self.bounds.size.width;
             CGFloat sh = self.bounds.size.height;
             CGPoint from;
-            if (lineOrigin == 0)      from = CGPointMake(sw*0.5f, 0);           // Top
-            else if (lineOrigin == 1) from = CGPointMake(sw*0.5f, sh*0.5f);     // Center
-            else                      from = CGPointMake(sw*0.5f, sh);           // Bottom
-
-            CGPoint to = CGPointMake(bx + boxWidth*0.5f, by + boxHeight);        // к ногам врага
-            DrawBoneLine(layers, from, to, [accentColor colorWithAlphaComponent:0.5], 0.8f);
+            if (lineOrigin == 0)      from = CGPointMake(sw*0.5f, 0);
+            else if (lineOrigin == 1) from = CGPointMake(sw*0.5f, sh*0.5f);
+            else                      from = CGPointMake(sw*0.5f, sh);
+            CGPoint to = CGPointMake(bx + boxWidth*0.5f, by + boxHeight);
+            DrawBoneLine(self, from, to, [accentUI colorWithAlphaComponent:0.5], 0.8f);
         }
     }
 
