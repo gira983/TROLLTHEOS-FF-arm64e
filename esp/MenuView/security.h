@@ -1,5 +1,4 @@
 #pragma once
-#include <sys/ptrace.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
 #include <mach-o/dyld.h>
@@ -8,6 +7,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <time.h>
+
+// ptrace недоступен через заголовок на iOS SDK — объявляем вручную
+extern "C" int ptrace(int request, pid_t pid, caddr_t addr, int data);
 
 // ─────────────────────────────────────────────
 // 1. Anti-Debug: запрет ptrace attach
@@ -83,7 +86,6 @@ static inline bool sec_check_integrity(void *func_ptr, size_t check_len) {
 // ─────────────────────────────────────────────
 // 5. Timing check — отладчики замедляют выполнение
 // ─────────────────────────────────────────────
-#include <time.h>
 static inline bool sec_timing_check(void) {
     struct timespec t1, t2;
     clock_gettime(CLOCK_MONOTONIC, &t1);
