@@ -1,5 +1,14 @@
 #import "esp.h"
 #import <objc/runtime.h>
+#include <sys/ptrace.h>
+#include <sys/sysctl.h>
+#include <sys/mman.h>
+#include <dlfcn.h>
+#include <mach-o/dyld.h>
+#include <string>
+#include <vector>
+#include <cmath>
+#import "security.h"
 
 // Лог в файл (определён в HUDApp.mm)
 extern void writeLog(NSString *msg);
@@ -340,10 +349,19 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     float previewScale;
 
     // Оптимизация рендера
-    NSMutableArray<CALayer *> *_layerPool;   // пул переиспользуемых слоёв
-    NSUInteger _poolUsed;                     // сколько слоёв занято в этом кадре
-    CAShapeLayer *_fovCircleLayer;            // FOV круг — создаём один раз
-    NSUInteger _frameSkip;                    // счётчик для троттлинга
+    NSMutableArray<CALayer *> *_layerPool;
+    NSUInteger _poolUsed;
+    CAShapeLayer *_fovCircleLayer;
+    NSUInteger _frameSkip;
+
+    // Background thread для ReadAddr
+    dispatch_queue_t _espQueue;
+    volatile BOOL _bgBusy;          // фоновый поток занят — не запускаем второй
+    NSMutableArray *_snapshot;      // готовые данные для рисования (main thread только читает)
+    uint64_t _bestTargetSnap;
+    Vector3  _myLocationSnap;
+    BOOL     _shouldAimSnap;
+    Vector3  _aimPosSnap;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -358,6 +376,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             [_layerPool addObject:[CALayer layer]];
         }
         _poolUsed = 0;
+
+        // Background queue для ReadAddr — НЕ main thread
+        _espQueue = dispatch_queue_create("esp.read.queue", DISPATCH_QUEUE_SERIAL);
+        _bgBusy = NO;
+        _snapshot = [NSMutableArray array];
 
         // FOV круг — один раз, обновляем только radius/visibility
         _fovCircleLayer = [CAShapeLayer layer];
@@ -1113,63 +1136,200 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)SetUpBase {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+        // Инициализация защиты — при провале просто не запускаемся
+        if (!sec_init()) return;
         Moudule_Base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
     });
-}
-
-// Получить слой из пула (или создать новый если пул исчерпан)
-- (CALayer *)pooledLayer {
-    if (_poolUsed < _layerPool.count) {
-        return _layerPool[_poolUsed++];
-    }
-    // Пул исчерпан — расширяем
-    CALayer *l = [CALayer layer];
-    [_layerPool addObject:l];
-    _poolUsed++;
-    return l;
 }
 
 - (void)updateFrame {
     if (!self.window) return;
 
-    // Скрываем все слои из пула (быстрее чем removeFromSuperlayer)
-    for (NSUInteger i = 0; i < _poolUsed; i++) {
-        _layerPool[i].hidden = YES;
+    // === BACKGROUND: читаем память игры (НЕ блокируем main thread) ===
+    if (!_bgBusy) {
+        _bgBusy = YES;
+        dispatch_async(_espQueue, ^{
+            [self collectESPSnapshot];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self->_bgBusy = NO;
+                [self drawESPFromSnapshot];
+            });
+        });
     }
+    // Если фоновый поток ещё занят — просто пропускаем этот кадр (не блокируем)
+}
+
+// Собирает все данные через ReadAddr на background thread
+- (void)collectESPSnapshot {
+    NSMutableArray *snap = [NSMutableArray array];
+
+    // Периодическая проверка защиты (раз в ~30 сек)
+    static NSTimeInterval lastSecCheck = 0;
+    NSTimeInterval now = CACurrentMediaTime();
+    if (now - lastSecCheck > 30.0) {
+        lastSecCheck = now;
+        if (!sec_periodic_check()) {
+            // Что-то подозрительно — останавливаем
+            _snapshot = snap;
+            return;
+        }
+    }
+
+    if (Moudule_Base == -1) { _snapshot = snap; return; }
+
+    uint64_t matchGame = getMatchGame(Moudule_Base);
+    if (!isVaildPtr(matchGame)) { _snapshot = snap; return; }
+
+    uint64_t camera = CameraMain(matchGame);
+    if (!isVaildPtr(camera)) { _snapshot = snap; return; }
+
+    uint64_t match = getMatch(matchGame);
+    if (!isVaildPtr(match)) { _snapshot = snap; return; }
+
+    if (match != _lastMatchPtr) { _lastMatchPtr = match; _snapshot = snap; return; }
+
+    uint64_t myPawnObject = getLocalPlayer(match);
+    if (!isVaildPtr(myPawnObject)) { _snapshot = snap; return; }
+
+    uint64_t mainCameraTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
+    Vector3 myLocation = getPositionExt(mainCameraTransform);
+    _myLocationSnap = myLocation;
+
+    uint64_t playerList = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
+    uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
+    int coutValue       = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
+
+    float *matrix   = GetViewMatrix(camera);
+    float viewW     = self.bounds.size.width;
+    float viewH     = self.bounds.size.height;
+
+    isFire = get_IsFiring(myPawnObject);
+
+    uint64_t bestTarget = 0;
+    float minScore = FLT_MAX;
+    CGPoint screenCenter = CGPointMake(viewW * 0.5f, viewH * 0.5f);
+
+    for (int i = 0; i < coutValue && i < 20; i++) {
+        uint64_t PawnObject = ReadAddr<uint64_t>(tValue + OFF_PLAYERLIST_ITEM + 8 * i);
+        if (!isVaildPtr(PawnObject) || PawnObject == myPawnObject) continue;
+        if (isLocalTeamMate(myPawnObject, PawnObject)) continue;
+
+        int CurHP = get_CurHP(PawnObject);
+        if (CurHP <= 0) continue;
+
+        Vector3 HeadPos  = getPositionExt(getHead(PawnObject));
+        Vector3 myPos    = getPositionExt(mainCameraTransform);
+        float dis        = Vector3::Distance(HeadPos, myPos);
+        if (dis > 220.0f) continue;
+
+        Vector3 w2sHead  = WorldToScreen(HeadPos, matrix, viewW, viewH);
+        if (w2sHead.z <= 0) continue;
+
+        Vector3 RightToePos = getPositionExt(getRightToeNode(PawnObject));
+        Vector3 HipPos      = getPositionExt(getHip(PawnObject));
+        Vector3 L_Ankle     = getPositionExt(getLeftAnkle(PawnObject));
+        Vector3 R_Ankle     = getPositionExt(getRightAnkle(PawnObject));
+        Vector3 L_Shoulder  = getPositionExt(getLeftShoulder(PawnObject));
+        Vector3 R_Shoulder  = getPositionExt(getRightShoulder(PawnObject));
+        Vector3 L_Elbow     = getPositionExt(getLeftElbow(PawnObject));
+        Vector3 R_Elbow     = getPositionExt(getRightElbow(PawnObject));
+        Vector3 L_Hand      = getPositionExt(getLeftHand(PawnObject));
+        Vector3 R_Hand      = getPositionExt(getRightHand(PawnObject));
+
+        Vector3 HeadTop     = HeadPos; HeadTop.y += 0.2f;
+        Vector3 w2sHeadTop  = WorldToScreen(HeadTop,      matrix, viewW, viewH);
+        Vector3 w2sToe      = WorldToScreen(RightToePos,  matrix, viewW, viewH);
+        Vector3 wHead       = WorldToScreen(HeadPos,      matrix, viewW, viewH);
+        Vector3 wHip        = WorldToScreen(HipPos,       matrix, viewW, viewH);
+        Vector3 wLS         = WorldToScreen(L_Shoulder,   matrix, viewW, viewH);
+        Vector3 wRS         = WorldToScreen(R_Shoulder,   matrix, viewW, viewH);
+        Vector3 wLE         = WorldToScreen(L_Elbow,      matrix, viewW, viewH);
+        Vector3 wRE         = WorldToScreen(R_Elbow,      matrix, viewW, viewH);
+        Vector3 wLH         = WorldToScreen(L_Hand,       matrix, viewW, viewH);
+        Vector3 wRH         = WorldToScreen(R_Hand,       matrix, viewW, viewH);
+        Vector3 wLA         = WorldToScreen(L_Ankle,      matrix, viewW, viewH);
+        Vector3 wRA         = WorldToScreen(R_Ankle,      matrix, viewW, viewH);
+
+        NSString *name = GetNickName(PawnObject);
+        if (!name || name.length == 0) name = @"?";
+        int maxHP = get_MaxHP(PawnObject);
+
+        // Упаковываем все данные врага в словарь
+        NSDictionary *entry = @{
+            @"hp":    @(CurHP),
+            @"maxhp": @(maxHP),
+            @"dis":   @(dis),
+            @"name":  name,
+            @"w2sHX": @(w2sHeadTop.x), @"w2sHY": @(w2sHeadTop.y),
+            @"w2sTX": @(w2sToe.x),     @"w2sTY": @(w2sToe.y),
+            @"wHX":   @(wHead.x),      @"wHY":   @(wHead.y),
+            @"wHipX": @(wHip.x),       @"wHipY": @(wHip.y),
+            @"wLSX":  @(wLS.x),  @"wLSY":  @(wLS.y),
+            @"wRSX":  @(wRS.x),  @"wRSY":  @(wRS.y),
+            @"wLEX":  @(wLE.x),  @"wLEY":  @(wLE.y),
+            @"wREX":  @(wRE.x),  @"wREY":  @(wRE.y),
+            @"wLHX":  @(wLH.x),  @"wLHY":  @(wLH.y),
+            @"wRHX":  @(wRH.x),  @"wRHY":  @(wRH.y),
+            @"wLAX":  @(wLA.x),  @"wLAY":  @(wLA.y),
+            @"wRAX":  @(wRA.x),  @"wRAY":  @(wRA.y),
+            @"pawn":  @(PawnObject),
+        };
+        [snap addObject:entry];
+
+        // Aimbot: находим лучшую цель
+        if (isAimbot && dis <= aimDistance) {
+            Vector3 w2sAim = WorldToScreen(HeadPos, matrix, viewW, viewH);
+            float dx = w2sAim.x - screenCenter.x;
+            float dy = w2sAim.y - screenCenter.y;
+            float dist2d = sqrtf(dx*dx + dy*dy);
+            if (dist2d <= aimFov) {
+                float score = (aimMode == 0) ? dis : dist2d;
+                if (score < minScore) {
+                    minScore  = score;
+                    bestTarget = PawnObject;
+                }
+            }
+        }
+    }
+
+    // Aimbot — выстрел прямо в background потоке (WriteAddr безопасен)
+    bool shouldAim = (aimTrigger == 0) || (aimTrigger == 1 && isFire);
+    if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
+        Vector3 aimPos;
+        if (aimTarget == 0)      aimPos = getPositionExt(getHead(bestTarget));
+        else if (aimTarget == 1) aimPos = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.15f, 0);
+        else                     aimPos = getPositionExt(getHip(bestTarget));
+        Quaternion rot = GetRotationToLocation(aimPos, 0.1f, myLocation);
+        set_aim(myPawnObject, rot);
+    }
+
+    _snapshot = snap;
+}
+
+// Рисует из снапшота — только CALayer операции, нет ReadAddr
+- (void)drawESPFromSnapshot {
+    // Скрываем все слои пула
+    for (NSUInteger i = 0; i < _poolUsed; i++) _layerPool[i].hidden = YES;
     _poolUsed = 0;
 
-    // FOV круг — обновляем только если нужно
+    // FOV круг
     if (isAimbot) {
         float cx = self.bounds.size.width  * 0.5f;
         float cy = self.bounds.size.height * 0.5f;
-        UIBezierPath *p = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy)
-                                                         radius:aimFov
-                                                     startAngle:0
-                                                       endAngle:2 * M_PI
-                                                      clockwise:YES];
-        _fovCircleLayer.path   = p.CGPath;
+        _fovCircleLayer.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx,cy)
+                                                              radius:aimFov
+                                                          startAngle:0
+                                                            endAngle:2*M_PI
+                                                           clockwise:YES].CGPath;
         _fovCircleLayer.hidden = NO;
     } else {
         _fovCircleLayer.hidden = YES;
     }
 
-    // Рендерим ESP через пул
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     [self renderESP];
     [CATransaction commit];
-}
-
-// Хелпер для рендера — добавляет слой из пула в иерархию
-- (void)addPooledLayerToParent:(CALayer *)parent frame:(CGRect)f color:(CGColorRef)c radius:(CGFloat)r {
-    CALayer *l = [self pooledLayer];
-    l.frame           = f;
-    l.backgroundColor = c;
-    l.cornerRadius    = r;
-    l.hidden          = NO;
-    if (l.superlayer != parent) {
-        [parent addSublayer:l];
-    }
 }
 
 - (void)dealloc {
@@ -1220,256 +1380,169 @@ bool get_IsFiring(uint64_t player) {
 
 
 
-- (void)renderESP {
-    if (Moudule_Base == -1) return;
+// Хелпер: получить слой из пула
+- (CALayer *)pooledLayer {
+    if (_poolUsed < _layerPool.count) return _layerPool[_poolUsed++];
+    CALayer *l = [CALayer layer];
+    [_layerPool addObject:l];
+    _poolUsed++;
+    return l;
+}
 
-    uint64_t matchGame = getMatchGame(Moudule_Base);
-    uint64_t camera = CameraMain(matchGame);
-    if (!isVaildPtr(camera)) return;
+// Хелпер: добавить plain слой из пула
+- (void)addPooledLayerToParent:(CALayer *)parent frame:(CGRect)f color:(CGColorRef)c radius:(CGFloat)r {
+    CALayer *l = [self pooledLayer];
+    l.frame           = f;
+    l.backgroundColor = c;
+    l.cornerRadius    = r;
+    l.hidden          = NO;
+    if (l.superlayer != parent) [parent addSublayer:l];
+}
 
-    uint64_t match = getMatch(matchGame);
-    if (!isVaildPtr(match)) return;
-
-    // HUD freeze fix: если матч сменился — пропускаем кадр
-    if (match != _lastMatchPtr) {
-        _lastMatchPtr = match;
-        return;
+// Хелпер: добавить/переиспользовать CATextLayer из пула
+- (CATextLayer *)pooledTextLayer {
+    // Ищем свободный CATextLayer начиная с _poolUsed
+    for (NSUInteger i = _poolUsed; i < _layerPool.count; i++) {
+        if ([_layerPool[i] isKindOfClass:[CATextLayer class]]) {
+            // Меняем местами с текущей позицией пула
+            CALayer *tmp = _layerPool[_poolUsed];
+            _layerPool[_poolUsed] = _layerPool[i];
+            _layerPool[i] = tmp;
+            return (CATextLayer *)_layerPool[_poolUsed++];
+        }
     }
+    // Нет свободного — создаём
+    CATextLayer *tl = [CATextLayer layer];
+    [_layerPool insertObject:tl atIndex:_poolUsed];
+    _poolUsed++;
+    return tl;
+}
 
-    uint64_t myPawnObject = getLocalPlayer(match);
-    if (!isVaildPtr(myPawnObject)) return;
-    
-    uint64_t mainCameraTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
-    Vector3 myLocation = getPositionExt(mainCameraTransform);
-    
-    uint64_t player = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
-    uint64_t tValue = ReadAddr<uint64_t>(player + OFF_PLAYERLIST_ARR);
-    int coutValue = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
-    
-    float *matrix = GetViewMatrix(camera);
-    float viewWidth = self.bounds.size.width;
-    float viewHeight = self.bounds.size.height;
-    CGPoint screenCenter = CGPointMake(viewWidth / 2, viewHeight / 2);
-    // Variables for Aimbot
-    uint64_t bestTarget = 0;
-    int minHP = 99999;
-    bool isFire = false;
-    isFire   = get_IsFiring(myPawnObject);
+// Рисует ESP из снапшота — НЕТ ReadAddr здесь, только CALayer операции
+- (void)renderESP {
+    NSMutableArray *snap = _snapshot;
+    if (!snap || snap.count == 0) return;
 
-    for (int i = 0; i < coutValue; i++) {
-        uint64_t PawnObject = ReadAddr<uint64_t>(tValue + OFF_PLAYERLIST_ITEM + 8 * i);
-        if (!isVaildPtr(PawnObject)) continue;
+    float viewW = self.bounds.size.width;
+    float viewH = self.bounds.size.height;
+    UIColor *boneColor = [UIColor colorWithWhite:1.0 alpha:0.85];
 
-        bool isLocalTeam = isLocalTeamMate(myPawnObject, PawnObject);
-        if (isLocalTeam) continue;
-        
-        int CurHP = get_CurHP(PawnObject);
-        if (CurHP <= 0) continue; 
+    for (NSDictionary *e in snap) {
+        float w2sHX = [e[@"w2sHX"] floatValue], w2sHY = [e[@"w2sHY"] floatValue];
+        float w2sTX = [e[@"w2sTX"] floatValue], w2sTY = [e[@"w2sTY"] floatValue];
+        float dis   = [e[@"dis"]   floatValue];
+        int   hp    = [e[@"hp"]    intValue];
+        int   maxhp = [e[@"maxhp"] intValue];
 
-        Vector3 HeadPos     = getPositionExt(getHead(PawnObject));
-
-        float dis = Vector3::Distance(myLocation, HeadPos);
-        if (dis > 400.0f) continue;
-
-        if (isAimbot && dis <= aimDistance) {
-            // Выбор кости цели
-            Vector3 aimPos = HeadPos;
-            if (aimTarget == 1) aimPos = HeadPos + Vector3(0, -0.15f, 0); // Neck
-            else if (aimTarget == 2) aimPos = getPositionExt(getHip(PawnObject)); // Hip
-
-            Vector3 w2sAim = WorldToScreen(aimPos, matrix, viewWidth, viewHeight);
-
-            float deltaX = w2sAim.x - screenCenter.x;
-            float deltaY = w2sAim.y - screenCenter.y;
-            float distanceFromCenter = sqrt(deltaX * deltaX + deltaY * deltaY);
-            
-            if (distanceFromCenter <= aimFov) {
-                // AimMode: 0 = closest to player (3D dist), 1 = closest to crosshair (2D dist)
-                float score = (aimMode == 0) ? dis : distanceFromCenter;
-                if (score < minHP) {
-                    minHP = (int)score;
-                    bestTarget = PawnObject;
-                }
-            }
-        }
-
-        if (dis > 220.0f) continue; 
-
-        Vector3 RightToePos = getPositionExt(getRightToeNode(PawnObject));
-        Vector3 HipPos      = getPositionExt(getHip(PawnObject));
-        Vector3 L_Ankle     = getPositionExt(getLeftAnkle(PawnObject));
-        Vector3 R_Ankle     = getPositionExt(getRightAnkle(PawnObject));
-        
-        Vector3 L_Shoulder  = getPositionExt(getLeftShoulder(PawnObject));
-        Vector3 R_Shoulder  = getPositionExt(getRightShoulder(PawnObject));
-        Vector3 L_Elbow     = getPositionExt(getLeftElbow(PawnObject));
-        Vector3 R_Elbow     = getPositionExt(getRightElbow(PawnObject));
-        Vector3 L_Hand      = getPositionExt(getLeftHand(PawnObject));
-        Vector3 R_Hand      = getPositionExt(getRightHand(PawnObject));
-
-        Vector3 HeadTop     = HeadPos; HeadTop.y += 0.2f;
-        Vector3 w2sHead     = WorldToScreen(HeadTop, matrix, viewWidth, viewHeight);
-        Vector3 w2sToe      = WorldToScreen(RightToePos, matrix, viewWidth, viewHeight);
-
-        Vector3 wHead       = WorldToScreen(HeadPos, matrix, viewWidth, viewHeight);
-        Vector3 wHip        = WorldToScreen(HipPos, matrix, viewWidth, viewHeight);
-
+        // Скелет
         if (isBone) {
-             Vector3 wLS = WorldToScreen(L_Shoulder, matrix, viewWidth, viewHeight);
-             Vector3 wRS = WorldToScreen(R_Shoulder, matrix, viewWidth, viewHeight);
-             Vector3 wLE = WorldToScreen(L_Elbow, matrix, viewWidth, viewHeight);
-             Vector3 wRE = WorldToScreen(R_Elbow, matrix, viewWidth, viewHeight);
-             Vector3 wLH = WorldToScreen(L_Hand, matrix, viewWidth, viewHeight);
-             Vector3 wRH = WorldToScreen(R_Hand, matrix, viewWidth, viewHeight);
-             Vector3 wLA = WorldToScreen(L_Ankle, matrix, viewWidth, viewHeight);
-             Vector3 wRA = WorldToScreen(R_Ankle, matrix, viewWidth, viewHeight);
-
-            UIColor *boneColor = [UIColor whiteColor];
-            CGFloat boneWidth = 1.0f;
-
-            DrawBoneLine(self, CGPointMake(wHead.x, wHead.y), CGPointMake(wHip.x,  wHip.y),  boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wLS.x,   wLS.y),   CGPointMake(wRS.x,   wRS.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wLS.x,   wLS.y),   CGPointMake(wLE.x,   wLE.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wLE.x,   wLE.y),   CGPointMake(wLH.x,   wLH.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wRS.x,   wRS.y),   CGPointMake(wRE.x,   wRE.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wRE.x,   wRE.y),   CGPointMake(wRH.x,   wRH.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wHip.x,  wHip.y),  CGPointMake(wLA.x,   wLA.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wHip.x,  wHip.y),  CGPointMake(wRA.x,   wRA.y),   boneColor, boneWidth);
+            CGPoint wH   = CGPointMake([e[@"wHX"]  floatValue], [e[@"wHY"]  floatValue]);
+            CGPoint wHip = CGPointMake([e[@"wHipX"] floatValue],[e[@"wHipY"] floatValue]);
+            CGPoint wLS  = CGPointMake([e[@"wLSX"]  floatValue],[e[@"wLSY"]  floatValue]);
+            CGPoint wRS  = CGPointMake([e[@"wRSX"]  floatValue],[e[@"wRSY"]  floatValue]);
+            CGPoint wLE  = CGPointMake([e[@"wLEX"]  floatValue],[e[@"wLEY"]  floatValue]);
+            CGPoint wRE  = CGPointMake([e[@"wREX"]  floatValue],[e[@"wREY"]  floatValue]);
+            CGPoint wLH  = CGPointMake([e[@"wLHX"]  floatValue],[e[@"wLHY"]  floatValue]);
+            CGPoint wRH  = CGPointMake([e[@"wRHX"]  floatValue],[e[@"wRHY"]  floatValue]);
+            CGPoint wLA  = CGPointMake([e[@"wLAX"]  floatValue],[e[@"wLAY"]  floatValue]);
+            CGPoint wRA  = CGPointMake([e[@"wRAX"]  floatValue],[e[@"wRAY"]  floatValue]);
+            DrawBoneLine(self, wH,   wHip, boneColor, 1.0f);
+            DrawBoneLine(self, wLS,  wRS,  boneColor, 1.0f);
+            DrawBoneLine(self, wLS,  wLE,  boneColor, 1.0f);
+            DrawBoneLine(self, wLE,  wLH,  boneColor, 1.0f);
+            DrawBoneLine(self, wRS,  wRE,  boneColor, 1.0f);
+            DrawBoneLine(self, wRE,  wRH,  boneColor, 1.0f);
+            DrawBoneLine(self, wHip, wLA,  boneColor, 1.0f);
+            DrawBoneLine(self, wHip, wRA,  boneColor, 1.0f);
         }
 
-        float boxHeight = abs(w2sHead.y - w2sToe.y);
-        float boxWidth  = boxHeight * 0.45f;
-        float bx = w2sHead.x - boxWidth * 0.5f;
-        float by = w2sHead.y;
+        float boxH = fabsf(w2sHY - w2sTY);
+        float boxW = boxH * 0.45f;
+        float bx   = w2sHX - boxW * 0.5f;
+        float by   = w2sHY;
 
-        // Цвет зависит от дистанции
-        CGColorRef accentCG;
         UIColor *accentUI;
-        if (dis < 30.0f)      { accentUI = [UIColor colorWithRed:1.0 green:0.3  blue:0.3  alpha:1.0]; }
-        else if (dis < 80.0f) { accentUI = [UIColor colorWithRed:1.0 green:0.85 blue:0.0  alpha:1.0]; }
-        else                  { accentUI = [UIColor colorWithRed:0.9 green:0.9  blue:0.9  alpha:0.85]; }
-        accentCG = accentUI.CGColor;
+        if      (dis < 30.0f) accentUI = [UIColor colorWithRed:1.0 green:0.3  blue:0.3  alpha:1.0];
+        else if (dis < 80.0f) accentUI = [UIColor colorWithRed:1.0 green:0.85 blue:0.0  alpha:1.0];
+        else                  accentUI = [UIColor colorWithRed:0.9 green:0.9  blue:0.9  alpha:0.85];
+        CGColorRef accentCG = accentUI.CGColor;
 
-        // === BOX: уголки из пула ===
+        // BOX уголки
         if (isBox) {
-            float cLen = MIN(boxWidth, boxHeight) * 0.22f;
-            float lw = 1.2f;
+            float cLen = MIN(boxW, boxH) * 0.22f, lw = 1.2f;
             float pts[][4] = {
-                {bx, by, bx+cLen, by}, {bx, by, bx, by+cLen},
-                {bx+boxWidth-cLen, by, bx+boxWidth, by}, {bx+boxWidth, by, bx+boxWidth, by+cLen},
-                {bx, by+boxHeight-cLen, bx, by+boxHeight}, {bx, by+boxHeight, bx+cLen, by+boxHeight},
-                {bx+boxWidth, by+boxHeight-cLen, bx+boxWidth, by+boxHeight}, {bx+boxWidth-cLen, by+boxHeight, bx+boxWidth, by+boxHeight}
+                {bx,bx+cLen,by,by},{bx,bx,by,by+cLen},
+                {bx+boxW-cLen,bx+boxW,by,by},{bx+boxW,bx+boxW,by,by+cLen},
+                {bx,bx,by+boxH-cLen,by+boxH},{bx,bx+cLen,by+boxH,by+boxH},
+                {bx+boxW,bx+boxW,by+boxH-cLen,by+boxH},{bx+boxW-cLen,bx+boxW,by+boxH,by+boxH}
             };
             for (int ci = 0; ci < 8; ci++) {
-                float cx = MIN(pts[ci][0], pts[ci][2]);
-                float cy = MIN(pts[ci][1], pts[ci][3]);
-                float cw = MAX(fabs(pts[ci][2]-pts[ci][0]), lw);
-                float ch = MAX(fabs(pts[ci][3]-pts[ci][1]), lw);
+                float cx = MIN(pts[ci][0], pts[ci][1]);
+                float cy = MIN(pts[ci][2], pts[ci][3]);
+                float cw = MAX(fabsf(pts[ci][1]-pts[ci][0]), lw);
+                float ch = MAX(fabsf(pts[ci][3]-pts[ci][2]), lw);
                 [self addPooledLayerToParent:self.layer frame:CGRectMake(cx,cy,cw,ch) color:accentCG radius:0];
             }
         }
 
-        // === NAME: фон + текст ===
+        // NAME
         if (isName) {
-            NSString *name = GetNickName(PawnObject);
-            if (!name || name.length == 0) name = @"?";
-            float nW = MAX(boxWidth, 50.0f);
-            float nH = 11.0f;
-            float nX = bx + (boxWidth - nW) * 0.5f;
-            float nY = by - nH - 3.0f;
-
-            // фон
+            NSString *name = e[@"name"];
+            float nW = MAX(boxW, 50.0f), nH = 11.0f;
+            float nX = bx + (boxW - nW)*0.5f, nY = by - nH - 3.0f;
             [self addPooledLayerToParent:self.layer
-                                   frame:CGRectMake(nX, nY, nW, nH)
-                                   color:[UIColor colorWithWhite:0.0 alpha:0.45].CGColor
-                                  radius:2.0f];
-
-            // текст — CATextLayer тоже из пула, но нужна проверка типа
-            CALayer *pl = [self pooledLayer];
-            if (![pl isKindOfClass:[CATextLayer class]]) {
-                // слой в пуле не текстовый — заменяем
-                pl = [CATextLayer layer];
-                _layerPool[_poolUsed - 1] = (CALayer *)pl;
-            }
-            CATextLayer *nl = (CATextLayer *)pl;
-            nl.string       = name;
-            nl.fontSize     = 8.5f;
-            nl.frame        = CGRectMake(nX, nY, nW, nH);
+                                   frame:CGRectMake(nX,nY,nW,nH)
+                                   color:[UIColor colorWithWhite:0 alpha:0.45].CGColor radius:2];
+            CATextLayer *nl = [self pooledTextLayer];
+            nl.string = name; nl.fontSize = 8.5f;
+            nl.frame  = CGRectMake(nX,nY,nW,nH);
             nl.alignmentMode = kCAAlignmentCenter;
-            nl.foregroundColor = [UIColor colorWithWhite:0.95 alpha:1.0].CGColor;
+            nl.foregroundColor = [UIColor colorWithWhite:0.95 alpha:1].CGColor;
             nl.contentsScale = [UIScreen mainScreen].scale;
-            nl.hidden       = NO;
+            nl.hidden = NO;
             if (nl.superlayer != self.layer) [self.layer addSublayer:nl];
         }
 
-        // === HEALTH: вертикальная полоска слева ===
-        if (isHealth) {
-            int MaxHP = get_MaxHP(PawnObject);
-            if (MaxHP > 0) {
-                float ratio = fmaxf(0.0f, fminf(1.0f, (float)CurHP / MaxHP));
-                float bW = 2.5f, bH = boxHeight;
-                float bX = bx - bW - 2.0f, bY = by;
-                // bg
-                [self addPooledLayerToParent:self.layer
-                                       frame:CGRectMake(bX, bY, bW, bH)
-                                       color:[UIColor colorWithWhite:0.0 alpha:0.5].CGColor
-                                      radius:1.0f];
-                // fill
-                CGColorRef hpCG;
-                if (ratio > 0.6f)      hpCG = [UIColor colorWithRed:0.15 green:0.9  blue:0.35 alpha:1.0].CGColor;
-                else if (ratio > 0.3f) hpCG = [UIColor colorWithRed:1.0  green:0.75 blue:0.0  alpha:1.0].CGColor;
-                else                   hpCG = [UIColor colorWithRed:1.0  green:0.2  blue:0.2  alpha:1.0].CGColor;
-                [self addPooledLayerToParent:self.layer
-                                       frame:CGRectMake(bX, bY + bH*(1.0f-ratio), bW, bH*ratio)
-                                       color:hpCG
-                                      radius:1.0f];
-            }
+        // HEALTH
+        if (isHealth && maxhp > 0) {
+            float ratio = fmaxf(0, fminf(1, (float)hp/maxhp));
+            float bW = 2.5f, bH = boxH, bX = bx - bW - 2.0f, bY = by;
+            [self addPooledLayerToParent:self.layer
+                                   frame:CGRectMake(bX,bY,bW,bH)
+                                   color:[UIColor colorWithWhite:0 alpha:0.5].CGColor radius:1];
+            CGColorRef hpCG = (ratio > 0.6f)
+                ? [UIColor colorWithRed:0.15 green:0.9 blue:0.35 alpha:1].CGColor
+                : (ratio > 0.3f)
+                    ? [UIColor colorWithRed:1.0 green:0.75 blue:0.0 alpha:1].CGColor
+                    : [UIColor colorWithRed:1.0 green:0.2  blue:0.2 alpha:1].CGColor;
+            [self addPooledLayerToParent:self.layer
+                                   frame:CGRectMake(bX, bY+bH*(1-ratio), bW, bH*ratio)
+                                   color:hpCG radius:1];
         }
 
-        // === DISTANCE ===
+        // DISTANCE
         if (isDis) {
-            CALayer *pl = [self pooledLayer];
-            if (![pl isKindOfClass:[CATextLayer class]]) {
-                pl = [CATextLayer layer];
-                _layerPool[_poolUsed - 1] = (CALayer *)pl;
-            }
-            CATextLayer *dl = (CATextLayer *)pl;
-            dl.string       = [NSString stringWithFormat:@"%.0fm", dis];
-            dl.fontSize     = 8.0f;
-            dl.frame        = CGRectMake(bx, by+boxHeight+1.0f, boxWidth, 10.0f);
+            CATextLayer *dl = [self pooledTextLayer];
+            dl.string = [NSString stringWithFormat:@"%.0fm", dis];
+            dl.fontSize = 8.0f;
+            dl.frame    = CGRectMake(bx, by+boxH+1, boxW, 10);
             dl.alignmentMode = kCAAlignmentCenter;
             dl.foregroundColor = [UIColor colorWithWhite:0.7 alpha:0.8].CGColor;
             dl.contentsScale = [UIScreen mainScreen].scale;
-            dl.hidden       = NO;
+            dl.hidden = NO;
             if (dl.superlayer != self.layer) [self.layer addSublayer:dl];
         }
 
-        // === ESP LINE ===
+        // LINES
         if (isLine) {
-            CGFloat sw = self.bounds.size.width;
-            CGFloat sh = self.bounds.size.height;
             CGPoint from;
-            if (lineOrigin == 0)      from = CGPointMake(sw*0.5f, 0);
-            else if (lineOrigin == 1) from = CGPointMake(sw*0.5f, sh*0.5f);
-            else                      from = CGPointMake(sw*0.5f, sh);
-            CGPoint to = CGPointMake(bx + boxWidth*0.5f, by + boxHeight);
-            DrawBoneLine(self, from, to, [accentUI colorWithAlphaComponent:0.5], 0.8f);
+            if      (lineOrigin == 0) from = CGPointMake(viewW*0.5f, 0);
+            else if (lineOrigin == 1) from = CGPointMake(viewW*0.5f, viewH*0.5f);
+            else                      from = CGPointMake(viewW*0.5f, viewH);
+            DrawBoneLine(self, from,
+                         CGPointMake(bx+boxW*0.5f, by+boxH),
+                         [accentUI colorWithAlphaComponent:0.5], 0.8f);
         }
-    }
-
-    // Aim Trigger
-    bool shouldAimNow = false;
-    if (aimTrigger == 0) shouldAimNow = true;
-    else if (aimTrigger == 1) shouldAimNow = isFire;
-
-    if (isAimbot && isVaildPtr(bestTarget) && shouldAimNow) {
-        Vector3 aimPos;
-        if (aimTarget == 0) aimPos = getPositionExt(getHead(bestTarget));
-        else if (aimTarget == 1) aimPos = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.15f, 0);
-        else aimPos = getPositionExt(getHip(bestTarget));
-
-        Quaternion targetLook = GetRotationToLocation(aimPos, 0.1f, myLocation);
-        set_aim(myPawnObject, targetLook);
     }
 }
 
