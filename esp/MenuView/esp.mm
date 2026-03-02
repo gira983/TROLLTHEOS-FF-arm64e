@@ -1,6 +1,5 @@
 #import "esp.h"
 #import <objc/runtime.h>
-#include <sys/ptrace.h>
 #include <sys/sysctl.h>
 #include <sys/mman.h>
 #include <dlfcn.h>
