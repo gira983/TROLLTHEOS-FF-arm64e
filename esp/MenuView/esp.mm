@@ -184,6 +184,7 @@ static bool isStreamerMode = NO;   // Stream Proof
 @interface MenuView ()
 @property (nonatomic, strong) CADisplayLink *displayLink;
 - (void)renderESP;
+- (void)collectESPSnapshotWithWidth:(CGFloat)w height:(CGFloat)h;
 @end
 
 // Кастомный слайдер — обрабатывает touches с правильным конвертированием координат
@@ -1144,22 +1145,22 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)updateFrame {
     if (!self.window) return;
 
-    // === BACKGROUND: читаем память игры (НЕ блокируем main thread) ===
     if (!_bgBusy) {
         _bgBusy = YES;
+        // Захватываем bounds на main thread ДО ухода в background
+        CGFloat capturedW = self.bounds.size.width;
+        CGFloat capturedH = self.bounds.size.height;
         dispatch_async(_espQueue, ^{
-            [self collectESPSnapshot];
+            [self collectESPSnapshotWithWidth:capturedW height:capturedH];
             dispatch_async(dispatch_get_main_queue(), ^{
                 self->_bgBusy = NO;
                 [self drawESPFromSnapshot];
             });
         });
     }
-    // Если фоновый поток ещё занят — просто пропускаем этот кадр (не блокируем)
 }
 
-// Собирает все данные через ReadAddr на background thread
-- (void)collectESPSnapshot {
+- (void)collectESPSnapshotWithWidth:(CGFloat)viewW height:(CGFloat)viewH {
     NSMutableArray *snap = [NSMutableArray array];
 
     // Периодическая проверка защиты (раз в ~30 сек)
@@ -1185,7 +1186,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) { _snapshot = snap; return; }
 
-    if (match != _lastMatchPtr) { _lastMatchPtr = match; _snapshot = snap; return; }
+    if (match != _lastMatchPtr) {
+        _lastMatchPtr = match;
+        // не return — продолжаем, просто запомнили новый матч
+    }
 
     uint64_t myPawnObject = getLocalPlayer(match);
     if (!isVaildPtr(myPawnObject)) { _snapshot = snap; return; }
@@ -1198,9 +1202,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
     int coutValue       = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
 
-    float *matrix   = GetViewMatrix(camera);
-    float viewW     = self.bounds.size.width;
-    float viewH     = self.bounds.size.height;
+    float *matrix = GetViewMatrix(camera);
+    // viewW и viewH переданы как параметры — не трогаем UIKit из background thread
 
     bool isFire = get_IsFiring(myPawnObject);
 
