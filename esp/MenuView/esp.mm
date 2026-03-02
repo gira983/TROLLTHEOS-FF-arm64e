@@ -1202,7 +1202,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     float viewW     = self.bounds.size.width;
     float viewH     = self.bounds.size.height;
 
-    isFire = get_IsFiring(myPawnObject);
+    bool isFire = get_IsFiring(myPawnObject);
 
     uint64_t bestTarget = 0;
     float minScore = FLT_MAX;
