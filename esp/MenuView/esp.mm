@@ -350,12 +350,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         
         [self SetUpBase];
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
-        // 20fps достаточно для ESP — снижает нагрузку на CPU/GPU в 3x
-        if (@available(iOS 15.0, *)) {
-            self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(15, 20, 20);
-        } else {
-            self.displayLink.preferredFramesPerSecond = 20;
-        }
+        if (@available(iOS 15.0, *)) { self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(15, 20, 20); } else { self.displayLink.preferredFramesPerSecond = 20; }
         [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 
         [self setupFloatingButton];
@@ -1263,53 +1258,46 @@ bool get_IsFiring(uint64_t player) {
         Vector3 L_Hand      = getPositionExt(getLeftHand(PawnObject));
         Vector3 R_Hand      = getPositionExt(getRightHand(PawnObject));
 
-        Vector3 HeadTop = HeadPos; HeadTop.y += 0.2f;
-        Vector3 w2sHead = WorldToScreen(HeadTop,     matrix, viewWidth, viewHeight);
-        Vector3 w2sToe  = WorldToScreen(RightToePos, matrix, viewWidth, viewHeight);
+        Vector3 HeadTop     = HeadPos; HeadTop.y += 0.2f;
+        Vector3 w2sHead     = WorldToScreen(HeadTop, matrix, viewWidth, viewHeight);
+        Vector3 w2sToe      = WorldToScreen(RightToePos, matrix, viewWidth, viewHeight);
 
-        // Враг за камерой — не рисуем
-        if (w2sHead.z <= 0) continue;
-        // Toe за камерой — используем приближение
-        if (w2sToe.z <= 0) w2sToe = w2sHead;
-
-        Vector3 wHead = WorldToScreen(HeadPos, matrix, viewWidth, viewHeight);
-        Vector3 wHip  = WorldToScreen(HipPos,  matrix, viewWidth, viewHeight);
+        Vector3 wHead       = WorldToScreen(HeadPos, matrix, viewWidth, viewHeight);
+        Vector3 wHip        = WorldToScreen(HipPos, matrix, viewWidth, viewHeight);
 
         if (isBone) {
              Vector3 wLS = WorldToScreen(L_Shoulder, matrix, viewWidth, viewHeight);
              Vector3 wRS = WorldToScreen(R_Shoulder, matrix, viewWidth, viewHeight);
-             Vector3 wLE = WorldToScreen(L_Elbow,    matrix, viewWidth, viewHeight);
-             Vector3 wRE = WorldToScreen(R_Elbow,    matrix, viewWidth, viewHeight);
-             Vector3 wLH = WorldToScreen(L_Hand,     matrix, viewWidth, viewHeight);
-             Vector3 wRH = WorldToScreen(R_Hand,     matrix, viewWidth, viewHeight);
-             Vector3 wLA = WorldToScreen(L_Ankle,    matrix, viewWidth, viewHeight);
-             Vector3 wRA = WorldToScreen(R_Ankle,    matrix, viewWidth, viewHeight);
+             Vector3 wLE = WorldToScreen(L_Elbow, matrix, viewWidth, viewHeight);
+             Vector3 wRE = WorldToScreen(R_Elbow, matrix, viewWidth, viewHeight);
+             Vector3 wLH = WorldToScreen(L_Hand, matrix, viewWidth, viewHeight);
+             Vector3 wRH = WorldToScreen(R_Hand, matrix, viewWidth, viewHeight);
+             Vector3 wLA = WorldToScreen(L_Ankle, matrix, viewWidth, viewHeight);
+             Vector3 wRA = WorldToScreen(R_Ankle, matrix, viewWidth, viewHeight);
 
             UIColor *boneColor = [UIColor whiteColor];
             CGFloat boneWidth = 1.0f;
 
-            DrawBoneLine(layers, CGPointMake(wHead.x, wHead.y), CGPointMake(wHip.x,  wHip.y),  boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wLS.x,   wLS.y),   CGPointMake(wRS.x,   wRS.y),   boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wLS.x,   wLS.y),   CGPointMake(wLE.x,   wLE.y),   boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wLE.x,   wLE.y),   CGPointMake(wLH.x,   wLH.y),   boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wRS.x,   wRS.y),   CGPointMake(wRE.x,   wRE.y),   boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wRE.x,   wRE.y),   CGPointMake(wRH.x,   wRH.y),   boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wHip.x,  wHip.y),  CGPointMake(wLA.x,   wLA.y),   boneColor, boneWidth);
-            DrawBoneLine(layers, CGPointMake(wHip.x,  wHip.y),  CGPointMake(wRA.x,   wRA.y),   boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wHead.x, wHead.y), CGPointMake(wHip.x, wHip.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wLS.x, wLS.y), CGPointMake(wRS.x, wRS.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wLS.x, wLS.y), CGPointMake(wLE.x, wLE.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wLE.x, wLE.y), CGPointMake(wLH.x, wLH.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wRS.x, wRS.y), CGPointMake(wRE.x, wRE.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wRE.x, wRE.y), CGPointMake(wRH.x, wRH.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wLA.x, wLA.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wRA.x, wRA.y), boneColor, boneWidth);
         }
 
-        // Минимальный размер box — чтобы далёкие враги были видны
-        float rawH      = fabsf(w2sHead.y - w2sToe.y);
-        float boxHeight = fmaxf(rawH, 30.0f);   // минимум 30px высота
+        float boxHeight = fmaxf(fabsf(w2sHead.y - w2sToe.y), 30.0f);
         float boxWidth  = boxHeight * 0.45f;
         float bx = w2sHead.x - boxWidth * 0.5f;
         float by = w2sHead.y;
 
-        // Цвет зависит от дистанции
+        // Цвет зависит от дистанции: близко = красный, средне = жёлтый, далеко = белый
         UIColor *accentColor;
-        if (dis < 30.0f)       accentColor = [UIColor colorWithRed:1.0 green:0.3  blue:0.3  alpha:1.0];
-        else if (dis < 80.0f)  accentColor = [UIColor colorWithRed:1.0 green:0.85 blue:0.0  alpha:1.0];
-        else                   accentColor = [UIColor colorWithRed:0.9 green:0.9  blue:0.9  alpha:0.85];
+        if (dis < 30.0f)       accentColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0];
+        else if (dis < 80.0f)  accentColor = [UIColor colorWithRed:1.0 green:0.85 blue:0.0 alpha:1.0];
+        else                   accentColor = [UIColor colorWithRed:0.9 green:0.9 blue:0.9 alpha:0.85];
 
         // === BOX: только уголки, тонкие, 1pt ===
         if (isBox) {
@@ -1363,7 +1351,6 @@ bool get_IsFiring(uint64_t player) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
                 float ratio = fmaxf(0.0f, fminf(1.0f, (float)CurHP / MaxHP));
-                // Толщина hp bar: минимум 4px, растёт с размером box
                 float bW = fmaxf(4.0f, boxWidth * 0.08f);
                 float bH = boxHeight;
                 float bX = bx - bW - 2.0f;
