@@ -1120,17 +1120,18 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)SetUpBase {
-    // Проверяем PID игры — если процесс перезапустился, пересчитываем базу
     pid_t currentPid = GetGameProcesspid((char*)ENCRYPT("freefireth"));
+    writeLog([NSString stringWithFormat:@"[SETUP] pid=%d lastPid=%d base=0x%llX", (int)currentPid, (int)_lastGamePid, Moudule_Base]);
     if (currentPid == -1) {
         Moudule_Base = (uint64_t)-1;
         _lastGamePid = -1;
+        writeLog(@"[SETUP] Game process NOT found");
         return;
     }
     if (currentPid != _lastGamePid) {
         _lastGamePid = currentPid;
-        // GetGameModule_Base сам вызывает task_for_pid и записывает в get_task в MemoryUtils.cpp
         Moudule_Base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
+        writeLog([NSString stringWithFormat:@"[SETUP] PID changed -> new base=0x%llX", Moudule_Base]);
     }
 }
 
