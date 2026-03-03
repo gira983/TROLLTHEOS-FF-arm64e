@@ -152,16 +152,35 @@ static __used void _HUDEventCallback(void *target, void *refcon, IOHIDServiceRef
             // При Began — определяем keyView через hitTest и кешируем
             // При Moved/Ended — используем тот же view (нужен для UISlider drag)
             static NSMutableDictionary *activeViews = nil;
+            static NSMutableSet *endedIds = nil;
             if (!activeViews) activeViews = [NSMutableDictionary dictionary];
+            if (!endedIds) endedIds = [NSMutableSet set];
             
             UIView *keyView = nil;
             NSNumber *key = @(clampedId);
             
             if (phase == UITouchPhaseBegan) {
+                // Новый тап — сбрасываем флаг дедупликации Ended
+                [endedIds removeObject:key];
                 keyView = [keyWindow hitTest:[rep location] withEvent:nil];
                 if (!keyView || keyView == keyWindow)
                     keyView = keyWindow.rootViewController.view;
                 if (keyView) activeViews[key] = keyView;
+            } else if (phase == UITouchPhaseEnded || phase == UITouchPhaseCancelled) {
+                // ФИКС: пропускаем дубликат Ended для того же id — иначе CustomSwitch получает
+                // двойной Ended и alpha застревает на 0.75
+                if ([endedIds containsObject:key]) {
+                    // дубликат — пропускаем без логирования
+                } else {
+                    [endedIds addObject:key];
+                    keyView = activeViews[key];
+                    if (!keyView) {
+                        keyView = [keyWindow hitTest:[rep location] withEvent:nil];
+                        if (!keyView || keyView == keyWindow)
+                            keyView = keyWindow.rootViewController.view;
+                    }
+                    [activeViews removeObjectForKey:key];
+                }
             } else {
                 keyView = activeViews[key];
                 if (!keyView) {
@@ -169,8 +188,6 @@ static __used void _HUDEventCallback(void *target, void *refcon, IOHIDServiceRef
                     if (!keyView || keyView == keyWindow)
                         keyView = keyWindow.rootViewController.view;
                 }
-                if (phase == UITouchPhaseEnded || phase == UITouchPhaseCancelled)
-                    [activeViews removeObjectForKey:key];
             }
             
             if (pointerId > 0 && keyView) {
