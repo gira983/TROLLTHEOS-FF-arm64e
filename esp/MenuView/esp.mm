@@ -1180,12 +1180,6 @@ bool get_IsFiring(uint64_t player) {
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
 
-    // HUD freeze fix: если матч сменился — сбрасываем все слои
-    if (match != _lastMatchPtr) {
-        _lastMatchPtr = match;
-        return; // Пропускаем этот фрейм — следующий будет чистым
-    }
-
     uint64_t myPawnObject = getLocalPlayer(match);
     if (!isVaildPtr(myPawnObject)) return;
     
@@ -1346,31 +1340,28 @@ bool get_IsFiring(uint64_t player) {
             [layers addObject:nl];
         }
 
-        // === HEALTH: вертикальная полоска слева от box, тонкая ===
+        // === HEALTH: горизонтально над никнеймом ===
         if (isHealth) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
                 float ratio = fmaxf(0.0f, fminf(1.0f, (float)CurHP / MaxHP));
-                float bW = fmaxf(4.0f, boxWidth * 0.08f);
-                float bH = boxHeight;
-                float bX = bx - bW - 2.0f;
-                float bY = by;
-
+                float barW = MAX(boxWidth, 50.0f);
+                float barH = 3.0f;
+                float barX = bx + (boxWidth - barW) * 0.5f;
+                float barY = by - 11.0f - 3.0f - barH - 2.0f;
                 CALayer *bgH = [CALayer layer];
-                bgH.frame = CGRectMake(bX, bY, bW, bH);
-                bgH.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.5].CGColor;
-                bgH.cornerRadius = 1.0f;
+                bgH.frame = CGRectMake(barX, barY, barW, barH);
+                bgH.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.55].CGColor;
+                bgH.cornerRadius = 1.5f;
                 [layers addObject:bgH];
-
                 UIColor *hpCol;
                 if (ratio > 0.6f)      hpCol = [UIColor colorWithRed:0.15 green:0.9 blue:0.35 alpha:1.0];
                 else if (ratio > 0.3f) hpCol = [UIColor colorWithRed:1.0 green:0.75 blue:0.0 alpha:1.0];
                 else                   hpCol = [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1.0];
-
                 CALayer *fillH = [CALayer layer];
-                fillH.frame = CGRectMake(bX, bY + bH*(1.0f-ratio), bW, bH*ratio);
+                fillH.frame = CGRectMake(barX, barY, barW * ratio, barH);
                 fillH.backgroundColor = hpCol.CGColor;
-                fillH.cornerRadius = 1.0f;
+                fillH.cornerRadius = 1.5f;
                 [layers addObject:fillH];
             }
         }
