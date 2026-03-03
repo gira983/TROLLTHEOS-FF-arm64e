@@ -363,7 +363,14 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
 
-    // Меню открыто — делегируем стандартный hitTest UIKit через menuContainer
+    // Когда меню закрыто — ТОЛЬКО floatingButton, всё в игру
+    if (!menuContainer || menuContainer.hidden) {
+        if (floatingButton && !floatingButton.hidden) {
+            CGPoint p = [self convertPoint:point toView:floatingButton];
+            if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
+        }
+        return nil;
+    }
     if (menuContainer && !menuContainer.hidden) {
         CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
         if ([menuContainer pointInside:pInMenu withEvent:event]) {
@@ -375,12 +382,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             if (hit) return hit;
             return menuContainer;
         }
-    }
-
-    // Кнопка M (floatingButton)
-    if (floatingButton && !floatingButton.hidden) {
-        CGPoint p = [self convertPoint:point toView:floatingButton];
-        if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
     }
 
     return nil;
@@ -1282,7 +1283,8 @@ bool get_IsFiring(uint64_t player) {
             DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wRA.x, wRA.y), boneColor, boneWidth);
         }
 
-        float boxHeight = fmaxf(fabsf(w2sHead.y - w2sToe.y), 30.0f);
+        float boxHeight = fabsf(w2sHead.y - w2sToe.y);
+        if (boxHeight < 5.0f) continue;
         float boxWidth  = boxHeight * 0.45f;
         float bx = w2sHead.x - boxWidth * 0.5f;
         float by = w2sHead.y;
@@ -1387,7 +1389,9 @@ bool get_IsFiring(uint64_t player) {
             else if (lineOrigin == 1) from = CGPointMake(sw*0.5f, sh*0.5f);     // Center
             else                      from = CGPointMake(sw*0.5f, sh);           // Bottom
 
-            CGPoint to = CGPointMake(bx + boxWidth*0.5f, by + boxHeight);        // к ногам врага
+            CGPoint to;
+            if (lineOrigin == 2) to = CGPointMake(bx + boxWidth*0.5f, by + boxHeight);
+            else                 to = CGPointMake(bx + boxWidth*0.5f, by);
             DrawBoneLine(layers, from, to, [accentColor colorWithAlphaComponent:0.5], 0.8f);
         }
     }
