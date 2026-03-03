@@ -115,18 +115,15 @@ static bool isStreamerMode = NO;   // Stream Proof
 }
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     _touchActive = YES;
-    [UIView animateWithDuration:0.05 animations:^{ self.alpha = 0.75f; }];
 }
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     CGPoint pt = [touches.anyObject locationInView:self];
     if (pt.x < -10 || pt.x > self.bounds.size.width + 10 ||
         pt.y < -10 || pt.y > self.bounds.size.height + 10) {
         _touchActive = NO;
-        [UIView animateWithDuration:0.1 animations:^{ self.alpha = 1.0f; }];
     }
 }
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [UIView animateWithDuration:0.1 animations:^{ self.alpha = 1.0f; }];
     if (_touchActive) {
         CGPoint pt = [touches.anyObject locationInView:self];
         if ([self pointInside:pt withEvent:event]) [self toggle];
@@ -134,9 +131,7 @@ static bool isStreamerMode = NO;   // Stream Proof
     _touchActive = NO;
 }
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    _touchActive = NO;
-    [UIView animateWithDuration:0.1 animations:^{ self.alpha = 1.0f; }];
-    [self setNeedsDisplay];
+    _touchActive = NO; // scroll отменил touch — не переключаем
 }
 - (void)drawRect:(CGRect)rect {
     CGContextRef ctx = UIGraphicsGetCurrentContext();
@@ -180,7 +175,8 @@ static bool isStreamerMode = NO;   // Stream Proof
 
 @interface MenuView ()
 @property (nonatomic, strong) CADisplayLink *displayLink;
-- (void)renderESP;
+@property (nonatomic, strong) NSMutableArray<CALayer *> *drawingLayers;
+- (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers;
 @end
 
 // Кастомный слайдер — обрабатывает touches с правильным конвертированием координат
@@ -338,20 +334,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *boxContainer;
     
     // HUD freeze detection
-    uint64_t _lastMatchPtr;
-    NSTimeInterval _lastValidFrame;
+    uint64_t _lastMatchPtr;     // отслеживаем смену матча
+    NSTimeInterval _lastValidFrame; // время последнего валидного фрейма
     UIView *skeletonContainer;
-
-    // Reconnect при перезаходе в игру
-    pid_t _lastGamePid;
     
     float previewScale;
-
-    // Оптимизация рендера
-    NSMutableArray<CALayer *> *_layerPool;   // пул переиспользуемых слоёв
-    NSUInteger _poolUsed;                     // сколько слоёв занято в этом кадре
-    CAShapeLayer *_fovCircleLayer;            // FOV круг — создаём один раз
-    NSUInteger _frameSkip;                    // счётчик для троттлинга
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -359,32 +346,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (self) {
         self.userInteractionEnabled = YES;
         self.backgroundColor = [UIColor clearColor];
-
-        // Пул слоёв — преаллоцируем 128 штук, избегаем alloc каждый кадр
-        _layerPool = [NSMutableArray arrayWithCapacity:128];
-        for (int i = 0; i < 128; i++) {
-            [_layerPool addObject:[CALayer layer]];
-        }
-        _poolUsed = 0;
-        _lastGamePid = -1;
-
-        // FOV круг — один раз, обновляем только radius/visibility
-        _fovCircleLayer = [CAShapeLayer layer];
-        _fovCircleLayer.fillColor   = [UIColor clearColor].CGColor;
-        _fovCircleLayer.strokeColor = [UIColor colorWithRed:1.0 green:1.0 blue:1.0 alpha:0.4].CGColor;
-        _fovCircleLayer.lineWidth   = 1.0;
-        _fovCircleLayer.hidden      = YES;
-        [self.layer addSublayer:_fovCircleLayer];
-
+        self.drawingLayers = [NSMutableArray array];
+        
         [self SetUpBase];
-
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
-        // 20fps достаточно для ESP — экономим CPU/GPU в 3x
-        if (@available(iOS 15.0, *)) {
-            self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(15, 20, 20);
-        } else {
-            self.displayLink.preferredFramesPerSecond = 20;
-        }
+        if (@available(iOS 15.0, *)) { self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(15, 20, 20); } else { self.displayLink.preferredFramesPerSecond = 20; }
         [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 
         [self setupFloatingButton];
@@ -397,7 +363,14 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
 
-    // Меню открыто — делегируем стандартный hitTest UIKit через menuContainer
+    // Когда меню закрыто — ТОЛЬКО floatingButton, всё в игру
+    if (!menuContainer || menuContainer.hidden) {
+        if (floatingButton && !floatingButton.hidden) {
+            CGPoint p = [self convertPoint:point toView:floatingButton];
+            if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
+        }
+        return nil;
+    }
     if (menuContainer && !menuContainer.hidden) {
         CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
         if ([menuContainer pointInside:pInMenu withEvent:event]) {
@@ -409,12 +382,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             if (hit) return hit;
             return menuContainer;
         }
-    }
-
-    // Кнопка M (floatingButton)
-    if (floatingButton && !floatingButton.hidden) {
-        CGPoint p = [self convertPoint:point toView:floatingButton];
-        if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
     }
 
     return nil;
@@ -1120,88 +1087,41 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)SetUpBase {
-    pid_t currentPid = GetGameProcesspid((char*)ENCRYPT("freefireth"));
-    writeLog([NSString stringWithFormat:@"[SETUP] pid=%d lastPid=%d base=0x%llX", (int)currentPid, (int)_lastGamePid, Moudule_Base]);
-    if (currentPid == -1) {
-        Moudule_Base = (uint64_t)-1;
-        _lastGamePid = -1;
-        writeLog(@"[SETUP] Game process NOT found");
-        return;
-    }
-    if (currentPid != _lastGamePid) {
-        _lastGamePid = currentPid;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
         Moudule_Base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
-        writeLog([NSString stringWithFormat:@"[SETUP] PID changed -> new base=0x%llX", Moudule_Base]);
-    }
-}
-
-// Получить слой из пула (или создать новый если пул исчерпан)
-- (CALayer *)pooledLayer {
-    if (_poolUsed < _layerPool.count) {
-        return _layerPool[_poolUsed++];
-    }
-    // Пул исчерпан — расширяем
-    CALayer *l = [CALayer layer];
-    [_layerPool addObject:l];
-    _poolUsed++;
-    return l;
+    });
 }
 
 - (void)updateFrame {
     if (!self.window) return;
-
-    // Переподключение если база потеряна (перезаход в игру)
-    static NSTimeInterval lastReconnect = 0;
-    if (Moudule_Base == (uint64_t)-1) {
-        NSTimeInterval now = CACurrentMediaTime();
-        if (now - lastReconnect > 3.0) {
-            lastReconnect = now;
-            [self SetUpBase];
-        }
-    }
-
-    // Скрываем все слои из пула (быстрее чем removeFromSuperlayer)
-    for (NSUInteger i = 0; i < _poolUsed; i++) {
-        _layerPool[i].hidden = YES;
-    }
-    _poolUsed = 0;
-
-    // FOV круг — обновляем только если нужно
-    if (isAimbot) {
-        float cx = self.bounds.size.width  * 0.5f;
-        float cy = self.bounds.size.height * 0.5f;
-        UIBezierPath *p = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy)
-                                                         radius:aimFov
-                                                     startAngle:0
-                                                       endAngle:2 * M_PI
-                                                      clockwise:YES];
-        _fovCircleLayer.path   = p.CGPath;
-        _fovCircleLayer.hidden = NO;
-    } else {
-        _fovCircleLayer.hidden = YES;
-    }
-
-    // Рендерим ESP через пул
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    @try {
-        [self renderESP];
-    } @catch (NSException *e) {
-        // Не останавливаем displayLink при краше внутри renderESP
+    for (CALayer *layer in self.drawingLayers) {
+        [layer removeFromSuperlayer];
+    }
+    [self.drawingLayers removeAllObjects];
+    
+    // Draw FOV Circle
+    if (isAimbot) {
+        float screenX = self.bounds.size.width / 2;
+        float screenY = self.bounds.size.height / 2;
+        
+        CAShapeLayer *circleLayer = [CAShapeLayer layer];
+        UIBezierPath *path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(screenX, screenY) radius:aimFov startAngle:0 endAngle:2 * M_PI clockwise:YES];
+        circleLayer.path = path.CGPath;
+        circleLayer.fillColor = [UIColor clearColor].CGColor;
+        circleLayer.strokeColor = [UIColor colorWithRed:1.0 green:1.0 blue:1.0 alpha:0.5].CGColor;
+        circleLayer.lineWidth = 1.0;
+        [self.drawingLayers addObject:circleLayer];
+    }
+    
+    [self renderESPToLayers:self.drawingLayers];
+    
+    for (CALayer *layer in self.drawingLayers) {
+        [self.layer addSublayer:layer];
     }
     [CATransaction commit];
-}
-
-// Хелпер для рендера — добавляет слой из пула в иерархию
-- (void)addPooledLayerToParent:(CALayer *)parent frame:(CGRect)f color:(CGColorRef)c radius:(CGFloat)r {
-    CALayer *l = [self pooledLayer];
-    l.frame           = f;
-    l.backgroundColor = c;
-    l.cornerRadius    = r;
-    l.hidden          = NO;
-    if (l.superlayer != parent) {
-        [parent addSublayer:l];
-    }
 }
 
 - (void)dealloc {
@@ -1210,7 +1130,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 static inline void DrawBoneLine(
-    MenuView *mv,
+    NSMutableArray<CALayer *> *layers,
     CGPoint p1,
     CGPoint p2,
     UIColor *color,
@@ -1221,14 +1141,13 @@ static inline void DrawBoneLine(
     CGFloat len = sqrt(dx*dx + dy*dy);
     if (len < 2.0f) return;
 
-    CALayer *line = [mv pooledLayer];
+    CALayer *line = [CALayer layer];
     line.backgroundColor = color.CGColor;
-    line.bounds    = CGRectMake(0, 0, len, width);
-    line.position  = p1;
+    line.bounds = CGRectMake(0, 0, len, width);
+    line.position = p1;
     line.anchorPoint = CGPointMake(0, 0.5);
     line.transform = CATransform3DMakeRotation(atan2(dy, dx), 0, 0, 1);
-    line.hidden    = NO;
-    if (line.superlayer != mv.layer) [mv.layer addSublayer:line];
+    [layers addObject:line];
 }
 
 
@@ -1252,7 +1171,7 @@ bool get_IsFiring(uint64_t player) {
 
 
 
-- (void)renderESP {
+- (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers {
     if (Moudule_Base == -1) return;
 
     uint64_t matchGame = getMatchGame(Moudule_Base);
@@ -1261,12 +1180,6 @@ bool get_IsFiring(uint64_t player) {
 
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
-
-    // HUD freeze fix: если матч сменился — пропускаем кадр
-    if (match != _lastMatchPtr) {
-        _lastMatchPtr = match;
-        return;
-    }
 
     uint64_t myPawnObject = getLocalPlayer(match);
     if (!isVaildPtr(myPawnObject)) return;
@@ -1278,14 +1191,11 @@ bool get_IsFiring(uint64_t player) {
     uint64_t tValue = ReadAddr<uint64_t>(player + OFF_PLAYERLIST_ARR);
     int coutValue = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
     
-    // ФИКС: один vm_read на 64 байта вместо 16 отдельных — убирает дёргание ESP
-    static float _matrixBuf[16];
-    uint64_t camV1 = ReadAddr<uint64_t>(camera + OFF_CAM_V1);
-    _read(camV1 + OFF_MATRIX_BASE, _matrixBuf, sizeof(float) * 16);
-    float *matrix = _matrixBuf;
+    float *matrix = GetViewMatrix(camera);
     float viewWidth = self.bounds.size.width;
     float viewHeight = self.bounds.size.height;
     CGPoint screenCenter = CGPointMake(viewWidth / 2, viewHeight / 2);
+
     // Variables for Aimbot
     uint64_t bestTarget = 0;
     int minHP = 99999;
@@ -1363,30 +1273,29 @@ bool get_IsFiring(uint64_t player) {
             UIColor *boneColor = [UIColor whiteColor];
             CGFloat boneWidth = 1.0f;
 
-            DrawBoneLine(self, CGPointMake(wHead.x, wHead.y), CGPointMake(wHip.x,  wHip.y),  boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wLS.x,   wLS.y),   CGPointMake(wRS.x,   wRS.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wLS.x,   wLS.y),   CGPointMake(wLE.x,   wLE.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wLE.x,   wLE.y),   CGPointMake(wLH.x,   wLH.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wRS.x,   wRS.y),   CGPointMake(wRE.x,   wRE.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wRE.x,   wRE.y),   CGPointMake(wRH.x,   wRH.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wHip.x,  wHip.y),  CGPointMake(wLA.x,   wLA.y),   boneColor, boneWidth);
-            DrawBoneLine(self, CGPointMake(wHip.x,  wHip.y),  CGPointMake(wRA.x,   wRA.y),   boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wHead.x, wHead.y), CGPointMake(wHip.x, wHip.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wLS.x, wLS.y), CGPointMake(wRS.x, wRS.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wLS.x, wLS.y), CGPointMake(wLE.x, wLE.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wLE.x, wLE.y), CGPointMake(wLH.x, wLH.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wRS.x, wRS.y), CGPointMake(wRE.x, wRE.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wRE.x, wRE.y), CGPointMake(wRH.x, wRH.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wLA.x, wLA.y), boneColor, boneWidth);
+            DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wRA.x, wRA.y), boneColor, boneWidth);
         }
 
-        float boxHeight = abs(w2sHead.y - w2sToe.y);
+        float boxHeight = fabsf(w2sHead.y - w2sToe.y);
+        if (boxHeight < 5.0f) continue;
         float boxWidth  = boxHeight * 0.45f;
         float bx = w2sHead.x - boxWidth * 0.5f;
         float by = w2sHead.y;
 
-        // Цвет зависит от дистанции
-        CGColorRef accentCG;
-        UIColor *accentUI;
-        if (dis < 30.0f)      { accentUI = [UIColor colorWithRed:1.0 green:0.3  blue:0.3  alpha:1.0]; }
-        else if (dis < 80.0f) { accentUI = [UIColor colorWithRed:1.0 green:0.85 blue:0.0  alpha:1.0]; }
-        else                  { accentUI = [UIColor colorWithRed:0.9 green:0.9  blue:0.9  alpha:0.85]; }
-        accentCG = accentUI.CGColor;
+        // Цвет зависит от дистанции: близко = красный, средне = жёлтый, далеко = белый
+        UIColor *accentColor;
+        if (dis < 30.0f)       accentColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0];
+        else if (dis < 80.0f)  accentColor = [UIColor colorWithRed:1.0 green:0.85 blue:0.0 alpha:1.0];
+        else                   accentColor = [UIColor colorWithRed:0.9 green:0.9 blue:0.9 alpha:0.85];
 
-        // === BOX: уголки из пула ===
+        // === BOX: только уголки, тонкие, 1pt ===
         if (isBox) {
             float cLen = MIN(boxWidth, boxHeight) * 0.22f;
             float lw = 1.2f;
@@ -1397,15 +1306,18 @@ bool get_IsFiring(uint64_t player) {
                 {bx+boxWidth, by+boxHeight-cLen, bx+boxWidth, by+boxHeight}, {bx+boxWidth-cLen, by+boxHeight, bx+boxWidth, by+boxHeight}
             };
             for (int ci = 0; ci < 8; ci++) {
+                CALayer *c = [CALayer layer];
                 float cx = MIN(pts[ci][0], pts[ci][2]);
                 float cy = MIN(pts[ci][1], pts[ci][3]);
                 float cw = MAX(fabs(pts[ci][2]-pts[ci][0]), lw);
                 float ch = MAX(fabs(pts[ci][3]-pts[ci][1]), lw);
-                [self addPooledLayerToParent:self.layer frame:CGRectMake(cx,cy,cw,ch) color:accentCG radius:0];
+                c.frame = CGRectMake(cx, cy, cw, ch);
+                c.backgroundColor = accentColor.CGColor;
+                [layers addObject:c];
             }
         }
 
-        // === NAME: фон + текст ===
+        // === NAME: маленький, над головой, полупрозрачный фон ===
         if (isName) {
             NSString *name = GetNickName(PawnObject);
             if (!name || name.length == 0) name = @"?";
@@ -1414,31 +1326,23 @@ bool get_IsFiring(uint64_t player) {
             float nX = bx + (boxWidth - nW) * 0.5f;
             float nY = by - nH - 3.0f;
 
-            // фон
-            [self addPooledLayerToParent:self.layer
-                                   frame:CGRectMake(nX, nY, nW, nH)
-                                   color:[UIColor colorWithWhite:0.0 alpha:0.45].CGColor
-                                  radius:2.0f];
+            CALayer *nbg = [CALayer layer];
+            nbg.frame = CGRectMake(nX, nY, nW, nH);
+            nbg.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.45].CGColor;
+            nbg.cornerRadius = 2.0f;
+            [layers addObject:nbg];
 
-            // текст — CATextLayer тоже из пула, но нужна проверка типа
-            CALayer *pl = [self pooledLayer];
-            if (![pl isKindOfClass:[CATextLayer class]]) {
-                // слой в пуле не текстовый — заменяем
-                pl = [CATextLayer layer];
-                _layerPool[_poolUsed - 1] = (CALayer *)pl;
-            }
-            CATextLayer *nl = (CATextLayer *)pl;
-            nl.string       = name;
-            nl.fontSize     = 8.5f;
-            nl.frame        = CGRectMake(nX, nY, nW, nH);
+            CATextLayer *nl = [CATextLayer layer];
+            nl.string = name;
+            nl.fontSize = 8.5f;
+            nl.frame = CGRectMake(nX, nY, nW, nH);
             nl.alignmentMode = kCAAlignmentCenter;
             nl.foregroundColor = [UIColor colorWithWhite:0.95 alpha:1.0].CGColor;
             nl.contentsScale = [UIScreen mainScreen].scale;
-            nl.hidden       = NO;
-            if (nl.superlayer != self.layer) [self.layer addSublayer:nl];
+            [layers addObject:nl];
         }
 
-        // === HEALTH: горизонтальная полоска + цифры HP ===
+        // === HEALTH: горизонтально над никнеймом ===
         if (isHealth) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
@@ -1446,67 +1350,49 @@ bool get_IsFiring(uint64_t player) {
                 float barW = MAX(boxWidth, 50.0f);
                 float barH = 3.0f;
                 float barX = bx + (boxWidth - barW) * 0.5f;
-                float barY = by - 7.0f - barH;
-                // bg
-                [self addPooledLayerToParent:self.layer
-                                       frame:CGRectMake(barX, barY, barW, barH)
-                                       color:[UIColor colorWithWhite:0.0 alpha:0.55].CGColor
-                                      radius:1.5f];
-                // fill
-                UIColor *hpUI;
-                if (ratio > 0.6f)      hpUI = [UIColor colorWithRed:0.15 green:0.9  blue:0.35 alpha:1.0];
-                else if (ratio > 0.3f) hpUI = [UIColor colorWithRed:1.0  green:0.75 blue:0.0  alpha:1.0];
-                else                   hpUI = [UIColor colorWithRed:1.0  green:0.2  blue:0.2  alpha:1.0];
-                [self addPooledLayerToParent:self.layer
-                                       frame:CGRectMake(barX, barY, barW * ratio, barH)
-                                       color:hpUI.CGColor
-                                      radius:1.5f];
-                // Цифры HP справа от бара
-                CALayer *pl = [self pooledLayer];
-                if (![pl isKindOfClass:[CATextLayer class]]) {
-                    pl = [CATextLayer layer];
-                    _layerPool[_poolUsed - 1] = (CALayer *)pl;
-                }
-                CATextLayer *ht = (CATextLayer *)pl;
-                ht.string        = [NSString stringWithFormat:@"%d/%d", CurHP, MaxHP];
-                ht.fontSize      = 7.5f;
-                ht.frame         = CGRectMake(barX + barW + 3.0f, barY - 1.0f, 42.0f, 10.0f);
-                ht.alignmentMode = kCAAlignmentLeft;
-                ht.foregroundColor = hpUI.CGColor;
-                ht.contentsScale = [UIScreen mainScreen].scale;
-                ht.hidden        = NO;
-                if (ht.superlayer != self.layer) [self.layer addSublayer:ht];
+                float barY = by - 11.0f - 3.0f - barH - 2.0f;
+                CALayer *bgH = [CALayer layer];
+                bgH.frame = CGRectMake(barX, barY, barW, barH);
+                bgH.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.55].CGColor;
+                bgH.cornerRadius = 1.5f;
+                [layers addObject:bgH];
+                UIColor *hpCol;
+                if (ratio > 0.6f)      hpCol = [UIColor colorWithRed:0.15 green:0.9 blue:0.35 alpha:1.0];
+                else if (ratio > 0.3f) hpCol = [UIColor colorWithRed:1.0 green:0.75 blue:0.0 alpha:1.0];
+                else                   hpCol = [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1.0];
+                CALayer *fillH = [CALayer layer];
+                fillH.frame = CGRectMake(barX, barY, barW * ratio, barH);
+                fillH.backgroundColor = hpCol.CGColor;
+                fillH.cornerRadius = 1.5f;
+                [layers addObject:fillH];
             }
         }
 
-        // === DISTANCE ===
+        // === DISTANCE: мелко под box ===
         if (isDis) {
-            CALayer *pl = [self pooledLayer];
-            if (![pl isKindOfClass:[CATextLayer class]]) {
-                pl = [CATextLayer layer];
-                _layerPool[_poolUsed - 1] = (CALayer *)pl;
-            }
-            CATextLayer *dl = (CATextLayer *)pl;
-            dl.string       = [NSString stringWithFormat:@"%.0fm", dis];
-            dl.fontSize     = 8.0f;
-            dl.frame        = CGRectMake(bx, by+boxHeight+1.0f, boxWidth, 10.0f);
+            CATextLayer *dl = [CATextLayer layer];
+            dl.string = [NSString stringWithFormat:@"%.0fm", dis];
+            dl.fontSize = 8.0f;
+            dl.frame = CGRectMake(bx, by+boxHeight+1.0f, boxWidth, 10.0f);
             dl.alignmentMode = kCAAlignmentCenter;
             dl.foregroundColor = [UIColor colorWithWhite:0.7 alpha:0.8].CGColor;
             dl.contentsScale = [UIScreen mainScreen].scale;
-            dl.hidden       = NO;
-            if (dl.superlayer != self.layer) [self.layer addSublayer:dl];
+            [layers addObject:dl];
         }
 
-        // === ESP LINE ===
+        // === ESP LINE: от края экрана до ног/центра/головы врага ===
         if (isLine) {
             CGFloat sw = self.bounds.size.width;
             CGFloat sh = self.bounds.size.height;
             CGPoint from;
-            if (lineOrigin == 0)      from = CGPointMake(sw*0.5f, 0);
-            else if (lineOrigin == 1) from = CGPointMake(sw*0.5f, sh*0.5f);
-            else                      from = CGPointMake(sw*0.5f, sh);
-            CGPoint to = CGPointMake(bx + boxWidth*0.5f, by + boxHeight);
-            DrawBoneLine(self, from, to, [accentUI colorWithAlphaComponent:0.5], 0.8f);
+            if (lineOrigin == 0)      from = CGPointMake(sw*0.5f, 0);           // Top
+            else if (lineOrigin == 1) from = CGPointMake(sw*0.5f, sh*0.5f);     // Center
+            else                      from = CGPointMake(sw*0.5f, sh);           // Bottom
+
+            CGPoint to;
+            if (lineOrigin == 2) to = CGPointMake(bx + boxWidth*0.5f, by + boxHeight);
+            else                 to = CGPointMake(bx + boxWidth*0.5f, by);
+            DrawBoneLine(layers, from, to, [accentColor colorWithAlphaComponent:0.5], 0.8f);
         }
     }
 
