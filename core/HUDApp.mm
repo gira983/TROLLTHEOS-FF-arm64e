@@ -1,4 +1,4 @@
-#import <cstddef>ф
+#import <cstddef>
 #import <cstring>
 #import <cstdlib>
 #import <dlfcn.h>
