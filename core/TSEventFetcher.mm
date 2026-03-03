@@ -15,34 +15,13 @@ static CFRunLoopSourceRef _source = NULL;
 static UITouch *toRemove = nil;
 static UITouch *toStationarify = nil;
 
-// ФИКС залипания при мультитач: очередь Ended/Cancelled touches
-// сбрасывается разом в одном callback — убирает задержку 1-2 сек
-static NSMutableArray *_pendingEndTouches = nil;
-
 static void __TSEventFetcherCallback(void *info)
 {
   static UIApplication *app = [UIApplication sharedApplication];
   UIEvent *event = [app _touchesEvent];
+  
+  // to retain objects from being released
   [event _clearTouches];
-
-  // Сначала отправляем все pending Ended touches разом
-  if (_pendingEndTouches.count > 0) {
-    for (UITouch *t in _pendingEndTouches) {
-      [t setPhaseAndUpdateTimestamp:UITouchPhaseEnded];
-      [event _addTouch:t forDelayedDelivery:NO];
-      [_livingTouchAry removeObjectIdenticalTo:t];
-    }
-    [_pendingEndTouches removeAllObjects];
-
-    CFTypeRef dr = CFBridgingRetain(_safeTouchAry);
-    _safeTouchAry = [[NSArray alloc] initWithArray:_livingTouchAry copyItems:NO];
-    CFBridgingRelease(dr);
-
-    [app sendEvent:event];
-
-    event = [app _touchesEvent];
-    [event _clearTouches];
-  }
 
   NSArray *myAry = _safeTouchAry;
   for (UITouch *aTouch in myAry)
@@ -71,7 +50,6 @@ static void __TSEventFetcherCallback(void *info)
 {
   _livingTouchAry = [[NSMutableArray alloc] init];
   _touchAry = [[NSMutableArray alloc] init];
-  _pendingEndTouches = [[NSMutableArray alloc] init];
   
   for (NSInteger i = 0; i < 100; i++)
   {
@@ -99,25 +77,6 @@ static void __TSEventFetcherCallback(void *info)
   BOOL deleted = NO;
   UITouch *touch = nil;
   BOOL needsCopy = NO;
-
-  // ФИКС: при Ended/Cancelled немедленно ставим в pending очередь
-  // и будим runloop — убирает залипание при быстром мультитач (джойстик + второй палец)
-  if (phase == UITouchPhaseEnded || phase == UITouchPhaseCancelled) {
-    eventId -= 1;
-    if (eventId >= 0 && eventId < (NSInteger)_touchAry.count) {
-      UITouch *endTouch = _touchAry[eventId];
-      if ([_livingTouchAry containsObject:endTouch]) {
-        if (![_pendingEndTouches containsObject:endTouch]) {
-          [endTouch setPhaseAndUpdateTimestamp:phase];
-          [_pendingEndTouches addObject:endTouch];
-        }
-        CFRunLoopSourceSignal(_source);
-        CFRunLoopWakeUp(CFRunLoopGetMain());
-        return deleted;
-      }
-    }
-    return deleted;
-  }
 
   if (toRemove != nil)
   {
