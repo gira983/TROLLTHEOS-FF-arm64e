@@ -129,7 +129,6 @@ static void __TSEventFetcherCallback(void *info)
   }
 
   CFRunLoopSourceSignal(_source);
-  CFRunLoopWakeUp(CFRunLoopGetMain());
   return deleted;
 }
 
