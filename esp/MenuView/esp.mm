@@ -316,6 +316,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 
+static inline void DrawBoneLine(MenuView *mv, CGPoint p1, CGPoint p2, UIColor *color, CGFloat width);
+
 @implementation MenuView {
     UIView *menuContainer;
     UIView *floatingButton;
@@ -1212,7 +1214,7 @@ bool get_IsFiring(uint64_t player) {
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
 
-    if (match != _lastMatchPtr) { _lastMatchPtr = match; return; }
+    _lastMatchPtr = match; // обновляем каждый кадр
 
     uint64_t myPawnObject = getLocalPlayer(match);
     if (!isVaildPtr(myPawnObject)) return;
