@@ -343,8 +343,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *skeletonContainer;
 
     // Reconnect при перезаходе в игру
-    pid_t          _lastGamePid;
-    NSTimeInterval _lastReconnectAttempt;
+    pid_t _lastGamePid;
     
     float previewScale;
 
@@ -368,7 +367,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         }
         _poolUsed = 0;
         _lastGamePid = -1;
-        _lastReconnectAttempt = 0;
 
         // FOV круг — один раз, обновляем только radius/visibility
         _fovCircleLayer = [CAShapeLayer layer];
@@ -1122,22 +1120,16 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)SetUpBase {
+    // Проверяем PID игры — если процесс перезапустился, пересчитываем базу
     pid_t currentPid = GetGameProcesspid((char*)ENCRYPT("freefireth"));
     if (currentPid == -1) {
         Moudule_Base = (uint64_t)-1;
-        get_task = MACH_PORT_NULL;
         _lastGamePid = -1;
         return;
     }
     if (currentPid != _lastGamePid) {
-        get_task = MACH_PORT_NULL;
-        kern_return_t kr = task_for_pid(mach_task_self(), currentPid, &get_task);
-        if (kr != KERN_SUCCESS || get_task == MACH_PORT_NULL) {
-            Moudule_Base = (uint64_t)-1;
-            _lastGamePid = -1;
-            return;
-        }
         _lastGamePid = currentPid;
+        // GetGameModule_Base сам вызывает task_for_pid и записывает в get_task в MemoryUtils.cpp
         Moudule_Base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
     }
 }
@@ -1157,11 +1149,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)updateFrame {
     if (!self.window) return;
 
-    // Переподключаемся к игре если нужно (не чаще раза в 2 секунды)
-    NSTimeInterval now = CACurrentMediaTime();
-    if (Moudule_Base == (uint64_t)-1 || get_task == MACH_PORT_NULL) {
-        if (now - _lastReconnectAttempt > 2.0) {
-            _lastReconnectAttempt = now;
+    // Переподключение если база потеряна (перезаход в игру)
+    static NSTimeInterval lastReconnect = 0;
+    if (Moudule_Base == (uint64_t)-1) {
+        NSTimeInterval now = CACurrentMediaTime();
+        if (now - lastReconnect > 3.0) {
+            lastReconnect = now;
             [self SetUpBase];
         }
     }
@@ -1193,7 +1186,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     @try {
         [self renderESP];
     } @catch (NSException *e) {
-        // renderESP крашанул — не останавливаем displayLink
+        // Не останавливаем displayLink при краше внутри renderESP
     }
     [CATransaction commit];
 }
@@ -1284,7 +1277,7 @@ bool get_IsFiring(uint64_t player) {
     uint64_t tValue = ReadAddr<uint64_t>(player + OFF_PLAYERLIST_ARR);
     int coutValue = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
     
-    // ФИКС: читаем матрицу одним vm_read (64 байта) — убирает дёргание ESP
+    // ФИКС: один vm_read на 64 байта вместо 16 отдельных — убирает дёргание ESP
     static float _matrixBuf[16];
     uint64_t camV1 = ReadAddr<uint64_t>(camera + OFF_CAM_V1);
     _read(camV1 + OFF_MATRIX_BASE, _matrixBuf, sizeof(float) * 16);
@@ -1459,15 +1452,13 @@ bool get_IsFiring(uint64_t player) {
                                        color:[UIColor colorWithWhite:0.0 alpha:0.55].CGColor
                                       radius:1.5f];
                 // fill
-                CGColorRef hpCG;
                 UIColor *hpUI;
                 if (ratio > 0.6f)      hpUI = [UIColor colorWithRed:0.15 green:0.9  blue:0.35 alpha:1.0];
                 else if (ratio > 0.3f) hpUI = [UIColor colorWithRed:1.0  green:0.75 blue:0.0  alpha:1.0];
                 else                   hpUI = [UIColor colorWithRed:1.0  green:0.2  blue:0.2  alpha:1.0];
-                hpCG = hpUI.CGColor;
                 [self addPooledLayerToParent:self.layer
                                        frame:CGRectMake(barX, barY, barW * ratio, barH)
-                                       color:hpCG
+                                       color:hpUI.CGColor
                                       radius:1.5f];
                 // Цифры HP справа от бара
                 CALayer *pl = [self pooledLayer];
@@ -1480,7 +1471,7 @@ bool get_IsFiring(uint64_t player) {
                 ht.fontSize      = 7.5f;
                 ht.frame         = CGRectMake(barX + barW + 3.0f, barY - 1.0f, 42.0f, 10.0f);
                 ht.alignmentMode = kCAAlignmentLeft;
-                ht.foregroundColor = hpCG;
+                ht.foregroundColor = hpUI.CGColor;
                 ht.contentsScale = [UIScreen mainScreen].scale;
                 ht.hidden        = NO;
                 if (ht.superlayer != self.layer) [self.layer addSublayer:ht];
