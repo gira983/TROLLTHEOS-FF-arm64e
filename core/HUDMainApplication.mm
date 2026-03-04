@@ -740,7 +740,7 @@ static void DumpThreads(void)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-    // Правильный encoding: I=unsigned int, d=double
+    // [_windowHostingController registerWindowWithContextID:_contextId atLevel:windowLevel];
     NSMethodSignature *signature = [NSMethodSignature signatureWithObjCTypes:"v@:Id"];
     NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
     [invocation setTarget:_windowHostingController];
@@ -748,13 +748,6 @@ static void DumpThreads(void)
     [invocation setArgument:&_contextId atIndex:2];
     [invocation setArgument:&windowLevel atIndex:3];
     [invocation invoke];
-    
-    // Также регистрируем через прямой вызов если метод доступен
-    if ([_windowHostingController respondsToSelector:NSSelectorFromString(@"registerWindowWithContextID:atLevel:")]) {
-        typedef void (*RegisterFunc)(id, SEL, unsigned int, double);
-        RegisterFunc func = (RegisterFunc)[[_windowHostingController class] instanceMethodForSelector:NSSelectorFromString(@"registerWindowWithContextID:atLevel:")];
-        if (func) func(_windowHostingController, NSSelectorFromString(@"registerWindowWithContextID:atLevel:"), _contextId, windowLevel);
-    }
 #pragma clang diagnostic pop
 
     return YES;
@@ -777,19 +770,9 @@ static void DumpThreads(void)
     return self;
 }
 
-// НЕ объявляем _isSystemWindow=YES — иначе iOS добавляет _UIAccessibilityHUDGateGestureRecognizer
-// который блокирует все touches на окне
-+ (BOOL)_isSystemWindow { return NO; }
++ (BOOL)_isSystemWindow { return YES; }
 - (BOOL)_isWindowServerHostingManaged { return NO; }
-- (BOOL)_ignoresHitTest { return NO; }
-- (BOOL)_isSecure { return YES; }
-- (BOOL)_shouldCreateContextAsSecure { return YES; }
-
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    UIView *hit = [super hitTest:point withEvent:event];
-    if (hit == self || hit == self.rootViewController.view) return nil;
-    return hit;
-}
+- (BOOL)_ignoresHitTest { return [HUDRootViewController passthroughMode]; }
 
 @end
 
@@ -892,13 +875,17 @@ static void DumpThreads(void)
     BOOL usesArrowPrefixes = [self usesArrowPrefixes];
     BOOL usesLargeFont = [self usesLargeFont] && !isCenteredMost;
 
-    _blurView.layer.maskedCorners = (isCenteredMost ? kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner : kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner);
+    if (@available(iOS 11.0, *)) {
+        _blurView.layer.maskedCorners = (isCenteredMost ? kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner : kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner);
+    }
     _blurView.layer.cornerRadius = (usesLargeFont ? 4.5 : 4.0);
     _speedLabel.textAlignment = (isCentered ? NSTextAlignmentCenter : NSTextAlignmentLeft);
-    if (isCentered) {
-        _lockedView.image = [UIImage systemImageNamed:@"hand.raised.slash.fill"];
-    } else {
-        _lockedView.image = [UIImage systemImageNamed:@"lock.fill"];
+    if (@available(iOS 13.0, *)) {
+        if (isCentered) {
+            _lockedView.image = [UIImage systemImageNamed:@"hand.raised.slash.fill"];
+        } else {
+            _lockedView.image = [UIImage systemImageNamed:@"lock.fill"];
+        }
     }
     
     DATAUNIT = usesBitrate;
@@ -1089,13 +1076,10 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     _contentView = [[UIView alloc] initWithFrame:self.view.bounds];
     _contentView.backgroundColor = [UIColor clearColor];
     _contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight; 
-    _contentView.translatesAutoresizingMaskIntoConstraints = YES;
-    _contentView.userInteractionEnabled = YES;
+    _contentView.translatesAutoresizingMaskIntoConstraints = YES; 
     [self.view addSubview:_contentView];
 
     _blurView = [[UIView alloc] initWithFrame:_contentView.bounds];
-    _blurView.userInteractionEnabled = YES;
-    _blurView.clipsToBounds = NO;
     _blurView.backgroundColor = [UIColor clearColor];
     _blurView.translatesAutoresizingMaskIntoConstraints = NO;
     [_contentView addSubview:_blurView];
@@ -1112,13 +1096,16 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
 
     menuView = [[MenuView alloc] initWithFrame:menuFrame];
     menuView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    menuView.userInteractionEnabled = YES;
     [_blurView addSubview:menuView];
     
     _speedLabel = [[UILabel alloc] initWithFrame:CGRectZero];
     [_blurView addSubview:_speedLabel];
     
-    _lockedView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"lock.fill"]];
+    if (@available(iOS 13.0, *)) {
+        _lockedView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"lock.fill"]];
+    } else {
+        _lockedView = [[UIImageView alloc] init];
+    }
     _lockedView.tintColor = [UIColor whiteColor];
     _lockedView.translatesAutoresizingMaskIntoConstraints = NO;
     _lockedView.contentMode = UIViewContentModeScaleAspectFit;
@@ -1130,8 +1117,6 @@ static inline CGRect orientationBounds(UIInterfaceOrientation orientation, CGRec
     _tapGestureRecognizer = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapGestureRecognized:)];
     _tapGestureRecognizer.numberOfTapsRequired = 1;
     _tapGestureRecognizer.numberOfTouchesRequired = 1;
-    _tapGestureRecognizer.cancelsTouchesInView = NO;
-    _tapGestureRecognizer.delaysTouchesEnded = NO;
     [_contentView addGestureRecognizer:_tapGestureRecognizer];
 
     [_contentView setUserInteractionEnabled:YES];
