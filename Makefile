@@ -51,6 +51,9 @@ ifdef LLVM_BIN
 THEOS_PLATFORM_CC  := $(LLVM_BIN)/clang
 THEOS_PLATFORM_CXX := $(LLVM_BIN)/clang++
 TARGET := iphone:$(LLVM_BIN)/clang:16.5:14.0
+# Форсируем Apple ld — brew lld не знает где Apple frameworks
+# xcrun находит правильный ld из активного Xcode
+Fryzz_LDFLAGS += -fuse-ld=$(shell xcrun -f ld)
 else
 TARGET := iphone:clang:16.5:14.0
 endif
