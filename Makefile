@@ -14,9 +14,7 @@ Fryzz_FILES += $(wildcard esp/lib/*.mm) $(wildcard esp/lib/*.cpp)
 Fryzz_FILES += $(wildcard esp/MenuView/*.cpp) $(wildcard esp/MenuView/*.mm)
 
 # ════════════════════════════════════════════════════════════════════════
-# УРОВЕНЬ 1 — Obscura
-# Шифрует все числовые константы, офсеты и строки на уровне LLVM IR
-# Переменные OBSCURA_LIB / OBSCURA_INCLUDE задаются из build.yml
+# УРОВЕНЬ 1 — Obscura: шифрование констант/офсетов
 # ════════════════════════════════════════════════════════════════════════
 ifdef OBSCURA_LIB
 OBSCURA_FLAGS := \
@@ -32,23 +30,24 @@ OBSCURA_FLAGS :=
 endif
 
 # ════════════════════════════════════════════════════════════════════════
-# УРОВЕНЬ 2 — Hikari (ollvm-pass)
-# Обфускация control flow, строк, ObjC классов
-#
-# Подход: xcode_cc.sh заменяет CC — он:
-#   1. Компилирует исходник в LLVM bitcode (clang -emit-llvm)
-#   2. Запускает opt с Hikari.dylib (применяет все passes)
-#   3. Компилирует bitcode обратно в .o (clang -c)
-#
-# Это лучший способ для arm64e — Apple clang остаётся в pipeline
-# Переменные HIKARI_LIB / HIKARI_OPT задаются из build.yml
+# УРОВЕНЬ 2 — Hikari: обфускация control flow, строк, ObjC классов
 # ════════════════════════════════════════════════════════════════════════
 ifdef HIKARI_LIB
-export OLLVM_PASS    := $(HIKARI_LIB)
-export OLLVM_OPT     := $(HIKARI_OPT)
-export OLLVM_POLICY  := $(CURDIR)/policy.json
-CC  := $(HOME)/xcode_cc.sh
-CXX := $(HOME)/xcode_cc.sh
+HIKARI_FLAGS := \
+  -fpass-plugin=$(HIKARI_LIB)
+# policy.json читается автоматически из рабочей директории
+export OLLVM_POLICY := $(CURDIR)/policy.json
+else
+HIKARI_FLAGS :=
+endif
+
+# ════════════════════════════════════════════════════════════════════════
+# CC/CXX — brew clang из build.yml (совместим с обоими плагинами)
+# Если не задан — используем стандартный Apple clang (локальная сборка)
+# ════════════════════════════════════════════════════════════════════════
+ifdef LLVM_BIN
+CC  := $(LLVM_BIN)/clang
+CXX := $(LLVM_BIN)/clang++
 endif
 
 Fryzz_CFLAGS += -fobjc-arc                          \
@@ -61,6 +60,7 @@ Fryzz_CFLAGS += -fobjc-arc                          \
 Fryzz_CFLAGS += -Iinclude
 Fryzz_CFLAGS += -include hud-prefix.pch
 Fryzz_CFLAGS += $(OBSCURA_FLAGS)
+Fryzz_CFLAGS += $(HIKARI_FLAGS)
 
 Fryzz_CCFLAGS += -std=c++14
 Fryzz_CCFLAGS += -DNOTIFY_LAUNCHED_HUD=\"ch.xxtou.notification.hud.launched\"
