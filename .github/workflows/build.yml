@@ -90,6 +90,7 @@ jobs:
             TARGET_CXX="$BREW_CLANGXX" \
             CC="$BREW_CLANG" \
             CXX="$BREW_CLANGXX" \
+            V=1 \
             2>&1 | tee build.log
           echo "=== ERRORS ==="
           grep "error:" build.log | head -20 || true
