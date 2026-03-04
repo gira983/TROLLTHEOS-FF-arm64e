@@ -3,6 +3,7 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+
 jobs:
   build:
     runs-on: macos-latest
@@ -19,16 +20,101 @@ jobs:
       - name: Download iOS SDK
         run: |
           curl -L "https://github.com/theos/sdks/archive/refs/heads/master.tar.gz" -o sdks.tar.gz
-          tar -xzf sdks.tar.gz --strip=1 -C $HOME/theos/sdks/ '*/iPhoneOS16.5.sdk'
+          tar -xzf sdks.tar.gz --strip-components=1 -C $HOME/theos/sdks/ '*/iPhoneOS16.5.sdk'
 
-      # Obscura: шифрование всех констант и офсетов при компиляции
-      # macos-latest = macOS 15 = Xcode 16.x = LLVM 17.0.6
+      # ── УРОВЕНЬ 1: Obscura — шифрование всех числовых констант/офсетов ──
       - name: Install Obscura
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -L "https://github.com/nkhmelni/Obscura/releases/download/v1.0.0/obscura-llvm17.0.6-arm64.tar.xz" -o obscura.tar.xz
-          tar -xJf obscura.tar.xz
-          echo "OBSCURA_LIB=$(pwd)/lib/libObscura.dylib" >> $GITHUB_ENV
-          echo "OBSCURA_INCLUDE=$(pwd)/include" >> $GITHUB_ENV
+          echo "=== Available Obscura assets ==="
+          gh release view v1.0.0 --repo nkhmelni/Obscura \
+            --json assets -q '.assets[].name' || echo "Could not list assets"
+
+          XCODE_MAJOR=$(xcodebuild -version | head -1 | awk '{print $2}' | cut -d. -f1)
+          [ "$XCODE_MAJOR" -ge 16 ] && LLVM_VER="17.0.6" || LLVM_VER="16.0.0"
+          echo "Xcode $XCODE_MAJOR → Obscura LLVM $LLVM_VER"
+
+          mkdir -p $HOME/obscura && cd $HOME/obscura
+          gh release download v1.0.0 --repo nkhmelni/Obscura \
+            --pattern "*llvm${LLVM_VER}*arm64*"
+          tar -xf *.tar.*
+          ls -la lib/ include/
+
+          echo "OBSCURA_LIB=$(pwd)/lib/libObscura.dylib"   >> $GITHUB_ENV
+          echo "OBSCURA_INCLUDE=$(pwd)/include"             >> $GITHUB_ENV
+
+      # ── УРОВЕНЬ 2: ollvm-pass (Hikari) — обфускация control flow ────────
+      # brew llvm@17 уже включает cmake директории — не нужно собирать LLVM
+      # Время сборки самого pass: ~3-5 минут
+      - name: Install LLVM + build Hikari pass
+        run: |
+          echo "Installing LLVM 17..."
+          brew install llvm@17 ninja cmake
+          LLVM_PREFIX=$(brew --prefix llvm@17)
+          echo "LLVM_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
+
+          echo "Building ollvm-pass (Hikari)..."
+          git clone --depth=1 https://github.com/lich4/llvm-pass-hikari \
+            $HOME/ollvm-pass
+          cd $HOME/ollvm-pass
+
+          # Собираем hikari subproject (содержит все нужные passes)
+          LLVM_CMAKE="$LLVM_PREFIX/lib/cmake/llvm"
+          cmake -S hikari -G Ninja -B hikari/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR="$LLVM_CMAKE"
+          cmake --build hikari/build
+
+          # Находим собранную dylib
+          HIKARI_LIB=$(find $HOME/ollvm-pass/hikari/build -name "*.dylib" | head -1)
+          echo "HIKARI_LIB=$HIKARI_LIB" >> $GITHUB_ENV
+          echo "HIKARI_OPT=$LLVM_PREFIX/bin/opt" >> $GITHUB_ENV
+          echo "Hikari built: $HIKARI_LIB"
+          ls -la $HOME/ollvm-pass/hikari/build/
+
+          # Копируем xcode_cc.sh и делаем исполняемым
+          cp $HOME/ollvm-pass/xcode_cc.sh $HOME/xcode_cc.sh
+          chmod +x $HOME/xcode_cc.sh
+
+      # ── Создаём policy.json для Hikari (что и как обфусцировать) ─────────
+      - name: Setup Hikari policy
+        run: |
+          cat > policy.json << 'POLICY'
+          {
+            "globals": {
+              "aesSeed": 31337
+            },
+            "policy_map": {
+              "module_policy": {
+                "acd-use-initialize": true
+              },
+              "func_policy": {
+                "enable-bcfobf":   true,
+                "bcf_prob":        70,
+                "bcf_loop":        2,
+                "enable-cffobf":   true,
+                "enable-strcry":   true,
+                "enable-acdobf":   true,
+                "enable-indibran": true,
+                "indibran-use-stack": true
+              }
+            },
+            "policies": [
+              {
+                "module": ".*",
+                "policy": "module_policy"
+              },
+              {
+                "module": ".*",
+                "func":   ".*",
+                "policy": "func_policy"
+              }
+            ]
+          }
+          POLICY
+          echo "policy.json created"
+          cat policy.json
 
       - name: Build
         run: |
