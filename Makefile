@@ -1,5 +1,4 @@
 ARCHS := arm64 arm64e
-TARGET := iphone:clang:16.5:14.0
 INSTALL_TARGET_PROCESSES := Fryzz
 include $(THEOS)/makefiles/common.mk
 
@@ -8,10 +7,14 @@ APPLICATION_NAME := Fryzz
 PACKAGE_NAME := xyris
 Fryzz_USE_MODULES := 0
 
-Fryzz_FILES += platform_stub.c
+# platform_stub.c компилируется БЕЗ обфускации — отдельно
 Fryzz_FILES += $(wildcard core/*.mm core/*.m)
 Fryzz_FILES += $(wildcard esp/lib/*.mm) $(wildcard esp/lib/*.cpp)
 Fryzz_FILES += $(wildcard esp/MenuView/*.cpp) $(wildcard esp/MenuView/*.mm)
+
+# platform_stub.c — без плагинов, чистая компиляция
+Fryzz_FILES += platform_stub.c
+platform_stub.c_CFLAGS = -fobjc-arc
 
 # ════════════════════════════════════════════════════════════════════════
 # УРОВЕНЬ 1 — Obscura: шифрование констант/офсетов
@@ -33,21 +36,23 @@ endif
 # УРОВЕНЬ 2 — Hikari: обфускация control flow, строк, ObjC классов
 # ════════════════════════════════════════════════════════════════════════
 ifdef HIKARI_LIB
-HIKARI_FLAGS := \
-  -fpass-plugin=$(HIKARI_LIB)
-# policy.json читается автоматически из рабочей директории
+HIKARI_FLAGS := -fpass-plugin=$(HIKARI_LIB)
 export OLLVM_POLICY := $(CURDIR)/policy.json
 else
 HIKARI_FLAGS :=
 endif
 
 # ════════════════════════════════════════════════════════════════════════
-# CC/CXX — brew clang из build.yml (совместим с обоими плагинами)
-# Если не задан — используем стандартный Apple clang (локальная сборка)
+# Theos использует свой clang — задаём его через TARGET
+# brew llvm@17 совместим с обоими плагинами без segfault
 # ════════════════════════════════════════════════════════════════════════
 ifdef LLVM_BIN
-CC  := $(LLVM_BIN)/clang
-CXX := $(LLVM_BIN)/clang++
+# Переопределяем компилятор Theos через переменную которую он реально читает
+THEOS_PLATFORM_CC  := $(LLVM_BIN)/clang
+THEOS_PLATFORM_CXX := $(LLVM_BIN)/clang++
+TARGET := iphone:$(LLVM_BIN)/clang:16.5:14.0
+else
+TARGET := iphone:clang:16.5:14.0
 endif
 
 Fryzz_CFLAGS += -fobjc-arc                          \
