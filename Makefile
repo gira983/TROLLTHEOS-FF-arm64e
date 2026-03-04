@@ -7,7 +7,6 @@ APPLICATION_NAME := Fryzz
 PACKAGE_NAME := xyris
 Fryzz_USE_MODULES := 0
 
-# platform_stub.c компилируется БЕЗ обфускации — отдельно
 Fryzz_FILES += $(wildcard core/*.mm core/*.m)
 Fryzz_FILES += $(wildcard esp/lib/*.mm) $(wildcard esp/lib/*.cpp)
 Fryzz_FILES += $(wildcard esp/MenuView/*.cpp) $(wildcard esp/MenuView/*.mm)
@@ -17,7 +16,11 @@ Fryzz_FILES += platform_stub.c
 platform_stub.c_CFLAGS = -fobjc-arc
 
 # ════════════════════════════════════════════════════════════════════════
-# УРОВЕНЬ 1 — Obscura: шифрование констант/офсетов
+# Obscura флаги
+# ВАЖНО: глобальные флаги БЕЗ L2G_ENABLE — он включается только
+# для HUDApp.mm через per-file override ниже.
+# Причина: Theos per-file _CFLAGS добавляются К глобальным, не заменяют.
+# L2G на HUDMainApplication.mm убивает runner по OOM (Exit 137).
 # ════════════════════════════════════════════════════════════════════════
 ifdef OBSCURA_LIB
 OBSCURA_FLAGS := \
@@ -25,26 +28,14 @@ OBSCURA_FLAGS := \
   -DENC_FULL                            \
   -DENC_FULL_TIMES=2                    \
   -DENC_DEEP_INLINE                     \
-  -DL2G_ENABLE                          \
-  -I$(OBSCURA_INCLUDE)                  \
-  -include $(OBSCURA_INCLUDE)/config.h
-
-# HUDMainApplication.mm — БЕЗ L2G_ENABLE (главная причина OOM)
-# ENC_FULL_TIMES не переопределяем — config.h уже задаёт его,
-# повторное -D вызывает -Wmacro-redefined. Итерации остаются =2.
-OBSCURA_FLAGS_LIGHT := \
-  -fpass-plugin=$(OBSCURA_LIB)          \
-  -DENC_FULL                            \
-  -DENC_DEEP_INLINE                     \
   -I$(OBSCURA_INCLUDE)                  \
   -include $(OBSCURA_INCLUDE)/config.h
 else
 OBSCURA_FLAGS :=
-OBSCURA_FLAGS_LIGHT :=
 endif
 
 # ════════════════════════════════════════════════════════════════════════
-# УРОВЕНЬ 2 — Hikari: обфускация control flow, строк, ObjC классов
+# Hikari
 # ════════════════════════════════════════════════════════════════════════
 ifdef HIKARI_LIB
 HIKARI_FLAGS := -fpass-plugin=$(HIKARI_LIB)
@@ -54,8 +45,7 @@ HIKARI_FLAGS :=
 endif
 
 # ════════════════════════════════════════════════════════════════════════
-# Theos использует свой clang — задаём его через TARGET
-# brew llvm@17 совместим с обоими плагинами без segfault
+# Компилятор
 # ════════════════════════════════════════════════════════════════════════
 ifdef LLVM_BIN
 THEOS_PLATFORM_CC  := $(LLVM_BIN)/clang
@@ -65,6 +55,9 @@ else
 TARGET := iphone:clang:16.5:14.0
 endif
 
+# ════════════════════════════════════════════════════════════════════════
+# Глобальные флаги (без L2G_ENABLE)
+# ════════════════════════════════════════════════════════════════════════
 Fryzz_CFLAGS += -fobjc-arc                          \
   -Wno-unused-function                               \
   -Wno-deprecated-declarations                       \
@@ -78,22 +71,12 @@ Fryzz_CFLAGS += $(OBSCURA_FLAGS)
 Fryzz_CFLAGS += $(HIKARI_FLAGS)
 
 # ════════════════════════════════════════════════════════════════════════
-# Per-file override: HUDMainApplication.mm — без L2G_ENABLE
-# L2G промоутит десятки тысяч глобалов и убивает runner по OOM
-# Не трогаем ENC_FULL_TIMES — config.h уже его определяет
+# Per-file: HUDApp.mm получает L2G_ENABLE дополнительно
+# На этом файле L2G успешно отработал (33k промоций, 765s, без OOM)
 # ════════════════════════════════════════════════════════════════════════
-core/HUDMainApplication.mm_CFLAGS = \
-  -fobjc-arc                                         \
-  -Wno-unused-function                               \
-  -Wno-deprecated-declarations                       \
-  -Wno-unused-variable                               \
-  -Wno-unused-value                                  \
-  -Wno-module-import-in-extern-c                     \
-  -Wno-unused-but-set-variable                       \
-  -Iinclude                                          \
-  -include hud-prefix.pch                            \
-  $(OBSCURA_FLAGS_LIGHT)                             \
-  $(HIKARI_FLAGS)
+ifdef OBSCURA_LIB
+core/HUDApp.mm_CFLAGS = -DL2G_ENABLE
+endif
 
 Fryzz_CCFLAGS += -std=c++14
 Fryzz_CCFLAGS += -DNOTIFY_LAUNCHED_HUD=\"ch.xxtou.notification.hud.launched\"
