@@ -77,8 +77,22 @@ jobs:
 
       - name: Build
         run: |
+          # Форсируем brew clang — Theos читает эти переменные при старте
+          BREW_CLANG="$LLVM_BIN/clang"
+          BREW_CLANGXX="$LLVM_BIN/clang++"
+          echo "Using clang: $BREW_CLANG"
+          $BREW_CLANG --version
+
           make clean
-          make package ARCHS="arm64 arm64e" 2>&1 | tee build.log
+          # THEOS_PLATFORM_CC и TARGET_CC форсируют компилятор внутри Theos
+          make package ARCHS="arm64 arm64e" \
+            THEOS_PLATFORM_CC="$BREW_CLANG" \
+            THEOS_PLATFORM_CXX="$BREW_CLANGXX" \
+            TARGET_CC="$BREW_CLANG" \
+            TARGET_CXX="$BREW_CLANGXX" \
+            CC="$BREW_CLANG" \
+            CXX="$BREW_CLANGXX" \
+            2>&1 | tee build.log
           echo "=== ERRORS ==="
           grep "error:" build.log | head -20 || true
 
@@ -95,3 +109,4 @@ jobs:
         with:
           name: build-log
           path: build.log
+# Patch already added above - this is a check
