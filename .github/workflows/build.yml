@@ -81,6 +81,9 @@ jobs:
           BREW_CLANGXX="$LLVM_BIN/clang++"
           echo "Using clang: $BREW_CLANG"
           $BREW_CLANG --version
+          echo "SDK path: $(xcrun --sdk iphoneos --show-sdk-path)"
+          echo "Theos vendor lib contents:"
+          ls $HOME/theos/vendor/lib/ | head -20 || true
 
           make clean
           make package ARCHS="arm64 arm64e" \
@@ -90,7 +93,6 @@ jobs:
             TARGET_CXX="$BREW_CLANGXX" \
             CC="$BREW_CLANG" \
             CXX="$BREW_CLANGXX" \
-            V=1 \
             2>&1 | tee build.log
           echo "=== ERRORS ==="
           grep "error:" build.log | head -20 || true
