@@ -22,6 +22,15 @@ jobs:
           curl -L "https://github.com/theos/sdks/archive/refs/heads/master.tar.gz" -o sdks.tar.gz
           tar -xzf sdks.tar.gz --strip-components=1 -C $HOME/theos/sdks/ '*/iPhoneOS16.5.sdk'
 
+      - name: Check Theos vendor stubs
+        run: |
+          echo "=== vendor/lib ==="
+          ls $HOME/theos/vendor/lib/ 2>/dev/null | head -30 || echo "vendor/lib empty or missing"
+          echo "=== lib ==="
+          ls $HOME/theos/lib/ 2>/dev/null | head -30 || echo "lib empty"
+          echo "=== BackBoardServices search ==="
+          find $HOME/theos -name "*BackBoard*" 2>/dev/null | head -10 || echo "not found"
+
       - name: Install LLVM 17
         run: |
           brew install llvm@17 ninja cmake
@@ -81,9 +90,14 @@ jobs:
           BREW_CLANGXX="$LLVM_BIN/clang++"
           echo "Using clang: $BREW_CLANG"
           $BREW_CLANG --version
-          echo "SDK path: $(xcrun --sdk iphoneos --show-sdk-path)"
-          echo "Theos vendor lib contents:"
-          ls $HOME/theos/vendor/lib/ | head -20 || true
+          echo "=== SDK path ==="
+          xcrun --sdk iphoneos --show-sdk-path
+          echo "=== Theos vendor/lib ==="
+          ls $HOME/theos/vendor/lib/ 2>/dev/null || echo "vendor/lib not found"
+          echo "=== Theos lib ==="
+          ls $HOME/theos/lib/ 2>/dev/null | head -20 || echo "lib not found"
+          echo "=== Theos lib/iphone ==="
+          ls $HOME/theos/lib/iphone/ 2>/dev/null | head -20 || echo "lib/iphone not found"
 
           make clean
           make package ARCHS="arm64 arm64e" \
