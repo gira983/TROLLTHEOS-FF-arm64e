@@ -28,8 +28,19 @@ OBSCURA_FLAGS := \
   -DL2G_ENABLE                          \
   -I$(OBSCURA_INCLUDE)                  \
   -include $(OBSCURA_INCLUDE)/config.h
+
+# HUDMainApplication.mm — отдельные флаги Obscura БЕЗ L2G и с 1 итерацией
+# L2G_ENABLE продвинул 33k+ глобалов на HUDApp.mm и убивает OOM на большем файле
+OBSCURA_FLAGS_LIGHT := \
+  -fpass-plugin=$(OBSCURA_LIB)          \
+  -DENC_FULL                            \
+  -DENC_FULL_TIMES=1                    \
+  -DENC_DEEP_INLINE                     \
+  -I$(OBSCURA_INCLUDE)                  \
+  -include $(OBSCURA_INCLUDE)/config.h
 else
 OBSCURA_FLAGS :=
+OBSCURA_FLAGS_LIGHT :=
 endif
 
 # ════════════════════════════════════════════════════════════════════════
@@ -66,6 +77,23 @@ Fryzz_CFLAGS += -Iinclude
 Fryzz_CFLAGS += -include hud-prefix.pch
 Fryzz_CFLAGS += $(OBSCURA_FLAGS)
 Fryzz_CFLAGS += $(HIKARI_FLAGS)
+
+# ════════════════════════════════════════════════════════════════════════
+# Per-file overrides: HUDMainApplication.mm — облегчённая обфускация
+# Без L2G_ENABLE (главная причина OOM) + 1 итерация вместо 2
+# ════════════════════════════════════════════════════════════════════════
+core/HUDMainApplication.mm_CFLAGS = \
+  -fobjc-arc                                         \
+  -Wno-unused-function                               \
+  -Wno-deprecated-declarations                       \
+  -Wno-unused-variable                               \
+  -Wno-unused-value                                  \
+  -Wno-module-import-in-extern-c                     \
+  -Wno-unused-but-set-variable                       \
+  -Iinclude                                          \
+  -include hud-prefix.pch                            \
+  $(OBSCURA_FLAGS_LIGHT)                             \
+  $(HIKARI_FLAGS)
 
 Fryzz_CCFLAGS += -std=c++14
 Fryzz_CCFLAGS += -DNOTIFY_LAUNCHED_HUD=\"ch.xxtou.notification.hud.launched\"
