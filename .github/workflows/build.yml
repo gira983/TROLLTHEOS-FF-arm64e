@@ -77,14 +77,12 @@ jobs:
 
       - name: Build
         run: |
-          # Форсируем brew clang — Theos читает эти переменные при старте
           BREW_CLANG="$LLVM_BIN/clang"
           BREW_CLANGXX="$LLVM_BIN/clang++"
           echo "Using clang: $BREW_CLANG"
           $BREW_CLANG --version
 
           make clean
-          # THEOS_PLATFORM_CC и TARGET_CC форсируют компилятор внутри Theos
           make package ARCHS="arm64 arm64e" \
             THEOS_PLATFORM_CC="$BREW_CLANG" \
             THEOS_PLATFORM_CXX="$BREW_CLANGXX" \
@@ -95,13 +93,15 @@ jobs:
             2>&1 | tee build.log
           echo "=== ERRORS ==="
           grep "error:" build.log | head -20 || true
+          echo "=== packages/ ==="
+          ls -la packages/ || echo "packages/ not found"
 
       - name: Upload tipa
         uses: actions/upload-artifact@v4
         with:
           name: Fryzz-arm64e
           path: packages/*.tipa
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload build log
         uses: actions/upload-artifact@v4
@@ -109,4 +109,3 @@ jobs:
         with:
           name: build-log
           path: build.log
-# Patch already added above - this is a check
