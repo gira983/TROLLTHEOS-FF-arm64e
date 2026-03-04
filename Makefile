@@ -29,12 +29,12 @@ OBSCURA_FLAGS := \
   -I$(OBSCURA_INCLUDE)                  \
   -include $(OBSCURA_INCLUDE)/config.h
 
-# HUDMainApplication.mm — отдельные флаги Obscura БЕЗ L2G и с 1 итерацией
-# L2G_ENABLE продвинул 33k+ глобалов на HUDApp.mm и убивает OOM на большем файле
+# HUDMainApplication.mm — БЕЗ L2G_ENABLE (главная причина OOM)
+# ENC_FULL_TIMES не переопределяем — config.h уже задаёт его,
+# повторное -D вызывает -Wmacro-redefined. Итерации остаются =2.
 OBSCURA_FLAGS_LIGHT := \
   -fpass-plugin=$(OBSCURA_LIB)          \
   -DENC_FULL                            \
-  -DENC_FULL_TIMES=1                    \
   -DENC_DEEP_INLINE                     \
   -I$(OBSCURA_INCLUDE)                  \
   -include $(OBSCURA_INCLUDE)/config.h
@@ -58,7 +58,6 @@ endif
 # brew llvm@17 совместим с обоими плагинами без segfault
 # ════════════════════════════════════════════════════════════════════════
 ifdef LLVM_BIN
-# Переопределяем компилятор Theos через переменную которую он реально читает
 THEOS_PLATFORM_CC  := $(LLVM_BIN)/clang
 THEOS_PLATFORM_CXX := $(LLVM_BIN)/clang++
 TARGET := iphone:$(LLVM_BIN)/clang:16.5:14.0
@@ -79,8 +78,9 @@ Fryzz_CFLAGS += $(OBSCURA_FLAGS)
 Fryzz_CFLAGS += $(HIKARI_FLAGS)
 
 # ════════════════════════════════════════════════════════════════════════
-# Per-file overrides: HUDMainApplication.mm — облегчённая обфускация
-# Без L2G_ENABLE (главная причина OOM) + 1 итерация вместо 2
+# Per-file override: HUDMainApplication.mm — без L2G_ENABLE
+# L2G промоутит десятки тысяч глобалов и убивает runner по OOM
+# Не трогаем ENC_FULL_TIMES — config.h уже его определяет
 # ════════════════════════════════════════════════════════════════════════
 core/HUDMainApplication.mm_CFLAGS = \
   -fobjc-arc                                         \
