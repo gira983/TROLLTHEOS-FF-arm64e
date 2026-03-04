@@ -52,12 +52,13 @@ THEOS_PLATFORM_CC  := $(LLVM_BIN)/clang
 THEOS_PLATFORM_CXX := $(LLVM_BIN)/clang++
 TARGET := iphone:$(LLVM_BIN)/clang:16.5:14.0
 # brew clang не передаёт -isysroot линковщику автоматически.
-# Явно указываем sysroot и путь к frameworks через LDFLAGS.
+# Добавляем только sysroot и публичные Frameworks.
+# PrivateFrameworks НЕ добавляем — их нет в SDK, Theos линкует
+# их через собственные .tbd стабы в $(THEOS)/vendor/lib.
 THEOS_SDK_PATH := $(shell xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)
 ifneq ($(THEOS_SDK_PATH),)
 Fryzz_LDFLAGS += -isysroot $(THEOS_SDK_PATH)
 Fryzz_LDFLAGS += -F$(THEOS_SDK_PATH)/System/Library/Frameworks
-Fryzz_LDFLAGS += -F$(THEOS_SDK_PATH)/System/Library/PrivateFrameworks
 endif
 else
 TARGET := iphone:clang:16.5:14.0
