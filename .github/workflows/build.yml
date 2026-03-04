@@ -22,15 +22,28 @@ jobs:
           curl -L "https://github.com/theos/sdks/archive/refs/heads/master.tar.gz" -o sdks.tar.gz
           tar -xzf sdks.tar.gz --strip-components=1 -C $HOME/theos/sdks/ '*/iPhoneOS16.5.sdk'
 
-      # ── УРОВЕНЬ 1: Obscura — шифрование всех числовых констант/офсетов ──
+      # ── УРОВЕНЬ 1+2: brew llvm@17 + Obscura + Hikari ──────────────────
+      # Используем brew clang вместо Apple clang — он совместим с обоими плагинами
+      # без segfault. Apple clang крашит с universal plugin из-за ABI mismatch.
+      - name: Install LLVM 17
+        run: |
+          brew install llvm@17 ninja cmake
+          LLVM_PREFIX=$(brew --prefix llvm@17)
+          echo "LLVM_PREFIX=$LLVM_PREFIX"       >> $GITHUB_ENV
+          echo "LLVM_BIN=$LLVM_PREFIX/bin"      >> $GITHUB_ENV
+          # brew clang совместим с обоими плагинами
+          echo "CC=$LLVM_PREFIX/bin/clang"      >> $GITHUB_ENV
+          echo "CXX=$LLVM_PREFIX/bin/clang++"   >> $GITHUB_ENV
+
       - name: Install Obscura
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "=== Available Obscura assets ==="
           gh release view v1.0.0 --repo nkhmelni/Obscura \
-            --json assets -q '.assets[].name' || echo "Could not list assets"
+            --json assets -q '.assets[].name'
 
+          # Xcode 16 = LLVM 17, universal работает с brew clang
           XCODE_MAJOR=$(xcodebuild -version | head -1 | awk '{print $2}' | cut -d. -f1)
           [ "$XCODE_MAJOR" -ge 16 ] && LLVM_VER="17.0.6" || LLVM_VER="16.0.0"
           echo "Xcode $XCODE_MAJOR → Obscura LLVM $LLVM_VER"
@@ -41,80 +54,70 @@ jobs:
           tar -xf *.tar.*
           ls -la lib/ include/
 
-          echo "OBSCURA_LIB=$(pwd)/lib/libObscura.dylib"   >> $GITHUB_ENV
-          echo "OBSCURA_INCLUDE=$(pwd)/include"             >> $GITHUB_ENV
+          echo "OBSCURA_LIB=$(pwd)/lib/libObscura.dylib"  >> $GITHUB_ENV
+          echo "OBSCURA_INCLUDE=$(pwd)/include"            >> $GITHUB_ENV
 
-      # ── УРОВЕНЬ 2: ollvm-pass (Hikari) — обфускация control flow ────────
-      # brew llvm@17 уже включает cmake директории — не нужно собирать LLVM
-      # Время сборки самого pass: ~3-5 минут
-      - name: Install LLVM + build Hikari pass
+      - name: Build Hikari pass
         run: |
-          echo "Installing LLVM 17..."
-          brew install llvm@17 ninja cmake
-          LLVM_PREFIX=$(brew --prefix llvm@17)
-          echo "LLVM_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
-
-          echo "Building ollvm-pass (Hikari)..."
           git clone --depth=1 https://github.com/lich4/llvm-pass-hikari \
             $HOME/ollvm-pass
           cd $HOME/ollvm-pass
 
-          # Собираем hikari subproject (содержит все нужные passes)
           LLVM_CMAKE="$LLVM_PREFIX/lib/cmake/llvm"
           cmake -S hikari -G Ninja -B hikari/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_DIR="$LLVM_CMAKE"
           cmake --build hikari/build
 
-          # Находим собранную dylib
           HIKARI_LIB=$(find $HOME/ollvm-pass/hikari/build -name "*.dylib" | head -1)
           echo "HIKARI_LIB=$HIKARI_LIB" >> $GITHUB_ENV
-          echo "HIKARI_OPT=$LLVM_PREFIX/bin/opt" >> $GITHUB_ENV
           echo "Hikari built: $HIKARI_LIB"
-          ls -la $HOME/ollvm-pass/hikari/build/
 
-          # Копируем xcode_cc.sh и делаем исполняемым
-          cp $HOME/ollvm-pass/xcode_cc.sh $HOME/xcode_cc.sh
-          chmod +x $HOME/xcode_cc.sh
+      - name: Verify plugins
+        run: |
+          echo "int x = 0x1337;" > /tmp/t.c
+          # Тест Obscura
+          $LLVM_BIN/clang \
+            -fpass-plugin="$OBSCURA_LIB" \
+            -DENC_FULL -DENC_DEEP_INLINE -DL2G_ENABLE \
+            -I"$OBSCURA_INCLUDE" -include "$OBSCURA_INCLUDE/config.h" \
+            -target arm64-apple-ios14.0 \
+            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
+            -c /tmp/t.c -o /tmp/t_obscura.o && echo "Obscura: OK" || echo "Obscura: FAIL"
+          # Тест Hikari
+          $LLVM_BIN/clang \
+            -fpass-plugin="$HIKARI_LIB" \
+            -target arm64-apple-ios14.0 \
+            -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
+            -c /tmp/t.c -o /tmp/t_hikari.o && echo "Hikari: OK" || echo "Hikari: FAIL"
 
-      # ── Создаём policy.json для Hikari (что и как обфусцировать) ─────────
       - name: Setup Hikari policy
         run: |
           cat > policy.json << 'POLICY'
-          {
-            "globals": {
-              "aesSeed": 31337
-            },
-            "policy_map": {
-              "module_policy": {
-                "acd-use-initialize": true
-              },
-              "func_policy": {
-                "enable-bcfobf":   true,
-                "bcf_prob":        70,
-                "bcf_loop":        2,
-                "enable-cffobf":   true,
-                "enable-strcry":   true,
-                "enable-acdobf":   true,
-                "enable-indibran": true,
-                "indibran-use-stack": true
-              }
-            },
-            "policies": [
-              {
-                "module": ".*",
-                "policy": "module_policy"
-              },
-              {
-                "module": ".*",
-                "func":   ".*",
-                "policy": "func_policy"
-              }
-            ]
-          }
-          POLICY
-          echo "policy.json created"
-          cat policy.json
+{
+  "globals": { "aesSeed": 31337 },
+  "policy_map": {
+    "module_policy": {
+      "acd-use-initialize": true
+    },
+    "func_policy": {
+      "enable-bcfobf":      true,
+      "bcf_prob":           70,
+      "bcf_loop":           2,
+      "enable-cffobf":      true,
+      "enable-strcry":      true,
+      "enable-acdobf":      true,
+      "enable-indibran":    true,
+      "indibran-use-stack": true
+    }
+  },
+  "policies": [
+    { "module": ".*",           "policy": "module_policy" },
+    { "module": ".*", "func": ".*", "policy": "func_policy" }
+  ]
+}
+POLICY
+          echo "policy.json ready"
 
       - name: Build
         run: |
