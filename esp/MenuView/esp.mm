@@ -349,6 +349,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         self.drawingLayers = [NSMutableArray array];
         
         [self SetUpBase];
+        // Перезаход в игру — переинициализируем base
+        [[NSNotificationCenter defaultCenter] addObserver:self
+            selector:@selector(appDidBecomeActive)
+            name:UIApplicationDidBecomeActiveNotification
+            object:nil];
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
         if (@available(iOS 15.0, *)) { self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(15, 20, 20); } else { self.displayLink.preferredFramesPerSecond = 20; }
         [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
@@ -363,13 +368,15 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
 
-    // Когда меню закрыто — ТОЛЬКО floatingButton, всё в игру
+    // Когда меню закрыто — ТОЛЬКО floatingButton перехватывает touches
     if (!menuContainer || menuContainer.hidden) {
         if (floatingButton && !floatingButton.hidden) {
-            CGPoint p = [self convertPoint:point toView:floatingButton];
-            if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
+            // Увеличенная зона нажатия 64x64 вокруг floatingButton
+            CGRect fb = floatingButton.frame;
+            CGRect hitZone = CGRectInset(fb, -5, -5);
+            if (CGRectContainsPoint(hitZone, point)) return floatingButton;
         }
-        return nil;
+        return nil; // все остальные touches — в игру
     }
     if (menuContainer && !menuContainer.hidden) {
         CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
@@ -1087,16 +1094,25 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)SetUpBase {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        Moudule_Base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
-    });
+    uint64_t base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
+    if (base != 0) Moudule_Base = base;
 }
 
 - (void)updateFrame {
     if (!self.window) return;
+    // Обновляем base каждые 60 кадров (~3 сек) — ловим перезаход в игру
+    static int _baseCheckCounter = 0;
+    if (++_baseCheckCounter >= 60) {
+        _baseCheckCounter = 0;
+        // SetUpBase в фоне — не фризим main thread
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+            uint64_t base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
+            if (base != 0) dispatch_async(dispatch_get_main_queue(), ^{ Moudule_Base = base; });
+        });
+    }
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
+    [CATransaction setAnimationDuration:0];
     for (CALayer *layer in self.drawingLayers) {
         [layer removeFromSuperlayer];
     }
@@ -1124,7 +1140,16 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [CATransaction commit];
 }
 
+- (void)appDidBecomeActive {
+    // Перезаход в игру — сбрасываем base и переинициализируем
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        uint64_t base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
+        if (base != 0) dispatch_async(dispatch_get_main_queue(), ^{ Moudule_Base = base; });
+    });
+}
+
 - (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.displayLink invalidate];
     self.displayLink = nil;
 }
@@ -1365,6 +1390,14 @@ bool get_IsFiring(uint64_t player) {
                 fillH.backgroundColor = hpCol.CGColor;
                 fillH.cornerRadius = 1.5f;
                 [layers addObject:fillH];
+                // Цифры HP справа от полоски
+                CATextLayer *hpTxt = [CATextLayer layer];
+                hpTxt.string = [NSString stringWithFormat:@"%d", CurHP];
+                hpTxt.fontSize = 7.5f;
+                hpTxt.foregroundColor = hpCol.CGColor;
+                hpTxt.contentsScale = [UIScreen mainScreen].scale;
+                hpTxt.frame = CGRectMake(barX + barW + 2.0f, barY - 1.0f, 24.0f, barH + 2.0f);
+                [layers addObject:hpTxt];
             }
         }
 
