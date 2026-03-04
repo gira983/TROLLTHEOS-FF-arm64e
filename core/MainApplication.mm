@@ -227,8 +227,18 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
         [_topLeftButton setConfiguration:config];
     }
     [_topLeftButton setTranslatesAutoresizingMaskIntoConstraints:NO];
+    NSLayoutYAxisAnchor *topSafeAnchor;
+    NSLayoutYAxisAnchor *bottomSafeAnchor;
+    if (@available(iOS 11.0, *)) {
+        topSafeAnchor = safeArea.topAnchor;
+        bottomSafeAnchor = safeArea.bottomAnchor;
+    } else {
+        topSafeAnchor = self.backgroundView.topAnchor;
+        bottomSafeAnchor = self.backgroundView.bottomAnchor;
+    }
+
     [NSLayoutConstraint activateConstraints:@[
-        [_topLeftButton.topAnchor constraintEqualToAnchor:(@available(iOS 11.0, *) ? safeArea.topAnchor : self.backgroundView.topAnchor) constant:(isPad ? 40.0f : 28.f)],
+        [_topLeftButton.topAnchor constraintEqualToAnchor:topSafeAnchor constant:(isPad ? 40.0f : 28.f)],
         [_topLeftButton.leadingAnchor constraintEqualToAnchor:self.backgroundView.leadingAnchor constant:20.0f],
         [_topLeftButton.widthAnchor constraintEqualToConstant:40.0f],
         [_topLeftButton.heightAnchor constraintEqualToConstant:40.0f],
@@ -250,7 +260,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     }
     [_topRightButton setTranslatesAutoresizingMaskIntoConstraints:NO];
     [NSLayoutConstraint activateConstraints:@[
-        [_topRightButton.topAnchor constraintEqualToAnchor:(@available(iOS 11.0, *) ? safeArea.topAnchor : self.backgroundView.topAnchor) constant:(isPad ? 40.0f : 28.f)],
+        [_topRightButton.topAnchor constraintEqualToAnchor:topSafeAnchor constant:(isPad ? 40.0f : 28.f)],
         [_topRightButton.trailingAnchor constraintEqualToAnchor:self.backgroundView.trailingAnchor constant:-20.0f],
         [_topRightButton.widthAnchor constraintEqualToConstant:40.0f],
         [_topRightButton.heightAnchor constraintEqualToConstant:40.0f],
@@ -272,7 +282,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     }
     [_topCenterButton setTranslatesAutoresizingMaskIntoConstraints:NO];
     [NSLayoutConstraint activateConstraints:@[
-        [_topCenterButton.topAnchor constraintEqualToAnchor:(@available(iOS 11.0, *) ? safeArea.topAnchor : self.backgroundView.topAnchor) constant:(isPad ? 40.0f : 28.f)],
+        [_topCenterButton.topAnchor constraintEqualToAnchor:topSafeAnchor constant:(isPad ? 40.0f : 28.f)],
         [_topCenterButton.centerXAnchor constraintEqualToAnchor:self.backgroundView.centerXAnchor],
         [_topCenterButton.widthAnchor constraintEqualToConstant:40.0f],
         [_topCenterButton.heightAnchor constraintEqualToConstant:40.0f],
@@ -321,7 +331,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     }
     [_settingsButton setTranslatesAutoresizingMaskIntoConstraints:NO];
     [NSLayoutConstraint activateConstraints:@[
-        [_settingsButton.bottomAnchor constraintEqualToAnchor:(@available(iOS 11.0, *) ? safeArea.bottomAnchor : self.backgroundView.bottomAnchor) constant:-20.0f],
+        [_settingsButton.bottomAnchor constraintEqualToAnchor:bottomSafeAnchor constant:-20.0f],
         [_settingsButton.centerXAnchor constraintEqualToAnchor:self.backgroundView.centerXAnchor],
         [_settingsButton.widthAnchor constraintEqualToConstant:40.0f],
         [_settingsButton.heightAnchor constraintEqualToConstant:40.0f],
