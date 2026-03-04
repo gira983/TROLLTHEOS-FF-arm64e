@@ -1,17 +1,31 @@
 {
-  "globals": { "aesSeed": 31337 },
+  "globals": {
+    "aesSeed": 31337
+  },
   "policy_map": {
-    "module_policy": { "acd-use-initialize": true },
+    "module_policy": {
+      "acd-use-initialize": true
+    },
     "func_policy": {
-      "enable-bcfobf": true, "bcf_prob": 70, "bcf_loop": 2,
-      "enable-cffobf": true,
-      "enable-strcry": true,
-      "enable-acdobf": true,
-      "enable-indibran": true, "indibran-use-stack": true
+      "enable-bcfobf":      true,
+      "bcf_prob":           70,
+      "bcf_loop":           2,
+      "enable-cffobf":      true,
+      "enable-strcry":      true,
+      "enable-acdobf":      true,
+      "enable-indibran":    true,
+      "indibran-use-stack": true
     }
   },
   "policies": [
-    { "module": ".*", "policy": "module_policy" },
-    { "module": ".*", "func": ".*", "policy": "func_policy" }
+    {
+      "module": ".*",
+      "policy": "module_policy"
+    },
+    {
+      "module": ".*",
+      "func": ".*",
+      "policy": "func_policy"
+    }
   ]
 }
