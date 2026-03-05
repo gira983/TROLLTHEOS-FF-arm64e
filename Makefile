@@ -47,20 +47,14 @@ endif
 # ════════════════════════════════════════════════════════════════════════
 # Компилятор
 # ════════════════════════════════════════════════════════════════════════
-ifdef LLVM_BIN
-THEOS_PLATFORM_CC  := $(LLVM_BIN)/clang
-THEOS_PLATFORM_CXX := $(LLVM_BIN)/clang++
-TARGET := iphone:$(LLVM_BIN)/clang:16.5:14.0
-# brew clang не передаёт -isysroot линковщику автоматически.
-# Добавляем sysroot + пути к фреймворкам.
-# Приватные фреймворки (BackBoardServices и т.д.) берутся из Theos stubs.
+# TARGET использует системный clang для линковки (знает iOS sysroot).
+# Brew clang используется только как компилятор через THEOS_PLATFORM_CC/CXX
+# чтобы передавать плагины Obscura/Hikari при компиляции .mm файлов.
+TARGET := iphone:clang:16.5:14.0
 THEOS_IOS_SDK  := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
 ifneq ($(THEOS_IOS_SDK),)
 Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/Frameworks
 Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/PrivateFrameworks
-endif
-else
-TARGET := iphone:clang:16.5:14.0
 endif
 
 # ════════════════════════════════════════════════════════════════════════
