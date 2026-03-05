@@ -55,14 +55,14 @@ TARGET := iphone:$(LLVM_BIN)/clang:16.5:14.0
 # Добавляем sysroot + пути к фреймворкам.
 # Приватные фреймворки (BackBoardServices и т.д.) берутся из Theos stubs.
 THEOS_SDK_PATH := $(shell xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)
+THEOS_IOS_SDK  := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
+ifneq ($(THEOS_IOS_SDK),)
+Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/Frameworks
+Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/PrivateFrameworks
+endif
 ifneq ($(THEOS_SDK_PATH),)
 Fryzz_LDFLAGS += -isysroot $(THEOS_SDK_PATH)
-Fryzz_LDFLAGS += -F$(THEOS_SDK_PATH)/System/Library/Frameworks
 endif
-# Пути к приватным фреймворкам из Theos (stubs)
-Fryzz_LDFLAGS += -F$(THEOS)/vendor/lib
-Fryzz_LDFLAGS += -F$(THEOS)/lib
-Fryzz_LDFLAGS += -F$(THEOS)/lib/iphone
 else
 TARGET := iphone:clang:16.5:14.0
 endif
@@ -97,7 +97,7 @@ Fryzz_CCFLAGS += -DNOTIFY_RELOAD_HUD=\"ch.xxtou.notification.hud.reload\"
 Fryzz_CCFLAGS += -DNOTIFY_RELOAD_APP=\"ch.xxtou.notification.app.reload\"
 
 Fryzz_FRAMEWORKS         += CoreGraphics QuartzCore UIKit Foundation
-Fryzz_PRIVATE_FRAMEWORKS += BackBoardServices GraphicsServices IOKit SpringBoardServices
+Fryzz_PRIVATE_FRAMEWORKS += GraphicsServices IOKit SpringBoardServices
 Fryzz_CODESIGN_FLAGS     += -Sent.plist
 
 include $(THEOS_MAKE_PATH)/application.mk
