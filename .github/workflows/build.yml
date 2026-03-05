@@ -82,11 +82,8 @@ jobs:
           THEOS_SDK=$(ls -d $HOME/theos/sdks/iPhoneOS*.sdk | head -1)
           echo "Theos SDK: $THEOS_SDK"
 
-          # ld wrapper — логирует полную команду линковщика
-          mkdir -p $HOME/ld-wrapper
-          printf '#!/bin/bash\necho "LD: $@" >> /tmp/ld_args.log\nexec "$(xcrun -f ld)" "$@"\n' > $HOME/ld-wrapper/ld
-          chmod +x $HOME/ld-wrapper/ld
-          export PATH="$HOME/ld-wrapper:$PATH"
+          # SDKROOT читается Apple ld напрямую — форсирует iOS libobjc
+          export SDKROOT="$THEOS_SDK"
 
           make clean
           make package ARCHS="arm64 arm64e" \
@@ -97,8 +94,6 @@ jobs:
             CC="$BREW_CLANG" \
             CXX="$BREW_CLANGXX" \
             2>&1 | tee build.log
-          echo "=== LD COMMAND ==="
-          cat /tmp/ld_args.log 2>/dev/null || echo "no ld args captured"
           echo "=== ERRORS ==="
           grep "error:" build.log | head -20 || true
           echo "=== packages/ ==="
