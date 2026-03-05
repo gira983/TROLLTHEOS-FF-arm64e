@@ -85,14 +85,7 @@ jobs:
           # Враппер вокруг clang++ — логирует команду линковщика
           mkdir -p $HOME/clang-wrapper
           WRAPPER="$HOME/clang-wrapper/clang++"
-          cat > "$WRAPPER" << WRAPEOF
-#!/bin/bash
-# Log args when linking (not compiling)
-if echo "\$@" | grep -q -- "-o "; then
-  echo "CLANGXX INVOKE: \$@" >> /tmp/clangxx_link.log
-fi
-exec "$BREW_CLANGXX" "\$@"
-WRAPEOF
+          printf '#!/bin/bash\necho "CLANGXX: $@" >> /tmp/clangxx_link.log\nexec "%s" "$@"\n' "$BREW_CLANGXX" > "$WRAPPER"
           chmod +x "$WRAPPER"
 
           make clean
@@ -105,7 +98,7 @@ WRAPEOF
             CXX="$WRAPPER" \
             2>&1 | tee build.log
           echo "=== LINK COMMAND ==="
-          grep "CLANGXX INVOKE" /tmp/clangxx_link.log 2>/dev/null | tail -3 || echo "not captured"
+          cat /tmp/clangxx_link.log 2>/dev/null | tail -3 || echo "not captured"
           echo "=== ERRORS ==="
           grep "error:" build.log | head -10 || true
           echo "=== packages/ ==="
