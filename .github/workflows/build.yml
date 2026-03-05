@@ -84,11 +84,7 @@ jobs:
 
           # ld wrapper — логирует полную команду линковщика
           mkdir -p $HOME/ld-wrapper
-          cat > $HOME/ld-wrapper/ld << 'LDWRAP'
-#!/bin/bash
-echo "LD: $@" >> /tmp/ld_args.log
-exec "$(xcrun -f ld)" "$@"
-LDWRAP
+          printf '#!/bin/bash\necho "LD: $@" >> /tmp/ld_args.log\nexec "$(xcrun -f ld)" "$@"\n' > $HOME/ld-wrapper/ld
           chmod +x $HOME/ld-wrapper/ld
           export PATH="$HOME/ld-wrapper:$PATH"
 
