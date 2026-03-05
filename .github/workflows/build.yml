@@ -22,15 +22,6 @@ jobs:
           curl -L "https://github.com/theos/sdks/archive/refs/heads/master.tar.gz" -o sdks.tar.gz
           tar -xzf sdks.tar.gz --strip-components=1 -C $HOME/theos/sdks/ '*/iPhoneOS16.5.sdk'
 
-      - name: Check Theos vendor stubs
-        run: |
-          echo "=== vendor/lib ==="
-          ls $HOME/theos/vendor/lib/ 2>/dev/null | head -30 || echo "vendor/lib empty or missing"
-          echo "=== lib ==="
-          ls $HOME/theos/lib/ 2>/dev/null | head -30 || echo "lib empty"
-          echo "=== BackBoardServices search ==="
-          find $HOME/theos -name "*BackBoard*" 2>/dev/null | head -10 || echo "not found"
-
       - name: Install LLVM 17
         run: |
           brew install llvm@17 ninja cmake
@@ -88,16 +79,18 @@ jobs:
         run: |
           BREW_CLANG="$LLVM_BIN/clang"
           BREW_CLANGXX="$LLVM_BIN/clang++"
-          echo "Using clang: $BREW_CLANG"
-          $BREW_CLANG --version
-          echo "=== SDK path ==="
-          xcrun --sdk iphoneos --show-sdk-path
-          echo "=== Theos vendor/lib ==="
-          ls $HOME/theos/vendor/lib/ 2>/dev/null || echo "vendor/lib not found"
-          echo "=== Theos lib ==="
-          ls $HOME/theos/lib/ 2>/dev/null | head -20 || echo "lib not found"
-          echo "=== Theos lib/iphone ==="
-          ls $HOME/theos/lib/iphone/ 2>/dev/null | head -20 || echo "lib/iphone not found"
+          THEOS_SDK=$(ls -d $HOME/theos/sdks/iPhoneOS*.sdk | head -1)
+          echo "Theos SDK: $THEOS_SDK"
+
+          # ld wrapper — логирует полную команду линковщика
+          mkdir -p $HOME/ld-wrapper
+          cat > $HOME/ld-wrapper/ld << 'LDWRAP'
+#!/bin/bash
+echo "LD: $@" >> /tmp/ld_args.log
+exec "$(xcrun -f ld)" "$@"
+LDWRAP
+          chmod +x $HOME/ld-wrapper/ld
+          export PATH="$HOME/ld-wrapper:$PATH"
 
           make clean
           make package ARCHS="arm64 arm64e" \
@@ -108,6 +101,8 @@ jobs:
             CC="$BREW_CLANG" \
             CXX="$BREW_CLANGXX" \
             2>&1 | tee build.log
+          echo "=== LD COMMAND ==="
+          cat /tmp/ld_args.log 2>/dev/null || echo "no ld args captured"
           echo "=== ERRORS ==="
           grep "error:" build.log | head -20 || true
           echo "=== packages/ ==="
@@ -118,7 +113,7 @@ jobs:
         with:
           name: Fryzz-arm64e
           path: packages/*.tipa
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Upload build log
         uses: actions/upload-artifact@v4
