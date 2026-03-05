@@ -54,14 +54,11 @@ TARGET := iphone:$(LLVM_BIN)/clang:16.5:14.0
 # brew clang не передаёт -isysroot линковщику автоматически.
 # Добавляем sysroot + пути к фреймворкам.
 # Приватные фреймворки (BackBoardServices и т.д.) берутся из Theos stubs.
-THEOS_SDK_PATH := $(shell xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)
 THEOS_IOS_SDK  := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
 ifneq ($(THEOS_IOS_SDK),)
+Fryzz_LDFLAGS += -isysroot $(THEOS_IOS_SDK)
 Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/Frameworks
 Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/PrivateFrameworks
-endif
-ifneq ($(THEOS_SDK_PATH),)
-Fryzz_LDFLAGS += -isysroot $(THEOS_SDK_PATH)
 endif
 else
 TARGET := iphone:clang:16.5:14.0
