@@ -82,23 +82,11 @@ jobs:
           THEOS_SDK=$(ls -d $HOME/theos/sdks/iPhoneOS*.sdk | head -1)
           echo "Theos SDK: $THEOS_SDK"
 
-          # Враппер вокруг clang++ — логирует команду линковщика
-          mkdir -p $HOME/clang-wrapper
-          WRAPPER="$HOME/clang-wrapper/clang++"
-          printf '#!/bin/bash\necho "CLANGXX: $@" >> /tmp/clangxx_link.log\nexec "%s" "$@"\n' "$BREW_CLANGXX" > "$WRAPPER"
-          chmod +x "$WRAPPER"
-
           make clean
           make package ARCHS="arm64 arm64e" \
             THEOS_PLATFORM_CC="$BREW_CLANG" \
-            THEOS_PLATFORM_CXX="$WRAPPER" \
-            TARGET_CC="$BREW_CLANG" \
-            TARGET_CXX="$WRAPPER" \
-            CC="$BREW_CLANG" \
-            CXX="$WRAPPER" \
+            THEOS_PLATFORM_CXX="$BREW_CLANGXX" \
             2>&1 | tee build.log
-          echo "=== LINK COMMAND ==="
-          cat /tmp/clangxx_link.log 2>/dev/null | tail -3 || echo "not captured"
           echo "=== ERRORS ==="
           grep "error:" build.log | head -10 || true
           echo "=== packages/ ==="
