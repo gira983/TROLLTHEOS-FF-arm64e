@@ -7,8 +7,7 @@ APPLICATION_NAME := Fryzz
 PACKAGE_NAME := xyris
 Fryzz_USE_MODULES := 0
 
-# HUDApp.mm исключён из Fryzz_FILES и компилируется в core/ subproject без Obscura
-# (Obscura вызывает segfault Apple clang 17 на этом файле)
+# HUDApp.mm в subproject без Obscura (слишком большой даже для brew LLVM с L2G)
 CORE_FILES := $(filter-out core/HUDApp.mm,$(wildcard core/*.mm core/*.m))
 Fryzz_FILES += $(CORE_FILES)
 Fryzz_FILES += $(wildcard esp/lib/*.mm) $(wildcard esp/lib/*.cpp)
@@ -16,12 +15,11 @@ Fryzz_FILES += $(wildcard esp/MenuView/*.cpp) $(wildcard esp/MenuView/*.mm)
 Fryzz_FILES += platform_stub.c
 platform_stub.c_CFLAGS = -fobjc-arc
 
-# Subproject core/ компилирует HUDApp.mm без Obscura и даёт libHUDAppLib.a
 SUBPROJECTS += core
 Fryzz_LIBRARIES += HUDAppLib
 
 # ════════════════════════════════════════════════════════════════════════
-# Obscura — только ENC_FULL, без ENC_FULL_TIMES/ENC_DEEP_INLINE
+# Obscura — требует brew LLVM, не работает с Apple clang 17
 # ════════════════════════════════════════════════════════════════════════
 ifdef OBSCURA_LIB
 OBSCURA_FLAGS := \
@@ -34,9 +32,15 @@ OBSCURA_FLAGS :=
 endif
 
 # ════════════════════════════════════════════════════════════════════════
-# Компилятор — системный clang (Xcode)
+# Компилятор: brew LLVM для компиляции (совместим с Obscura)
+# TARGET через LLVM_BIN если задан в env, иначе системный
 # ════════════════════════════════════════════════════════════════════════
+ifdef LLVM_BIN
+TARGET := iphone:$(LLVM_BIN)/clang:16.5:14.0
+else
 TARGET := iphone:clang:16.5:14.0
+endif
+
 THEOS_IOS_SDK := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
 ifneq ($(THEOS_IOS_SDK),)
 Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/Frameworks
