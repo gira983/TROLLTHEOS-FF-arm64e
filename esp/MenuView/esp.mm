@@ -61,6 +61,17 @@ static void espLog(NSString *msg) {
 #include <vector>
 #include <cmath>
 
+// Структура для передачи текстовых данных из bg-потока в main
+struct ESPTextEntry {
+    char text[48];
+    float x, y, w, h;
+    float fontSize;
+    float r, g, b, a;       // foreground color
+    float bgAlpha;           // 0 = нет фона
+    int   align;             // 0=left, 1=center
+};
+static const int kMaxESPText = 64; // максимум строк за кадр
+
 uint64_t Moudule_Base = -1;
 
 // Глобальный ключ для objc_associated object — один адрес для set и get
@@ -344,16 +355,20 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *skeletonContainer;
     float previewScale;
 
-    // ESP рендер — 3 CAShapeLayer + пул текстовых слоёв
-    // Используем paths вместо сотен CALayer — в 10x быстрее
-    CAShapeLayer *_boneLayer;    // скелет всех врагов (один path)
-    CAShapeLayer *_boxLayer;     // боксы всех врагов (один path)
-    CAShapeLayer *_lineLayer;    // ESP линии (один path)
-    CAShapeLayer *_fovLayer;     // FOV круг
-    CAShapeLayer *_hpBgLayer;    // HP полоски фон
-    CAShapeLayer *_hpFillLayer;  // HP полоски заполнение
-    NSMutableArray<CATextLayer *> *_textPool;  // пул текстовых слоёв
+    // ESP рендер — CAShapeLayer + текстовый пул
+    CAShapeLayer *_boneLayer;
+    CAShapeLayer *_boxLayer;
+    CAShapeLayer *_lineLayer;
+    CAShapeLayer *_fovLayer;
+    CAShapeLayer *_hpBgLayer;
+    CAShapeLayer *_hpFillLayer;
+    NSMutableArray<CATextLayer *> *_textPool;
     NSInteger _textPoolIndex;
+
+    // Background ESP compute queue — считаем paths не на main thread
+    dispatch_queue_t _espQueue;
+    // Atomic flag — не запускаем новый расчёт пока предыдущий не кончил
+    volatile BOOL _espBusy;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -363,6 +378,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         self.backgroundColor = [UIColor clearColor];
         self.drawingLayers = [NSMutableArray array];
         _textPool = [NSMutableArray array];
+        // Высокоприоритетная очередь для расчёта ESP путей
+        _espQueue = dispatch_queue_create("esp.render", DISPATCH_QUEUE_SERIAL);
+        dispatch_set_target_queue(_espQueue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
+        _espBusy = NO;
 
         // === Инициализация ESP слоёв — один раз на весь lifecycle ===
         // Кости: белые линии 1pt
@@ -1159,16 +1178,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
 - (void)updateFrame {
     if (!self.window) return;
-    static CFTimeInterval _lastESPTime = 0;
-    CFTimeInterval now = CACurrentMediaTime();
-    if (now - _lastESPTime < 0.05) return; // 20fps
-    _lastESPTime = now;
+    // Если предыдущий расчёт ещё не закончил — пропускаем кадр (нет очереди задач)
+    if (_espBusy) return;
+    _espBusy = YES;
 
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    [CATransaction setAnimationDuration:0];
-
-    // FOV круг
+    // FOV круг — быстро, на main thread
     if (isAimbot) {
         float cx = self.bounds.size.width / 2;
         float cy = self.bounds.size.height / 2;
@@ -1179,45 +1193,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         _fovLayer.hidden = YES;
     }
 
-    // Скрываем все текстовые слои — переиспользуем
-    for (CATextLayer *t in _textPool) t.hidden = YES;
-    _textPoolIndex = 0;
-
-    [self renderESP];
-
-    [CATransaction commit];
-}
-
-// Получить/создать текстовый слой из пула
-- (CATextLayer *)textLayer {
-    if (_textPoolIndex < (NSInteger)_textPool.count) {
-        CATextLayer *t = _textPool[_textPoolIndex++];
-        t.hidden = NO;
-        return t;
-    }
-    CATextLayer *t = [CATextLayer layer];
-    t.contentsScale = [UIScreen mainScreen].scale;
-    t.allowsFontSubpixelQuantization = YES;
-    [self.layer addSublayer:t];
-    [_textPool addObject:t];
-    _textPoolIndex++;
-    return t;
-}
-
-
-
-Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 myLoc) {
-    return Quaternion::LookRotation((targetLocation + Vector3(0, y_bias, 0)) - myLoc, Vector3(0, 1, 0));
-}
-
-void set_aim(uint64_t player, Quaternion rotation) {
-    if (!isVaildPtr(player)) return;
-    WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);
-}
-
-bool get_IsFiring(uint64_t player) {
-    if (!isVaildPtr(player)) return false;
-    return ReadAddr<bool>(player + OFF_FIRING);
+    // Весь тяжёлый расчёт — на background queue
+    // memory reads, WorldToScreen, CGPath построение — всё там
+    dispatch_async(_espQueue, ^{
+        [self renderESP];
+        _espBusy = NO;
+    });
 }
 
 - (void)renderESP {
@@ -1259,6 +1240,20 @@ bool get_IsFiring(uint64_t player) {
     uint64_t bestTarget = 0;
     float    bestScore  = FLT_MAX;
     bool     isFire     = get_IsFiring(myPawnObject);
+
+    // Массив текстовых записей — собираем на bg, применяем на main
+    ESPTextEntry textEntries[kMaxESPText];
+    int textCount = 0;
+    // Хелпер — добавить текстовую запись
+    auto addText = [&](const char *txt, float x, float y, float w, float h,
+                       float fs, float r, float g, float b, float a,
+                       float bgA, int align) {
+        if (textCount >= kMaxESPText) return;
+        ESPTextEntry &e = textEntries[textCount++];
+        strncpy(e.text, txt, 47); e.text[47] = 0;
+        e.x=x; e.y=y; e.w=w; e.h=h; e.fontSize=fs;
+        e.r=r; e.g=g; e.b=b; e.a=a; e.bgAlpha=bgA; e.align=align;
+    };
 
     for (int i = 0; i < coutValue; i++) {
         uint64_t PawnObject = ReadAddr<uint64_t>(tValue + OFF_PLAYERLIST_ITEM + 8 * i);
@@ -1359,16 +1354,12 @@ bool get_IsFiring(uint64_t player) {
                 float fillH = boxH * ratio;
                 CGPathAddRect(hpFillPath, nil, CGRectMake(bX, bY + boxH - fillH, bW, fillH));
 
-                // Текст HP/MaxHP — из пула
-                CATextLayer *hpTxt = [self textLayer];
-                hpTxt.string = [NSString stringWithFormat:@"%d/%d", CurHP, MaxHP];
-                hpTxt.fontSize = 7.0f;
-                hpTxt.alignmentMode = kCAAlignmentLeft;
-                // Цвет по ratio
-                if      (ratio > 0.6f) hpTxt.foregroundColor = [UIColor colorWithRed:0.15 green:0.9 blue:0.35 alpha:1.0].CGColor;
-                else if (ratio > 0.3f) hpTxt.foregroundColor = [UIColor colorWithRed:1.0 green:0.75 blue:0.0 alpha:1.0].CGColor;
-                else                   hpTxt.foregroundColor = [UIColor colorWithRed:1.0 green:0.2  blue:0.2 alpha:1.0].CGColor;
-                hpTxt.frame = CGRectMake(bX, bY - 9.0f, 40.0f, 9.0f);
+                // HP текст — в массив, применим на main thread
+                char hpBuf[24]; snprintf(hpBuf, sizeof(hpBuf), "%d/%d", CurHP, MaxHP);
+                float hr = (ratio > 0.6f) ? 0.15f : 1.0f;
+                float hg = (ratio > 0.6f) ? 0.9f  : (ratio > 0.3f ? 0.75f : 0.2f);
+                float hb = (ratio > 0.6f) ? 0.35f : (ratio > 0.3f ? 0.0f  : 0.2f);
+                addText(hpBuf, bX, bY - 9.0f, 40.0f, 9.0f, 7.0f, hr, hg, hb, 1.0f, 0.0f, 0);
             }
         }
 
@@ -1380,25 +1371,16 @@ bool get_IsFiring(uint64_t player) {
             float nY = by - 12.0f;
             if (isHealth) nY -= 10.0f;
 
-            CATextLayer *nl = [self textLayer];
-            nl.string = name;
-            nl.fontSize = 9.0f;
-            nl.alignmentMode = kCAAlignmentCenter;
-            nl.foregroundColor = [UIColor whiteColor].CGColor;
-            nl.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.45].CGColor;
-            nl.cornerRadius = 2.0f;
-            nl.frame = CGRectMake(bx + (boxW - nW)*0.5f, nY, nW, 11.0f);
+            // Имя — в массив
+            char nameBuf[48]; strncpy(nameBuf, [name UTF8String] ?: "?", 47); nameBuf[47]=0;
+            addText(nameBuf, bx + (boxW - nW)*0.5f, nY, nW, 11.0f, 9.0f, 0.95f, 0.95f, 0.95f, 1.0f, 0.45f, 1);
         }
 
         // === DISTANCE ===
         if (isDis) {
-            CATextLayer *dl = [self textLayer];
-            dl.string = [NSString stringWithFormat:@"%.0fm", dis];
-            dl.fontSize = 8.0f;
-            dl.alignmentMode = kCAAlignmentCenter;
-            dl.foregroundColor = [UIColor colorWithWhite:0.8 alpha:0.85].CGColor;
-            dl.backgroundColor = nil;
-            dl.frame = CGRectMake(bx, by + boxH + 2.0f, boxW, 10.0f);
+            // Дистанция — в массив
+            char disBuf[16]; snprintf(disBuf, sizeof(disBuf), "%.0fm", dis);
+            addText(disBuf, bx, by + boxH + 2.0f, boxW, 10.0f, 8.0f, 0.8f, 0.8f, 0.8f, 0.85f, 0.0f, 1);
         }
 
         // === ESP LINE ===
@@ -1415,20 +1397,7 @@ bool get_IsFiring(uint64_t player) {
         }
     }
 
-    // Применяем paths к слоям
-    _boneLayer.path    = isBone   ? bonePath   : nil;
-    _boxLayer.path     = isBox    ? boxPath    : nil;
-        _hpBgLayer.path   = isHealth ? hpBgPath   : nil;
-    _hpFillLayer.path  = isHealth ? hpFillPath : nil;
-    _lineLayer.path    = isLine   ? linePath   : nil;
-
-    CGPathRelease(bonePath);
-    CGPathRelease(boxPath);
-    CGPathRelease(hpBgPath);
-    CGPathRelease(hpFillPath);
-    CGPathRelease(linePath);
-
-    // Aimbot
+    // Aimbot — пишем в память сразу (не UI)
     bool shouldAim = (aimTrigger == 0) || (aimTrigger == 1 && isFire);
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
@@ -1437,6 +1406,53 @@ bool get_IsFiring(uint64_t player) {
         else                     ap = getPositionExt(getHip(bestTarget));
         set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLocation));
     }
-}
 
+    // Копируем текстовые данные для передачи в блок (стек освободится после возврата)
+    BOOL b_bone = isBone, b_box = isBox, b_hp = isHealth, b_line = isLine;
+    int  tCount = textCount;
+    ESPTextEntry *tCopy = nullptr;
+    if (tCount > 0) {
+        tCopy = (ESPTextEntry *)malloc(sizeof(ESPTextEntry) * tCount);
+        memcpy(tCopy, textEntries, sizeof(ESPTextEntry) * tCount);
+    }
+
+    // На main thread — только UI обновления
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        [CATransaction setAnimationDuration:0];
+
+        // Shapes
+        _boneLayer.path   = b_bone ? bonePath  : nil;
+        _boxLayer.path    = b_box  ? boxPath   : nil;
+        _hpBgLayer.path   = b_hp   ? hpBgPath  : nil;
+        _hpFillLayer.path = b_hp   ? hpFillPath: nil;
+        _lineLayer.path   = b_line ? linePath  : nil;
+
+        // Текст — скрываем лишние слои, обновляем нужные
+        for (CATextLayer *t in _textPool) t.hidden = YES;
+        _textPoolIndex = 0;
+        for (int ti = 0; ti < tCount; ti++) {
+            const ESPTextEntry &e = tCopy[ti];
+            CATextLayer *tl = [self textLayer];
+            tl.string = [NSString stringWithUTF8String:e.text];
+            tl.fontSize = e.fontSize;
+            tl.frame = CGRectMake(e.x, e.y, e.w, e.h);
+            tl.foregroundColor = [UIColor colorWithRed:e.r green:e.g blue:e.b alpha:e.a].CGColor;
+            tl.backgroundColor = (e.bgAlpha > 0.01f)
+                ? [UIColor colorWithWhite:0.0 alpha:e.bgAlpha].CGColor : nil;
+            tl.alignmentMode = (e.align == 1) ? kCAAlignmentCenter : kCAAlignmentLeft;
+            tl.cornerRadius  = (e.bgAlpha > 0.01f) ? 2.0f : 0.0f;
+            tl.hidden = NO;
+        }
+        if (tCopy) free(tCopy);
+
+        [CATransaction commit];
+        CGPathRelease(bonePath);
+        CGPathRelease(boxPath);
+        CGPathRelease(hpBgPath);
+        CGPathRelease(hpFillPath);
+        CGPathRelease(linePath);
+    });
+}
 @end
