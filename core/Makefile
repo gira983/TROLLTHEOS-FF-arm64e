@@ -1,5 +1,13 @@
-# Все core файлы компилируются БЕЗ Obscura — Apple clang 17 крашит с плагином на этих файлах
+# core/ subproject — БЕЗ Obscura, но тоже использует brew LLVM через .llvm_bin
 include $(THEOS)/makefiles/common.mk
+
+LLVM_BIN_FILE := $(CURDIR)/../.llvm_bin
+ifneq ($(wildcard $(LLVM_BIN_FILE)),)
+  LLVM_BIN_PATH := $(shell cat $(LLVM_BIN_FILE))
+  TARGET := iphone:$(LLVM_BIN_PATH)/clang:16.5:14.0
+else
+  TARGET := iphone:clang:16.5:14.0
+endif
 
 LIBRARY_NAME = CoreLib
 CoreLib_FILES = $(wildcard *.mm *.m)
