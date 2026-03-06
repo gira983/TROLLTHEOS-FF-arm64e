@@ -45,7 +45,7 @@ jobs:
       - name: Verify Obscura
         run: |
           echo "int x = 0x1337;" > /tmp/t.c
-          xcrun clang -fpass-plugin="$OBSCURA_LIB" -DENC_FULL -DENC_DEEP_INLINE -DL2G_ENABLE \
+          xcrun clang -fpass-plugin="$OBSCURA_LIB" -DENC_FULL \
             -I"$OBSCURA_INCLUDE" -include "$OBSCURA_INCLUDE/config.h" \
             -target arm64-apple-ios14.0 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
             -c /tmp/t.c -o /tmp/t_o.o && echo "Obscura: OK" || echo "Obscura: FAIL"
