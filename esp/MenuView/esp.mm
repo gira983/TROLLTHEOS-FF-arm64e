@@ -1201,6 +1201,36 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     });
 }
 
+Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 myLoc) {
+    return Quaternion::LookRotation((targetLocation + Vector3(0, y_bias, 0)) - myLoc, Vector3(0, 1, 0));
+}
+
+void set_aim(uint64_t player, Quaternion rotation) {
+    if (!isVaildPtr(player)) return;
+    WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);
+}
+
+bool get_IsFiring(uint64_t player) {
+    if (!isVaildPtr(player)) return false;
+    return ReadAddr<bool>(player + OFF_FIRING);
+}
+
+// Pool текстовых слоёв — берёт существующий или создаёт новый
+- (CATextLayer *)textLayer {
+    if (_textPoolIndex < (NSInteger)_textPool.count) {
+        CATextLayer *t = _textPool[_textPoolIndex++];
+        t.hidden = NO;
+        return t;
+    }
+    CATextLayer *t = [CATextLayer layer];
+    t.contentsScale = [UIScreen mainScreen].scale;
+    t.allowsFontSubpixelQuantization = YES;
+    [self.layer addSublayer:t];
+    [_textPool addObject:t];
+    _textPoolIndex++;
+    return t;
+}
+
 - (void)renderESP {
     if (Moudule_Base == -1) {
         _boneLayer.path = nil; _boxLayer.path = nil;
