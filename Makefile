@@ -1,98 +1,72 @@
-name: Build Xyris arm64e
-on:
-  push:
-    branches: [ main, master ]
-  workflow_dispatch:
+# TARGET ДО include common.mk — обязательно для Theos
+# Путь к brew clang передаётся через переменную BREW_CLANG из командной строки make
+ifdef BREW_CLANG
+TARGET := iphone:$(BREW_CLANG):16.5:14.0
+else
+TARGET := iphone:clang:16.5:14.0
+endif
 
-jobs:
-  build:
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+ARCHS := arm64 arm64e
+INSTALL_TARGET_PROCESSES := Fryzz
+include $(THEOS)/makefiles/common.mk
 
-      - name: Install Theos
-        run: |
-          brew install ldid xz
-          git clone --recursive https://github.com/theos/theos.git $HOME/theos
-          echo "THEOS=$HOME/theos" >> $GITHUB_ENV
+IS_NEW_ABI := 1
+APPLICATION_NAME := Fryzz
+PACKAGE_NAME := xyris
+Fryzz_USE_MODULES := 0
 
-      - name: Download iOS SDK
-        run: |
-          curl -L "https://github.com/theos/sdks/archive/refs/heads/master.tar.gz" -o sdks.tar.gz
-          tar -xzf sdks.tar.gz --strip-components=1 -C $HOME/theos/sdks/ '*/iPhoneOS16.5.sdk'
+SUBPROJECTS += core
+Fryzz_LIBRARIES += CoreLib
 
-      - name: Install LLVM 17
-        run: |
-          brew install llvm@17
-          LLVM_PREFIX=$(brew --prefix llvm@17)
-          echo "LLVM_BIN=$LLVM_PREFIX/bin" >> $GITHUB_ENV
-          # Записываем путь в файл — Makefile читает его через $(shell cat .llvm_bin)
-          # Это единственный способ передать абсолютный путь в TARGET надёжно
-          echo -n "$LLVM_PREFIX/bin" > .llvm_bin
-          echo "Written .llvm_bin: $(cat .llvm_bin)"
+Fryzz_FILES += $(wildcard esp/lib/*.mm) $(wildcard esp/lib/*.cpp)
+Fryzz_FILES += $(wildcard esp/MenuView/*.cpp) $(wildcard esp/MenuView/*.mm)
+Fryzz_FILES += platform_stub.c
+platform_stub.c_CFLAGS = -fobjc-arc
 
-      - name: Install Obscura
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "=== Available Obscura assets ==="
-          gh release view v1.0.0 --repo nkhmelni/Obscura --json assets -q '.assets[].name'
-          XCODE_MAJOR=$(xcodebuild -version | head -1 | awk '{print $2}' | cut -d. -f1)
-          if [ "$XCODE_MAJOR" -ge 16 ]; then
-            LLVM_VER="17.0.6"
-          else
-            LLVM_VER="16.0.0"
-          fi
-          echo "Xcode $XCODE_MAJOR -> Obscura LLVM $LLVM_VER"
-          mkdir -p $HOME/obscura && cd $HOME/obscura
-          gh release download v1.0.0 --repo nkhmelni/Obscura --pattern "*llvm${LLVM_VER}*universal*"
-          tar -xf *.tar.*
-          ls -la lib/ include/
-          echo "OBSCURA_LIB=$(pwd)/lib/libObscura.dylib" >> $GITHUB_ENV
-          echo "OBSCURA_INCLUDE=$(pwd)/include" >> $GITHUB_ENV
+ifdef OBSCURA_LIB
+OBSCURA_FLAGS := \
+  -fpass-plugin=$(OBSCURA_LIB)          \
+  -DENC_FULL                            \
+  -I$(OBSCURA_INCLUDE)                  \
+  -include $(OBSCURA_INCLUDE)/config.h
+else
+OBSCURA_FLAGS :=
+endif
 
-      - name: Verify compiler and Obscura
-        run: |
-          echo "=== .llvm_bin ===" && cat .llvm_bin
-          BREW_CLANG="$(cat .llvm_bin)/clang"
-          echo "=== brew clang ===" && $BREW_CLANG --version | head -1
-          echo "int x = 0x1337;" > /tmp/t.c
-          $BREW_CLANG -fpass-plugin="$OBSCURA_LIB" -DENC_FULL \
-            -I"$OBSCURA_INCLUDE" -include "$OBSCURA_INCLUDE/config.h" \
-            -target arm64-apple-ios14.0 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
-            -c /tmp/t.c -o /tmp/t_o.o && echo "Obscura: OK" || echo "Obscura: FAIL"
+THEOS_IOS_SDK := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
+ifneq ($(THEOS_IOS_SDK),)
+Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/Frameworks
+Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/PrivateFrameworks
+endif
 
-      - name: Build
-        run: |
-          THEOS_SDK=$(ls -d $HOME/theos/sdks/iPhoneOS*.sdk | head -1)
-          echo "Theos SDK: $THEOS_SDK"
-          echo "TARGET clang: $(cat .llvm_bin)/clang"
+Fryzz_CFLAGS += -fobjc-arc                          \
+  -Wno-unused-function                               \
+  -Wno-deprecated-declarations                       \
+  -Wno-unused-variable                               \
+  -Wno-unused-value                                  \
+  -Wno-module-import-in-extern-c                     \
+  -Wno-unused-but-set-variable
+Fryzz_CFLAGS += -Iinclude
+Fryzz_CFLAGS += -include hud-prefix.pch
+Fryzz_CFLAGS += $(OBSCURA_FLAGS)
 
-          # SDKROOT = iOS SDK — линковщик берёт libobjc из iOS, не macOS
-          export SDKROOT="$THEOS_SDK"
+Fryzz_CCFLAGS += -std=c++14
+Fryzz_CCFLAGS += -DNOTIFY_LAUNCHED_HUD=\"ch.xxtou.notification.hud.launched\"
+Fryzz_CCFLAGS += -DNOTIFY_DISMISSAL_HUD=\"ch.xxtou.notification.hud.dismissal\"
+Fryzz_CCFLAGS += -DNOTIFY_RELOAD_HUD=\"ch.xxtou.notification.hud.reload\"
+Fryzz_CCFLAGS += -DNOTIFY_RELOAD_APP=\"ch.xxtou.notification.app.reload\"
 
-          BREW_CLANG="$LLVM_BIN/clang"
-          echo "BREW_CLANG: $BREW_CLANG"
+Fryzz_FRAMEWORKS         += CoreGraphics QuartzCore UIKit Foundation
+Fryzz_PRIVATE_FRAMEWORKS += GraphicsServices IOKit SpringBoardServices
+Fryzz_CODESIGN_FLAGS     += -Sent.plist
 
-          make clean BREW_CLANG="$BREW_CLANG"
-          make package ARCHS="arm64 arm64e" BREW_CLANG="$BREW_CLANG" \
-            2>&1 | tee build.log
-          echo "=== ERRORS ==="
-          grep "error:" build.log | head -20 || true
-          echo "=== packages/ ==="
-          ls -la packages/ || echo "packages/ not found"
+include $(THEOS_MAKE_PATH)/application.mk
+include $(THEOS_MAKE_PATH)/aggregate.mk
 
-      - name: Upload tipa
-        uses: actions/upload-artifact@v4
-        with:
-          name: Fryzz-arm64e
-          path: packages/*.tipa
-          if-no-files-found: warn
-
-      - name: Upload build log
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: build-log
-          path: build.log
+after-package::
+	@rm -rf packages Payload
+	@mkdir -p Payload packages
+	@cp -rp $(THEOS_STAGING_DIR)/Applications/$(APPLICATION_NAME).app Payload
+	@cd . && zip -qr $(APPLICATION_NAME).tipa Payload
+	@mv $(APPLICATION_NAME).tipa packages/$(APPLICATION_NAME).tipa
+	@rm -rf Payload
