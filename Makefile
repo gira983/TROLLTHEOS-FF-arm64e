@@ -1,3 +1,12 @@
+# TARGET должен быть установлен ДО include common.mk — иначе Theos его игнорирует
+LLVM_BIN_FILE := $(CURDIR)/.llvm_bin
+ifneq ($(wildcard $(LLVM_BIN_FILE)),)
+  LLVM_BIN_PATH := $(shell cat $(LLVM_BIN_FILE))
+  TARGET := iphone:$(LLVM_BIN_PATH)/clang:16.5:14.0
+else
+  TARGET := iphone:clang:16.5:14.0
+endif
+
 ARCHS := arm64 arm64e
 INSTALL_TARGET_PROCESSES := Fryzz
 include $(THEOS)/makefiles/common.mk
@@ -27,18 +36,6 @@ OBSCURA_FLAGS := \
   -include $(OBSCURA_INCLUDE)/config.h
 else
 OBSCURA_FLAGS :=
-endif
-
-# ════════════════════════════════════════════════════════════════════════
-# TARGET — читаем путь к brew clang из файла .llvm_bin (записывается в build.yml)
-# Это единственный способ передать абсолютный путь в Theos TARGET
-# ════════════════════════════════════════════════════════════════════════
-LLVM_BIN_FILE := $(CURDIR)/.llvm_bin
-ifneq ($(wildcard $(LLVM_BIN_FILE)),)
-  LLVM_BIN_PATH := $(shell cat $(LLVM_BIN_FILE))
-  TARGET := iphone:$(LLVM_BIN_PATH)/clang:16.5:14.0
-else
-  TARGET := iphone:clang:16.5:14.0
 endif
 
 THEOS_IOS_SDK := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
