@@ -1,10 +1,7 @@
-# TARGET ДО include common.mk
-LLVM_BIN_FILE := $(CURDIR)/../.llvm_bin
-ifneq ($(wildcard $(LLVM_BIN_FILE)),)
-  LLVM_BIN_PATH := $(shell cat $(LLVM_BIN_FILE))
-  TARGET := iphone:$(LLVM_BIN_PATH)/clang:16.5:14.0
+ifdef BREW_CLANG
+TARGET := iphone:$(BREW_CLANG):16.5:14.0
 else
-  TARGET := iphone:clang:16.5:14.0
+TARGET := iphone:clang:16.5:14.0
 endif
 
 include $(THEOS)/makefiles/common.mk
