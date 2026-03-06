@@ -429,10 +429,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
         [self SetUpBase];
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
+        // 30fps для ESP: плавно и не жрёт FPS игры
+        // _espBusy гарантирует что тяжёлый кадр не накапливается
         if (@available(iOS 15.0, *)) {
-            self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(15, 20, 20);
+            self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(24, 30, 30);
         } else {
-            self.displayLink.preferredFramesPerSecond = 20;
+            self.displayLink.preferredFramesPerSecond = 30;
         }
         [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 
@@ -1232,15 +1234,20 @@ bool get_IsFiring(uint64_t player) {
 }
 
 - (void)renderESP {
-    if (Moudule_Base == -1) {
-        _boneLayer.path = nil; _boxLayer.path = nil;
-        _hpBgLayer.path = nil; _hpFillLayer.path = nil; _lineLayer.path = nil;
-        return;
-    }
+    if (Moudule_Base == -1) return;
 
     uint64_t matchGame = getMatchGame(Moudule_Base);
     uint64_t camera    = CameraMain(matchGame);
-    if (!isVaildPtr(camera)) { _boneLayer.path = nil; _boxLayer.path = nil; return; }
+    if (!isVaildPtr(camera)) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [CATransaction begin]; [CATransaction setDisableActions:YES];
+            _boneLayer.path=nil; _boxLayer.path=nil;
+            _hpBgLayer.path=nil; _hpFillLayer.path=nil; _lineLayer.path=nil;
+            for (CATextLayer *t in _textPool) t.hidden = YES;
+            [CATransaction commit];
+        });
+        return;
+    }
 
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
@@ -1248,36 +1255,32 @@ bool get_IsFiring(uint64_t player) {
     uint64_t myPawnObject = getLocalPlayer(match);
     if (!isVaildPtr(myPawnObject)) return;
 
-    uint64_t mainCameraTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
-    Vector3 myLocation = getPositionExt(mainCameraTransform);
+    uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
+    Vector3 myLoc = getPositionExt(camTransform);
 
-    uint64_t player  = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
-    uint64_t tValue  = ReadAddr<uint64_t>(player + OFF_PLAYERLIST_ARR);
-    int coutValue    = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
+    uint64_t playerList = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
+    uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
+    int      totalCount = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
+    // Защита от мусорного значения
+    if (totalCount <= 0 || totalCount > 64) totalCount = 64;
 
-    float *matrix   = GetViewMatrix(camera);
-    float vW        = self.bounds.size.width;
-    float vH        = self.bounds.size.height;
-    CGPoint center  = CGPointMake(vW/2, vH/2);
+    float *matrix = GetViewMatrix(camera);
+    float vW = self.bounds.size.width;
+    float vH = self.bounds.size.height;
+    CGPoint center = CGPointMake(vW * 0.5f, vH * 0.5f);
 
-    // Один path на все примитивы одного типа
-    CGMutablePathRef bonePath  = CGPathCreateMutable();
-    CGMutablePathRef boxPath   = CGPathCreateMutable();
-    CGMutablePathRef hpBgPath  = CGPathCreateMutable();
-    CGMutablePathRef hpFillPath= CGPathCreateMutable();
-    CGMutablePathRef linePath  = CGPathCreateMutable();
+    // Paths — создаём один раз, пишем всех врагов
+    CGMutablePathRef bonePath   = CGPathCreateMutable();
+    CGMutablePathRef boxPath    = CGPathCreateMutable();
+    CGMutablePathRef hpBgPath   = CGPathCreateMutable();
+    CGMutablePathRef hpFillPath = CGPathCreateMutable();
+    CGMutablePathRef linePath   = CGPathCreateMutable();
 
-    uint64_t bestTarget = 0;
-    float    bestScore  = FLT_MAX;
-    bool     isFire     = get_IsFiring(myPawnObject);
-
-    // Массив текстовых записей — собираем на bg, применяем на main
+    // Текстовые записи
     ESPTextEntry textEntries[kMaxESPText];
     int textCount = 0;
-    // Хелпер — добавить текстовую запись
     auto addText = [&](const char *txt, float x, float y, float w, float h,
-                       float fs, float r, float g, float b, float a,
-                       float bgA, int align) {
+                       float fs, float r, float g, float b, float a, float bgA, int align) {
         if (textCount >= kMaxESPText) return;
         ESPTextEntry &e = textEntries[textCount++];
         strncpy(e.text, txt, 47); e.text[47] = 0;
@@ -1285,7 +1288,11 @@ bool get_IsFiring(uint64_t player) {
         e.r=r; e.g=g; e.b=b; e.a=a; e.bgAlpha=bgA; e.align=align;
     };
 
-    for (int i = 0; i < coutValue; i++) {
+    uint64_t bestTarget = 0;
+    float    bestScore  = FLT_MAX;
+    bool     isFire     = get_IsFiring(myPawnObject);
+
+    for (int i = 0; i < totalCount; i++) {
         uint64_t PawnObject = ReadAddr<uint64_t>(tValue + OFF_PLAYERLIST_ITEM + 8 * i);
         if (!isVaildPtr(PawnObject)) continue;
         if (isLocalTeamMate(myPawnObject, PawnObject)) continue;
@@ -1293,11 +1300,16 @@ bool get_IsFiring(uint64_t player) {
         int CurHP = get_CurHP(PawnObject);
         if (CurHP <= 0) continue;
 
-        Vector3 HeadPos = getPositionExt(getHead(PawnObject));
-        float dis = Vector3::Distance(myLocation, HeadPos);
-        if (dis > 400.0f) continue;
+        // Читаем голову — для дистанции и aimbot
+        uint64_t headNode = getHead(PawnObject);
+        if (!isVaildPtr(headNode)) continue;
+        Vector3 HeadPos = getPositionExt(headNode);
 
-        // Aimbot target selection
+        float dis = Vector3::Distance(myLoc, HeadPos);
+        // Убираем лишний cut-off — ESP работает до 600м
+        if (dis > 600.0f) continue;
+
+        // ── AIMBOT ──────────────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
             Vector3 ap = HeadPos;
             if (aimTarget == 1) ap = HeadPos + Vector3(0,-0.15f,0);
@@ -1311,155 +1323,172 @@ bool get_IsFiring(uint64_t player) {
             }
         }
 
-        if (dis > 220.0f) continue;
+        // ── Проецируем голову и ступни ───────────────────────────────
+        uint64_t toeNode = getRightToeNode(PawnObject);
+        if (!isVaildPtr(toeNode)) continue;
+        Vector3 ToePos  = getPositionExt(toeNode);
 
-        Vector3 RightToePos = getPositionExt(getRightToeNode(PawnObject));
-        Vector3 HipPos      = getPositionExt(getHip(PawnObject));
+        Vector3 HeadTop = HeadPos; HeadTop.y += 0.22f;
+        Vector3 s_HeadTop = WorldToScreen(HeadTop,  matrix, vW, vH);
+        Vector3 s_Toe     = WorldToScreen(ToePos,   matrix, vW, vH);
+        Vector3 s_Head    = WorldToScreen(HeadPos,  matrix, vW, vH);
 
-        Vector3 HeadTop = HeadPos; HeadTop.y += 0.2f;
-        Vector3 w2sHead = WorldToScreen(HeadTop,     matrix, vW, vH);
-        Vector3 w2sToe  = WorldToScreen(RightToePos, matrix, vW, vH);
-        Vector3 wHead   = WorldToScreen(HeadPos,     matrix, vW, vH);
-        Vector3 wHip    = WorldToScreen(HipPos,      matrix, vW, vH);
+        // Если голова за экраном — пропускаем
+        if (s_HeadTop.x < -200 || s_HeadTop.x > vW+200 ||
+            s_HeadTop.y < -200 || s_HeadTop.y > vH+200) continue;
 
-        float boxH = fabsf(w2sHead.y - w2sToe.y);
-        if (boxH < 8.0f) continue;
+        float boxH = fabsf(s_HeadTop.y - s_Toe.y);
+        if (boxH < 6.0f) continue;   // слишком маленький — за горизонтом
         float boxW = boxH * 0.45f;
-        float bx   = w2sHead.x - boxW * 0.5f;
-        float by   = w2sHead.y;
+        float bx   = s_HeadTop.x - boxW * 0.5f;
+        float by   = s_HeadTop.y;
 
-        // === SKELETON ===
-        if (isBone) {
-            Vector3 wLS = WorldToScreen(getPositionExt(getLeftShoulder(PawnObject)),  matrix, vW, vH);
-            Vector3 wRS = WorldToScreen(getPositionExt(getRightShoulder(PawnObject)), matrix, vW, vH);
-            Vector3 wLE = WorldToScreen(getPositionExt(getLeftElbow(PawnObject)),     matrix, vW, vH);
-            Vector3 wRE = WorldToScreen(getPositionExt(getRightElbow(PawnObject)),    matrix, vW, vH);
-            Vector3 wLH = WorldToScreen(getPositionExt(getLeftHand(PawnObject)),      matrix, vW, vH);
-            Vector3 wRH = WorldToScreen(getPositionExt(getRightHand(PawnObject)),     matrix, vW, vH);
-            Vector3 wLA = WorldToScreen(getPositionExt(getLeftAnkle(PawnObject)),     matrix, vW, vH);
-            Vector3 wRA = WorldToScreen(getPositionExt(getRightAnkle(PawnObject)),    matrix, vW, vH);
-            // Голова → таз
-            CGPathMoveToPoint(bonePath,nil,wHead.x,wHead.y);
-            CGPathAddLineToPoint(bonePath,nil,wHip.x,wHip.y);
+        // ── Цвет по дистанции ────────────────────────────────────────
+        // Красный=близко(<40), Жёлтый=средне(<100), Голубой=далеко
+        float acR, acG, acB;
+        if      (dis < 40.f)  { acR=1.f; acG=0.25f; acB=0.25f; }
+        else if (dis < 100.f) { acR=1.f; acG=0.85f; acB=0.f;   }
+        else                  { acR=0.3f;acG=0.9f;  acB=1.f;   }
+
+        // ── SKELETON (только ≤ 150м — дальше незаметно, но жрёт ресурсы) ──
+        if (isBone && dis <= 150.f) {
+            uint64_t hipNode = getHip(PawnObject);
+            Vector3 HipPos  = isVaildPtr(hipNode) ? getPositionExt(hipNode) : HeadPos;
+            Vector3 s_Hip   = WorldToScreen(HipPos,  matrix, vW, vH);
+
+            Vector3 s_LS = WorldToScreen(getPositionExt(getLeftShoulder(PawnObject)),  matrix, vW, vH);
+            Vector3 s_RS = WorldToScreen(getPositionExt(getRightShoulder(PawnObject)), matrix, vW, vH);
+            Vector3 s_LE = WorldToScreen(getPositionExt(getLeftElbow(PawnObject)),     matrix, vW, vH);
+            Vector3 s_RE = WorldToScreen(getPositionExt(getRightElbow(PawnObject)),    matrix, vW, vH);
+            Vector3 s_LH = WorldToScreen(getPositionExt(getLeftHand(PawnObject)),      matrix, vW, vH);
+            Vector3 s_RH = WorldToScreen(getPositionExt(getRightHand(PawnObject)),     matrix, vW, vH);
+            Vector3 s_LA = WorldToScreen(getPositionExt(getLeftAnkle(PawnObject)),     matrix, vW, vH);
+            Vector3 s_RA = WorldToScreen(getPositionExt(getRightAnkle(PawnObject)),    matrix, vW, vH);
+
+            // Голова→таз
+            CGPathMoveToPoint(bonePath,nil,s_Head.x,s_Head.y);
+            CGPathAddLineToPoint(bonePath,nil,s_Hip.x,s_Hip.y);
             // Плечи
-            CGPathMoveToPoint(bonePath,nil,wLS.x,wLS.y);
-            CGPathAddLineToPoint(bonePath,nil,wRS.x,wRS.y);
+            CGPathMoveToPoint(bonePath,nil,s_LS.x,s_LS.y);
+            CGPathAddLineToPoint(bonePath,nil,s_RS.x,s_RS.y);
             // Левая рука
-            CGPathMoveToPoint(bonePath,nil,wLS.x,wLS.y);
-            CGPathAddLineToPoint(bonePath,nil,wLE.x,wLE.y);
-            CGPathAddLineToPoint(bonePath,nil,wLH.x,wLH.y);
+            CGPathMoveToPoint(bonePath,nil,s_LS.x,s_LS.y);
+            CGPathAddLineToPoint(bonePath,nil,s_LE.x,s_LE.y);
+            CGPathAddLineToPoint(bonePath,nil,s_LH.x,s_LH.y);
             // Правая рука
-            CGPathMoveToPoint(bonePath,nil,wRS.x,wRS.y);
-            CGPathAddLineToPoint(bonePath,nil,wRE.x,wRE.y);
-            CGPathAddLineToPoint(bonePath,nil,wRH.x,wRH.y);
+            CGPathMoveToPoint(bonePath,nil,s_RS.x,s_RS.y);
+            CGPathAddLineToPoint(bonePath,nil,s_RE.x,s_RE.y);
+            CGPathAddLineToPoint(bonePath,nil,s_RH.x,s_RH.y);
             // Ноги
-            CGPathMoveToPoint(bonePath,nil,wHip.x,wHip.y);
-            CGPathAddLineToPoint(bonePath,nil,wLA.x,wLA.y);
-            CGPathMoveToPoint(bonePath,nil,wHip.x,wHip.y);
-            CGPathAddLineToPoint(bonePath,nil,wRA.x,wRA.y);
+            CGPathMoveToPoint(bonePath,nil,s_Hip.x,s_Hip.y);
+            CGPathAddLineToPoint(bonePath,nil,s_LA.x,s_LA.y);
+            CGPathMoveToPoint(bonePath,nil,s_Hip.x,s_Hip.y);
+            CGPathAddLineToPoint(bonePath,nil,s_RA.x,s_RA.y);
         }
 
-        // === BOX: corner brackets style ===
+        // ── BOX: corner brackets ─────────────────────────────────────
         if (isBox) {
             float cL = MIN(boxW, boxH) * 0.22f;
-            // Top-left
-            CGPathMoveToPoint(boxPath,nil,bx,by+cL); CGPathAddLineToPoint(boxPath,nil,bx,by); CGPathAddLineToPoint(boxPath,nil,bx+cL,by);
-            // Top-right
-            CGPathMoveToPoint(boxPath,nil,bx+boxW-cL,by); CGPathAddLineToPoint(boxPath,nil,bx+boxW,by); CGPathAddLineToPoint(boxPath,nil,bx+boxW,by+cL);
-            // Bot-left
-            CGPathMoveToPoint(boxPath,nil,bx,by+boxH-cL); CGPathAddLineToPoint(boxPath,nil,bx,by+boxH); CGPathAddLineToPoint(boxPath,nil,bx+cL,by+boxH);
-            // Bot-right
-            CGPathMoveToPoint(boxPath,nil,bx+boxW-cL,by+boxH); CGPathAddLineToPoint(boxPath,nil,bx+boxW,by+boxH); CGPathAddLineToPoint(boxPath,nil,bx+boxW,by+boxH-cL);
+            // TL
+            CGPathMoveToPoint(boxPath,nil,bx,by+cL);
+            CGPathAddLineToPoint(boxPath,nil,bx,by);
+            CGPathAddLineToPoint(boxPath,nil,bx+cL,by);
+            // TR
+            CGPathMoveToPoint(boxPath,nil,bx+boxW-cL,by);
+            CGPathAddLineToPoint(boxPath,nil,bx+boxW,by);
+            CGPathAddLineToPoint(boxPath,nil,bx+boxW,by+cL);
+            // BL
+            CGPathMoveToPoint(boxPath,nil,bx,by+boxH-cL);
+            CGPathAddLineToPoint(boxPath,nil,bx,by+boxH);
+            CGPathAddLineToPoint(boxPath,nil,bx+cL,by+boxH);
+            // BR
+            CGPathMoveToPoint(boxPath,nil,bx+boxW-cL,by+boxH);
+            CGPathAddLineToPoint(boxPath,nil,bx+boxW,by+boxH);
+            CGPathAddLineToPoint(boxPath,nil,bx+boxW,by+boxH-cL);
         }
 
-        // === HP BAR: вертикальная слева от бокса ===
+        // ── HP BAR ───────────────────────────────────────────────────
         if (isHealth) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
-                float ratio = fmaxf(0.0f, fminf(1.0f, (float)CurHP / MaxHP));
-                float bW = 3.0f, bX = bx - bW - 3.0f, bY = by;
-                // Фон
-                CGPathAddRect(hpBgPath, nil, CGRectMake(bX, bY, bW, boxH));
-                // Fill снизу вверх
+                float ratio  = fmaxf(0.f, fminf(1.f, (float)CurHP / MaxHP));
+                float hpBW   = 3.5f;
+                float hpBX   = bx - hpBW - 3.f;
+                float hpBY   = by;
+                CGPathAddRect(hpBgPath,   nil, CGRectMake(hpBX, hpBY, hpBW, boxH));
                 float fillH = boxH * ratio;
-                CGPathAddRect(hpFillPath, nil, CGRectMake(bX, bY + boxH - fillH, bW, fillH));
+                CGPathAddRect(hpFillPath, nil, CGRectMake(hpBX, hpBY+boxH-fillH, hpBW, fillH));
 
-                // HP текст — в массив, применим на main thread
-                char hpBuf[24]; snprintf(hpBuf, sizeof(hpBuf), "%d/%d", CurHP, MaxHP);
-                float hr = (ratio > 0.6f) ? 0.15f : 1.0f;
-                float hg = (ratio > 0.6f) ? 0.9f  : (ratio > 0.3f ? 0.75f : 0.2f);
-                float hb = (ratio > 0.6f) ? 0.35f : (ratio > 0.3f ? 0.0f  : 0.2f);
-                addText(hpBuf, bX, bY - 9.0f, 40.0f, 9.0f, 7.0f, hr, hg, hb, 1.0f, 0.0f, 0);
+                // HP текст
+                char hpBuf[24]; snprintf(hpBuf,sizeof(hpBuf),"%d/%d",CurHP,MaxHP);
+                float hr=(ratio>0.6f)?0.15f:1.f, hg=(ratio>0.6f)?0.9f:(ratio>0.3f?0.75f:0.2f), hb=(ratio>0.6f)?0.35f:(ratio>0.3f?0.f:0.2f);
+                addText(hpBuf, hpBX, hpBY-9.f, 42.f, 9.f, 7.f, hr,hg,hb,1.f, 0.f, 0);
             }
         }
 
-        // === NAME ===
+        // ── NAME ─────────────────────────────────────────────────────
         if (isName) {
             NSString *name = GetNickName(PawnObject);
-            if (!name || name.length == 0) name = @"?";
-            float nW = MAX(boxW, 60.0f);
-            float nY = by - 12.0f;
-            if (isHealth) nY -= 10.0f;
-
-            // Имя — в массив
-            char nameBuf[48]; strncpy(nameBuf, [name UTF8String] ?: "?", 47); nameBuf[47]=0;
-            addText(nameBuf, bx + (boxW - nW)*0.5f, nY, nW, 11.0f, 9.0f, 0.95f, 0.95f, 0.95f, 1.0f, 0.45f, 1);
+            const char *ns = (name && name.length) ? [name UTF8String] : "?";
+            float nW = MAX(boxW, 60.f);
+            float nY = by - 12.f - (isHealth ? 10.f : 0.f);
+            char nb[48]; strncpy(nb, ns, 47); nb[47]=0;
+            addText(nb, bx+(boxW-nW)*0.5f, nY, nW, 11.f, 9.f, 0.95f,0.95f,0.95f,1.f, 0.45f, 1);
         }
 
-        // === DISTANCE ===
+        // ── DISTANCE ─────────────────────────────────────────────────
         if (isDis) {
-            // Дистанция — в массив
-            char disBuf[16]; snprintf(disBuf, sizeof(disBuf), "%.0fm", dis);
-            addText(disBuf, bx, by + boxH + 2.0f, boxW, 10.0f, 8.0f, 0.8f, 0.8f, 0.8f, 0.85f, 0.0f, 1);
+            char db[16]; snprintf(db,sizeof(db),"%.0fm",dis);
+            addText(db, bx, by+boxH+2.f, boxW, 10.f, 8.f, acR,acG,acB,0.9f, 0.f, 1);
         }
 
-        // === ESP LINE ===
+        // ── ESP LINE ─────────────────────────────────────────────────
         if (isLine) {
-            CGPoint from, to;
-            if      (lineOrigin == 0) from = CGPointMake(vW*0.5f, 0);
-            else if (lineOrigin == 1) from = CGPointMake(vW*0.5f, vH*0.5f);
-            else                      from = CGPointMake(vW*0.5f, vH);
-            to = (lineOrigin == 2)
-                ? CGPointMake(bx+boxW*0.5f, by+boxH)
-                : CGPointMake(bx+boxW*0.5f, by);
+            CGPoint from = (lineOrigin==0) ? CGPointMake(vW*.5f,0)
+                         : (lineOrigin==1) ? CGPointMake(vW*.5f,vH*.5f)
+                                           : CGPointMake(vW*.5f,vH);
+            CGPoint to   = (lineOrigin==2) ? CGPointMake(bx+boxW*.5f,by+boxH)
+                                           : CGPointMake(bx+boxW*.5f,by);
             CGPathMoveToPoint(linePath,nil,from.x,from.y);
             CGPathAddLineToPoint(linePath,nil,to.x,to.y);
         }
-    }
+    } // end player loop
 
-    // Aimbot — пишем в память сразу (не UI)
-    bool shouldAim = (aimTrigger == 0) || (aimTrigger == 1 && isFire);
+    // ── Aimbot apply ─────────────────────────────────────────────────
+    bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
-        if      (aimTarget == 0) ap = getPositionExt(getHead(bestTarget));
-        else if (aimTarget == 1) ap = getPositionExt(getHead(bestTarget)) + Vector3(0,-0.15f,0);
-        else                     ap = getPositionExt(getHip(bestTarget));
-        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLocation));
+        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
+        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
+        else                   ap = getPositionExt(getHip(bestTarget));
+        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
     }
 
-    // Копируем текстовые данные для передачи в блок (стек освободится после возврата)
-    BOOL b_bone = isBone, b_box = isBox, b_hp = isHealth, b_line = isLine;
+    // ── Передаём на main thread ──────────────────────────────────────
+    BOOL b_bone=isBone, b_box=isBox, b_hp=isHealth, b_line=isLine;
     int  tCount = textCount;
     ESPTextEntry *tCopy = nullptr;
     if (tCount > 0) {
-        tCopy = (ESPTextEntry *)malloc(sizeof(ESPTextEntry) * tCount);
-        memcpy(tCopy, textEntries, sizeof(ESPTextEntry) * tCount);
+        tCopy = (ESPTextEntry *)malloc(sizeof(ESPTextEntry)*tCount);
+        memcpy(tCopy, textEntries, sizeof(ESPTextEntry)*tCount);
     }
 
-    // На main thread — только UI обновления
     dispatch_async(dispatch_get_main_queue(), ^{
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
         [CATransaction setAnimationDuration:0];
 
-        // Shapes
-        _boneLayer.path   = b_bone ? bonePath  : nil;
-        _boxLayer.path    = b_box  ? boxPath   : nil;
-        _hpBgLayer.path   = b_hp   ? hpBgPath  : nil;
-        _hpFillLayer.path = b_hp   ? hpFillPath: nil;
-        _lineLayer.path   = b_line ? linePath  : nil;
+        _boneLayer.path   = b_bone ? bonePath   : nil;
+        _boxLayer.path    = b_box  ? boxPath    : nil;
+        _hpBgLayer.path   = b_hp   ? hpBgPath   : nil;
+        _hpFillLayer.path = b_hp   ? hpFillPath : nil;
+        _lineLayer.path   = b_line ? linePath   : nil;
 
-        // Текст — скрываем лишние слои, обновляем нужные
+        // Обновляем box stroke color по первому врагу (упрощение — один цвет на кадр)
+        // Для per-player цвета нужен отдельный ShapeLayer на каждого — нецелесообразно
+        _boxLayer.strokeColor  = [UIColor colorWithRed:0.9 green:0.9 blue:0.9 alpha:0.9].CGColor;
+        _boneLayer.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.75].CGColor;
+
         for (CATextLayer *t in _textPool) t.hidden = YES;
         _textPoolIndex = 0;
         for (int ti = 0; ti < tCount; ti++) {
@@ -1469,11 +1498,10 @@ bool get_IsFiring(uint64_t player) {
             tl.fontSize = e.fontSize;
             tl.frame = CGRectMake(e.x, e.y, e.w, e.h);
             tl.foregroundColor = [UIColor colorWithRed:e.r green:e.g blue:e.b alpha:e.a].CGColor;
-            tl.backgroundColor = (e.bgAlpha > 0.01f)
+            tl.backgroundColor = (e.bgAlpha>0.01f)
                 ? [UIColor colorWithWhite:0.0 alpha:e.bgAlpha].CGColor : nil;
-            tl.alignmentMode = (e.align == 1) ? kCAAlignmentCenter : kCAAlignmentLeft;
-            tl.cornerRadius  = (e.bgAlpha > 0.01f) ? 2.0f : 0.0f;
-            tl.hidden = NO;
+            tl.alignmentMode = (e.align==1) ? kCAAlignmentCenter : kCAAlignmentLeft;
+            tl.cornerRadius  = (e.bgAlpha>0.01f) ? 2.0f : 0.0f;
         }
         if (tCopy) free(tCopy);
 
@@ -1485,4 +1513,5 @@ bool get_IsFiring(uint64_t player) {
         CGPathRelease(linePath);
     });
 }
+
 @end
