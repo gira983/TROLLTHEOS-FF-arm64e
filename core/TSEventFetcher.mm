@@ -116,6 +116,11 @@ static void __TSEventFetcherCallback(void *info)
   {
     if (touch.phase == UITouchPhaseBegan && phase == UITouchPhaseMoved)
       return deleted;
+    // Игнорируем дублирующий Ended — touch уже в фазе Ended/Cancelled
+    // Без этого UIControl получает двойной touchUpInside и переключается дважды
+    if ((phase == UITouchPhaseEnded || phase == UITouchPhaseCancelled) &&
+        (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled))
+      return deleted;
     [touch setLocationInWindow:coordinate];
   }
 
