@@ -63,11 +63,12 @@ jobs:
           echo "Theos SDK: $THEOS_SDK"
           echo "LLVM_BIN: $LLVM_BIN"
 
-          # SDKROOT форсирует Apple ld использовать iOS SDK при линковке (libobjc из iOS, не macOS)
+          # SDKROOT форсирует Apple ld использовать iOS SDK при линковке
           export SDKROOT="$THEOS_SDK"
 
           make clean
-          make package ARCHS="arm64 arm64e" \
+          # Явно передаём LLVM_BIN в make чтобы TARGET в Makefile подхватил brew clang
+          make package ARCHS="arm64 arm64e" LLVM_BIN="$LLVM_BIN" \
             2>&1 | tee build.log
           echo "=== ERRORS ==="
           grep "error:" build.log | head -10 || true
