@@ -134,6 +134,18 @@ static bool isStreamerMode = NO;   // Stream Proof
     if ([self pointInside:pt withEvent:event]) {
         _lastToggleTime = now;
         [self toggle];
+        // Явно вызываем селектор таргета, так как системные события могут не доходить
+        for (id target in self.allTargets) {
+            for (NSString *actionStr in [self actionsForTarget:target forControlEvent:UIControlEventValueChanged]) {
+                SEL selector = NSSelectorFromString(actionStr);
+                if ([target respondsToSelector:selector]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                    [target performSelector:selector withObject:self];
+#pragma clang diagnostic pop
+                }
+            }
+        }
     }
 }
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
