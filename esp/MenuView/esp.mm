@@ -350,6 +350,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         
         [self SetUpBase];
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
+        if (@available(iOS 15.0, *)) { self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(15, 20, 20); } else { self.displayLink.preferredFramesPerSecond = 20; }
         [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 
         [self setupFloatingButton];
@@ -362,7 +363,14 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
 
-    // Меню открыто — делегируем стандартный hitTest UIKit через menuContainer
+    // Когда меню закрыто — ТОЛЬКО floatingButton, всё в игру
+    if (!menuContainer || menuContainer.hidden) {
+        if (floatingButton && !floatingButton.hidden) {
+            CGPoint p = [self convertPoint:point toView:floatingButton];
+            if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
+        }
+        return nil;
+    }
     if (menuContainer && !menuContainer.hidden) {
         CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
         if ([menuContainer pointInside:pInMenu withEvent:event]) {
@@ -374,12 +382,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             if (hit) return hit;
             return menuContainer;
         }
-    }
-
-    // Кнопка M (floatingButton)
-    if (floatingButton && !floatingButton.hidden) {
-        CGPoint p = [self convertPoint:point toView:floatingButton];
-        if ([floatingButton pointInside:p withEvent:event]) return floatingButton;
     }
 
     return nil;
@@ -1120,7 +1122,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         [self.layer addSublayer:layer];
     }
     [CATransaction commit];
-    [self setNeedsDisplay];
 }
 
 - (void)dealloc {
@@ -1179,19 +1180,6 @@ bool get_IsFiring(uint64_t player) {
 
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
-
-    // HUD freeze fix: если матч сменился — сбрасываем все слои
-    if (match != _lastMatchPtr) {
-        _lastMatchPtr = match;
-        // Принудительно очищаем все CALayer (на случай если updateFrame не успел)
-        dispatch_async(dispatch_get_main_queue(), ^{
-            for (CALayer *layer in self.drawingLayers) {
-                [layer removeFromSuperlayer];
-            }
-            [self.drawingLayers removeAllObjects];
-        });
-        return; // Пропускаем этот фрейм — следующий будет чистым
-    }
 
     uint64_t myPawnObject = getLocalPlayer(match);
     if (!isVaildPtr(myPawnObject)) return;
@@ -1295,7 +1283,8 @@ bool get_IsFiring(uint64_t player) {
             DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wRA.x, wRA.y), boneColor, boneWidth);
         }
 
-        float boxHeight = abs(w2sHead.y - w2sToe.y);
+        float boxHeight = fabsf(w2sHead.y - w2sToe.y);
+        if (boxHeight < 5.0f) continue;
         float boxWidth  = boxHeight * 0.45f;
         float bx = w2sHead.x - boxWidth * 0.5f;
         float by = w2sHead.y;
@@ -1353,31 +1342,28 @@ bool get_IsFiring(uint64_t player) {
             [layers addObject:nl];
         }
 
-        // === HEALTH: вертикальная полоска слева от box, тонкая ===
+        // === HEALTH: горизонтально над никнеймом ===
         if (isHealth) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
                 float ratio = fmaxf(0.0f, fminf(1.0f, (float)CurHP / MaxHP));
-                float bW = 2.5f;
-                float bH = boxHeight;
-                float bX = bx - bW - 2.0f;
-                float bY = by;
-
+                float barW = MAX(boxWidth, 50.0f);
+                float barH = 3.0f;
+                float barX = bx + (boxWidth - barW) * 0.5f;
+                float barY = by - 11.0f - 3.0f - barH - 2.0f;
                 CALayer *bgH = [CALayer layer];
-                bgH.frame = CGRectMake(bX, bY, bW, bH);
-                bgH.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.5].CGColor;
-                bgH.cornerRadius = 1.0f;
+                bgH.frame = CGRectMake(barX, barY, barW, barH);
+                bgH.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.55].CGColor;
+                bgH.cornerRadius = 1.5f;
                 [layers addObject:bgH];
-
                 UIColor *hpCol;
                 if (ratio > 0.6f)      hpCol = [UIColor colorWithRed:0.15 green:0.9 blue:0.35 alpha:1.0];
                 else if (ratio > 0.3f) hpCol = [UIColor colorWithRed:1.0 green:0.75 blue:0.0 alpha:1.0];
                 else                   hpCol = [UIColor colorWithRed:1.0 green:0.2 blue:0.2 alpha:1.0];
-
                 CALayer *fillH = [CALayer layer];
-                fillH.frame = CGRectMake(bX, bY + bH*(1.0f-ratio), bW, bH*ratio);
+                fillH.frame = CGRectMake(barX, barY, barW * ratio, barH);
                 fillH.backgroundColor = hpCol.CGColor;
-                fillH.cornerRadius = 1.0f;
+                fillH.cornerRadius = 1.5f;
                 [layers addObject:fillH];
             }
         }
@@ -1403,7 +1389,9 @@ bool get_IsFiring(uint64_t player) {
             else if (lineOrigin == 1) from = CGPointMake(sw*0.5f, sh*0.5f);     // Center
             else                      from = CGPointMake(sw*0.5f, sh);           // Bottom
 
-            CGPoint to = CGPointMake(bx + boxWidth*0.5f, by + boxHeight);        // к ногам врага
+            CGPoint to;
+            if (lineOrigin == 2) to = CGPointMake(bx + boxWidth*0.5f, by + boxHeight);
+            else                 to = CGPointMake(bx + boxWidth*0.5f, by);
             DrawBoneLine(layers, from, to, [accentColor colorWithAlphaComponent:0.5], 0.8f);
         }
     }
