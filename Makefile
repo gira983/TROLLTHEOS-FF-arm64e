@@ -12,8 +12,8 @@ Fryzz_FILES += $(wildcard esp/lib/*.mm) $(wildcard esp/lib/*.cpp)
 Fryzz_FILES += $(wildcard esp/MenuView/*.cpp) $(wildcard esp/MenuView/*.mm)
 
 # platform_stub.c — без плагинов, чистая компиляция
-Fryzz_FILES += platform_stub.c
 platform_stub.c_CFLAGS = -fobjc-arc
+Fryzz_FILES += platform_stub.c
 
 # ════════════════════════════════════════════════════════════════════════
 # Obscura флаги
@@ -35,26 +35,10 @@ OBSCURA_FLAGS :=
 endif
 
 # ════════════════════════════════════════════════════════════════════════
-# Hikari
+# Компилятор — системный clang (Xcode), совместим с Obscura
+# Hikari убран: несовместим с Apple clang 17 (Trace/BPT trap: 5)
 # ════════════════════════════════════════════════════════════════════════
-ifdef HIKARI_LIB
-HIKARI_FLAGS := -fpass-plugin=$(HIKARI_LIB)
-export OLLVM_POLICY := $(CURDIR)/policy.json
-else
-HIKARI_FLAGS :=
-endif
-
-# ════════════════════════════════════════════════════════════════════════
-# Компилятор
-# ════════════════════════════════════════════════════════════════════════
-# TARGET использует brew LLVM clang (совместим с Hikari/Obscura плагинами).
-# Линковка переопределяется через LD=системный clang в build.yml,
-# чтобы избежать CommandLineTools libobjc при линковке.
-ifdef LLVM_BIN
-TARGET := iphone:$(LLVM_BIN)/clang:16.5:14.0
-else
 TARGET := iphone:clang:16.5:14.0
-endif
 THEOS_IOS_SDK  := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
 ifneq ($(THEOS_IOS_SDK),)
 Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/Frameworks
@@ -74,11 +58,9 @@ Fryzz_CFLAGS += -fobjc-arc                          \
 Fryzz_CFLAGS += -Iinclude
 Fryzz_CFLAGS += -include hud-prefix.pch
 Fryzz_CFLAGS += $(OBSCURA_FLAGS)
-Fryzz_CFLAGS += $(HIKARI_FLAGS)
 
 # ════════════════════════════════════════════════════════════════════════
 # Per-file: HUDApp.mm получает L2G_ENABLE дополнительно
-# На этом файле L2G успешно отработал (33k промоций, 765s, без OOM)
 # ════════════════════════════════════════════════════════════════════════
 ifdef OBSCURA_LIB
 core/HUDApp.mm_CFLAGS = -DL2G_ENABLE
