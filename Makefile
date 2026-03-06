@@ -23,11 +23,11 @@ Fryzz_FILES += platform_stub.c
 # L2G на HUDMainApplication.mm убивает runner по OOM (Exit 137).
 # ════════════════════════════════════════════════════════════════════════
 ifdef OBSCURA_LIB
+# ENC_FULL_TIMES=2 и ENC_DEEP_INLINE убраны — вызывают segfault Apple clang 17
+# HUDApp.mm защищён #pragma clang optimize off в начале файла
 OBSCURA_FLAGS := \
   -fpass-plugin=$(OBSCURA_LIB)          \
   -DENC_FULL                            \
-  -DENC_FULL_TIMES=2                    \
-  -DENC_DEEP_INLINE                     \
   -I$(OBSCURA_INCLUDE)                  \
   -include $(OBSCURA_INCLUDE)/config.h
 else
