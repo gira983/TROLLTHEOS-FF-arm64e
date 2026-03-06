@@ -350,7 +350,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     CAShapeLayer *_boxLayer;     // боксы всех врагов (один path)
     CAShapeLayer *_lineLayer;    // ESP линии (один path)
     CAShapeLayer *_fovLayer;     // FOV круг
-    CALayer      *_hpBgLayer;    // HP полоски фон (один path через CALayer)
+    CAShapeLayer *_hpBgLayer;    // HP полоски фон
     CAShapeLayer *_hpFillLayer;  // HP полоски заполнение
     NSMutableArray<CATextLayer *> *_textPool;  // пул текстовых слоёв
     NSInteger _textPoolIndex;
@@ -383,8 +383,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
         // HP полоски фон (тёмный)
         _hpBgLayer = [CAShapeLayer layer];
-        ((CAShapeLayer*)_hpBgLayer).fillColor   = [UIColor colorWithWhite:0.1 alpha:0.6].CGColor;
-        ((CAShapeLayer*)_hpBgLayer).strokeColor = nil;
+        _hpBgLayer.fillColor   = [UIColor colorWithWhite:0.1 alpha:0.6].CGColor;
+        _hpBgLayer.strokeColor = nil;
         [self.layer addSublayer:_hpBgLayer];
 
         // HP полоски fill (цветные — но один цвет за кадр, зелёный по умолчанию)
@@ -1206,6 +1206,20 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
 
 
+Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 myLoc) {
+    return Quaternion::LookRotation((targetLocation + Vector3(0, y_bias, 0)) - myLoc, Vector3(0, 1, 0));
+}
+
+void set_aim(uint64_t player, Quaternion rotation) {
+    if (!isVaildPtr(player)) return;
+    WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);
+}
+
+bool get_IsFiring(uint64_t player) {
+    if (!isVaildPtr(player)) return false;
+    return ReadAddr<bool>(player + OFF_FIRING);
+}
+
 - (void)renderESP {
     if (Moudule_Base == -1) {
         _boneLayer.path = nil; _boxLayer.path = nil;
@@ -1404,7 +1418,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     // Применяем paths к слоям
     _boneLayer.path    = isBone   ? bonePath   : nil;
     _boxLayer.path     = isBox    ? boxPath    : nil;
-    ((CAShapeLayer*)_hpBgLayer).path   = isHealth ? hpBgPath   : nil;
+        _hpBgLayer.path   = isHealth ? hpBgPath   : nil;
     _hpFillLayer.path  = isHealth ? hpFillPath : nil;
     _lineLayer.path    = isLine   ? linePath   : nil;
 
