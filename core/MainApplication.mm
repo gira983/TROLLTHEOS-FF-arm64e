@@ -161,7 +161,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [self.backgroundView addSubview:appIconImageView];
 
     UILabel *appNameLabel = [[UILabel alloc] init];
-    appNameLabel.text = @"Xyris";
+    appNameLabel.text = @"Fryzzternal";
     appNameLabel.font = [UIFont fontWithName:@"HelveticaNeue" size:labelFontSize];
     appNameLabel.textColor = [UIColor whiteColor];
     appNameLabel.font = [UIFont boldSystemFontOfSize:labelFontSize];
@@ -177,47 +177,27 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [appNameLabel setTranslatesAutoresizingMaskIntoConstraints:NO];
     [appVersionLabel setTranslatesAutoresizingMaskIntoConstraints:NO];
 
-    UILayoutGuide *safeArea;
-    if (@available(iOS 11.0, *)) {
-        safeArea = self.backgroundView.safeAreaLayoutGuide;
-    }
+    UILayoutGuide *safeArea = self.backgroundView.safeAreaLayoutGuide;
 
-    if (@available(iOS 11.0, *)) {
-        [NSLayoutConstraint activateConstraints:@[
-            [appIconImageView.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:20.0f],
-            [appIconImageView.leadingAnchor constraintEqualToAnchor:self.backgroundView.leadingAnchor constant:20.0f],
-            [appIconImageView.widthAnchor constraintEqualToConstant:iconSize],
-            [appIconImageView.heightAnchor constraintEqualToConstant:iconSize],
+    [NSLayoutConstraint activateConstraints:@[
+        [appIconImageView.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:20.0f],
+        [appIconImageView.leadingAnchor constraintEqualToAnchor:self.backgroundView.leadingAnchor constant:20.0f],
+        [appIconImageView.widthAnchor constraintEqualToConstant:iconSize],
+        [appIconImageView.heightAnchor constraintEqualToConstant:iconSize],
 
-            [appNameLabel.centerYAnchor constraintEqualToAnchor:appIconImageView.centerYAnchor],
-            [appNameLabel.leadingAnchor constraintEqualToAnchor:appIconImageView.trailingAnchor constant:10.0f],
+        [appNameLabel.centerYAnchor constraintEqualToAnchor:appIconImageView.centerYAnchor],
+        [appNameLabel.leadingAnchor constraintEqualToAnchor:appIconImageView.trailingAnchor constant:10.0f],
 
-            [appVersionLabel.topAnchor constraintEqualToAnchor:appNameLabel.bottomAnchor constant:5.0f],
-            [appVersionLabel.leadingAnchor constraintEqualToAnchor:appNameLabel.leadingAnchor]
-        ]];
-    } else {
-        [NSLayoutConstraint activateConstraints:@[
-            [appIconImageView.topAnchor constraintEqualToAnchor:self.backgroundView.topAnchor constant:40.0f],
-            [appIconImageView.leadingAnchor constraintEqualToAnchor:self.backgroundView.leadingAnchor constant:20.0f],
-            [appIconImageView.widthAnchor constraintEqualToConstant:iconSize],
-            [appIconImageView.heightAnchor constraintEqualToConstant:iconSize],
-
-            [appNameLabel.centerYAnchor constraintEqualToAnchor:appIconImageView.centerYAnchor],
-            [appNameLabel.leadingAnchor constraintEqualToAnchor:appIconImageView.trailingAnchor constant:10.0f],
-
-            [appVersionLabel.topAnchor constraintEqualToAnchor:appNameLabel.bottomAnchor constant:5.0f],
-            [appVersionLabel.leadingAnchor constraintEqualToAnchor:appNameLabel.leadingAnchor]
-        ]];
-    }
+        [appVersionLabel.topAnchor constraintEqualToAnchor:appNameLabel.bottomAnchor constant:5.0f],
+        [appVersionLabel.leadingAnchor constraintEqualToAnchor:appNameLabel.leadingAnchor]
+    ]];
     
     
     
     _topLeftButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [_topLeftButton setTintColor:[UIColor whiteColor]];
     [_topLeftButton addTarget:self action:@selector(tapTopLeftButton:) forControlEvents:UIControlEventTouchUpInside];
-    if (@available(iOS 13.0, *)) {
-        [_topLeftButton setImage:[UIImage systemImageNamed:@"arrow.up.left"] forState:UIControlStateNormal];
-    }
+    [_topLeftButton setImage:[UIImage systemImageNamed:@"arrow.up.left"] forState:UIControlStateNormal];
     [_topLeftButton setAdjustsImageWhenHighlighted:NO];
     [self.backgroundView addSubview:_topLeftButton];
     if (@available(iOS 15.0, *))
@@ -227,18 +207,8 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
         [_topLeftButton setConfiguration:config];
     }
     [_topLeftButton setTranslatesAutoresizingMaskIntoConstraints:NO];
-    NSLayoutYAxisAnchor *topSafeAnchor;
-    NSLayoutYAxisAnchor *bottomSafeAnchor;
-    if (@available(iOS 11.0, *)) {
-        topSafeAnchor = safeArea.topAnchor;
-        bottomSafeAnchor = safeArea.bottomAnchor;
-    } else {
-        topSafeAnchor = self.backgroundView.topAnchor;
-        bottomSafeAnchor = self.backgroundView.bottomAnchor;
-    }
-
     [NSLayoutConstraint activateConstraints:@[
-        [_topLeftButton.topAnchor constraintEqualToAnchor:topSafeAnchor constant:(isPad ? 40.0f : 28.f)],
+        [_topLeftButton.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:(isPad ? 40.0f : 28.f)],
         [_topLeftButton.leadingAnchor constraintEqualToAnchor:self.backgroundView.leadingAnchor constant:20.0f],
         [_topLeftButton.widthAnchor constraintEqualToConstant:40.0f],
         [_topLeftButton.heightAnchor constraintEqualToConstant:40.0f],
@@ -247,9 +217,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     _topRightButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [_topRightButton setTintColor:[UIColor whiteColor]];
     [_topRightButton addTarget:self action:@selector(tapTopRightButton:) forControlEvents:UIControlEventTouchUpInside];
-    if (@available(iOS 13.0, *)) {
-        [_topRightButton setImage:[UIImage systemImageNamed:@"arrow.up.right"] forState:UIControlStateNormal];
-    }
+    [_topRightButton setImage:[UIImage systemImageNamed:@"arrow.up.right"] forState:UIControlStateNormal];
     [_topRightButton setAdjustsImageWhenHighlighted:NO];
     [self.backgroundView addSubview:_topRightButton];
     if (@available(iOS 15.0, *))
@@ -260,7 +228,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     }
     [_topRightButton setTranslatesAutoresizingMaskIntoConstraints:NO];
     [NSLayoutConstraint activateConstraints:@[
-        [_topRightButton.topAnchor constraintEqualToAnchor:topSafeAnchor constant:(isPad ? 40.0f : 28.f)],
+        [_topRightButton.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:(isPad ? 40.0f : 28.f)],
         [_topRightButton.trailingAnchor constraintEqualToAnchor:self.backgroundView.trailingAnchor constant:-20.0f],
         [_topRightButton.widthAnchor constraintEqualToConstant:40.0f],
         [_topRightButton.heightAnchor constraintEqualToConstant:40.0f],
@@ -269,9 +237,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     _topCenterButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [_topCenterButton setTintColor:[UIColor whiteColor]];
     [_topCenterButton addTarget:self action:@selector(tapTopCenterButton:) forControlEvents:UIControlEventTouchUpInside];
-    if (@available(iOS 13.0, *)) {
-        [_topCenterButton setImage:[UIImage systemImageNamed:@"arrow.up"] forState:UIControlStateNormal];
-    }
+    [_topCenterButton setImage:[UIImage systemImageNamed:@"arrow.up"] forState:UIControlStateNormal];
     [_topCenterButton setAdjustsImageWhenHighlighted:NO];
     [self.backgroundView addSubview:_topCenterButton];
     if (@available(iOS 15.0, *))
@@ -282,7 +248,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     }
     [_topCenterButton setTranslatesAutoresizingMaskIntoConstraints:NO];
     [NSLayoutConstraint activateConstraints:@[
-        [_topCenterButton.topAnchor constraintEqualToAnchor:topSafeAnchor constant:(isPad ? 40.0f : 28.f)],
+        [_topCenterButton.topAnchor constraintEqualToAnchor:safeArea.topAnchor constant:(isPad ? 40.0f : 28.f)],
         [_topCenterButton.centerXAnchor constraintEqualToAnchor:self.backgroundView.centerXAnchor],
         [_topCenterButton.widthAnchor constraintEqualToConstant:40.0f],
         [_topCenterButton.heightAnchor constraintEqualToConstant:40.0f],
@@ -319,9 +285,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     _settingsButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [_settingsButton setTintColor:[UIColor whiteColor]];
     [_settingsButton addTarget:self action:@selector(tapSettingsButton:) forControlEvents:UIControlEventTouchUpInside];
-    if (@available(iOS 13.0, *)) {
-        [_settingsButton setImage:[UIImage systemImageNamed:@"gear"] forState:UIControlStateNormal];
-    }
+    [_settingsButton setImage:[UIImage systemImageNamed:@"gear"] forState:UIControlStateNormal];
     [self.backgroundView addSubview:_settingsButton];
     if (@available(iOS 15.0, *))
     {
@@ -331,7 +295,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     }
     [_settingsButton setTranslatesAutoresizingMaskIntoConstraints:NO];
     [NSLayoutConstraint activateConstraints:@[
-        [_settingsButton.bottomAnchor constraintEqualToAnchor:bottomSafeAnchor constant:-20.0f],
+        [_settingsButton.bottomAnchor constraintEqualToAnchor:safeArea.bottomAnchor constant:-20.0f],
         [_settingsButton.centerXAnchor constraintEqualToAnchor:self.backgroundView.centerXAnchor],
         [_settingsButton.widthAnchor constraintEqualToConstant:40.0f],
         [_settingsButton.heightAnchor constraintEqualToConstant:40.0f],
@@ -367,11 +331,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
-    if (@available(iOS 11.0, *)) {
-        _supportsCenterMost = self.view.window.safeAreaLayoutGuide.layoutFrame.origin.y >= 51;
-    } else {
-        _supportsCenterMost = NO;
-    }
+    _supportsCenterMost = self.view.window.safeAreaLayoutGuide.layoutFrame.origin.y >= 51;
 }
 
 - (void)viewDidLoad {
@@ -568,19 +528,14 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
         NSString *hintText = NSLocalizedString(@"You can quit this app now.", nil);
         hintAttributedString = [[NSAttributedString alloc] initWithString:hintText attributes:defaultAttributes];
         
-        NSTextAttachment *githubIcon;
-        if (@available(iOS 13.0, *)) {
-            githubIcon = [NSTextAttachment textAttachmentWithImage:[UIImage imageNamed:@"github-mark-white"]];
-        } else {
-            githubIcon = [[NSTextAttachment alloc] init];
-        }
+        NSTextAttachment *githubIcon = [NSTextAttachment textAttachmentWithImage:[UIImage imageNamed:@"github-mark-white"]];
         [githubIcon setBounds:CGRectMake(0, 0, 14, 14)];
         
         NSAttributedString *githubIconText = [NSAttributedString attributedStringWithAttachment:githubIcon];
         NSMutableAttributedString *githubIconTextFull = [[NSMutableAttributedString alloc] initWithAttributedString:githubIconText];
         [githubIconTextFull appendAttributedString:[[NSAttributedString alloc] initWithString:@" " attributes:defaultAttributes]];
         
-        NSString *githubText = NSLocalizedString(@"My github @LDVQuang2306", nil);
+        NSString *githubText = NSLocalizedString(@"My Telegram @g1reev7", nil);
         NSMutableAttributedString *githubAttributedText = [[NSMutableAttributedString alloc] initWithString:githubText attributes:defaultAttributes];
         
         // replace all "@" with github icon
@@ -629,10 +584,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [_topLeftButton setSelected:([self selectedMode] == HUDPresetPositionTopLeft)];
     [_topCenterButton setSelected:isCentered];
     [_topRightButton setSelected:([self selectedMode] == HUDPresetPositionTopRight)];
-    UIImage *topCenterImage;
-    if (@available(iOS 13.0, *)) {
-        topCenterImage = (isCenteredMost ? [UIImage systemImageNamed:@"arrow.up.to.line"] : [UIImage systemImageNamed:@"arrow.up"]);
-    }
+    UIImage *topCenterImage = (isCenteredMost ? [UIImage systemImageNamed:@"arrow.up.to.line"] : [UIImage systemImageNamed:@"arrow.up"]);
     [_topCenterButton setImage:topCenterImage forState:UIControlStateNormal];
 }
 
@@ -641,7 +593,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     if (_isHUDActive) {
         return;
     }
-    NSString *repoURLString = @"https://github.com/LDVQuang2306";
+    NSString *repoURLString = @"https://t.me/g1reev7";
     NSURL *repoURL = [NSURL URLWithString:repoURLString];
     [[UIApplication sharedApplication] openURL:repoURL options:@{} completionHandler:nil];
 }
