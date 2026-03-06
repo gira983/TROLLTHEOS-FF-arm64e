@@ -1,42 +1,74 @@
 #import "MemoryUtils.h"
 
+// Получить PID по имени процесса через sysctl
 pid_t GetGameProcesspid(char* GameProcessName) {
     size_t length = 0;
     static const int name[] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
-    int err = sysctl((int *)name, (sizeof(name) / sizeof(*name)) - 1, NULL, &length, NULL, 0);
-    
-    if (err == -1) {
-        err = errno;
-    }
-    
-    if (err == 0) {
-        struct kinfo_proc *procBuffer = (struct kinfo_proc *)malloc(length);
-        if (procBuffer == NULL) {
-            return -1;
-        }
-        
-        err = sysctl((int *)name, (sizeof(name) / sizeof(*name)) - 1, procBuffer, &length, NULL, 0);
-        if (err == -1) {
-            err = errno;
-            free(procBuffer);
-            return -1;
-        }
-        
-        int count = (int)length / sizeof(struct kinfo_proc);
-        for (int i = 0; i < count; ++i) {
-            const char *procname = procBuffer[i].kp_proc.p_comm;
-            pid_t Processpid = procBuffer[i].kp_proc.p_pid;
-            
-            if (strstr(procname, GameProcessName)) {
-                free(procBuffer);
-                return Processpid;
-            }
-        }
-        
+    sysctl((int *)name, (sizeof(name) / sizeof(*name)) - 1, NULL, &length, NULL, 0);
+
+    struct kinfo_proc *procBuffer = (struct kinfo_proc *)malloc(length);
+    if (!procBuffer) return -1;
+
+    if (sysctl((int *)name, (sizeof(name) / sizeof(*name)) - 1, procBuffer, &length, NULL, 0) == -1) {
         free(procBuffer);
+        return -1;
     }
-    
+
+    int count = (int)length / sizeof(struct kinfo_proc);
+    for (int i = 0; i < count; i++) {
+        if (strstr(procBuffer[i].kp_proc.p_comm, GameProcessName)) {
+            pid_t pid = procBuffer[i].kp_proc.p_pid;
+            free(procBuffer);
+            return pid;
+        }
+    }
+    free(procBuffer);
     return -1;
+}
+
+// Получить task port через processor_set_tasks — не детектируется как task_for_pid
+// Требует entitlement: com.apple.system-task-ports (уже в ent.plist)
+static mach_port_t GetTaskViaProcessorSet(pid_t targetPid) {
+    host_t host = mach_host_self();
+
+    // Получаем default processor set
+    processor_set_name_t psDefault;
+    if (processor_set_default(host, &psDefault) != KERN_SUCCESS)
+        return MACH_PORT_NULL;
+
+    // Получаем привилегированный порт processor set
+    processor_set_t psPriv;
+    if (host_processor_set_priv(host, psDefault, &psPriv) != KERN_SUCCESS) {
+        mach_port_deallocate(mach_task_self(), psDefault);
+        return MACH_PORT_NULL;
+    }
+
+    // Получаем список всех tasks в системе
+    task_array_t tasks;
+    mach_msg_type_number_t taskCount = 0;
+    if (processor_set_tasks(psPriv, &tasks, &taskCount) != KERN_SUCCESS) {
+        mach_port_deallocate(mach_task_self(), psPriv);
+        mach_port_deallocate(mach_task_self(), psDefault);
+        return MACH_PORT_NULL;
+    }
+
+    mach_port_t result = MACH_PORT_NULL;
+    for (mach_msg_type_number_t i = 0; i < taskCount; i++) {
+        pid_t pid = -1;
+        pid_for_task(tasks[i], &pid);  // обратный lookup — менее подозрительно
+        if (pid == targetPid) {
+            result = tasks[i];
+        } else {
+            // Освобождаем все task ports кроме нашего
+            mach_port_deallocate(mach_task_self(), tasks[i]);
+        }
+    }
+
+    vm_deallocate(mach_task_self(), (vm_address_t)tasks, taskCount * sizeof(task_t));
+    mach_port_deallocate(mach_task_self(), psPriv);
+    mach_port_deallocate(mach_task_self(), psDefault);
+
+    return result;
 }
 
 vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
@@ -45,21 +77,27 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
     uint32_t nesting_depth = 0;
     struct vm_region_submap_info_64 vbr;
     mach_msg_type_number_t vbrcount = 16;
-    
+
     pid_t pid = GetGameProcesspid(GameProcessName);
-    if (pid == -1) {
-        return 0;
+    if (pid == -1) return 0;
+
+    // Сначала пробуем processor_set_tasks — не детектируется античитом
+    get_task = GetTaskViaProcessorSet(pid);
+
+    // Fallback: task_for_pid если processor_set_tasks не сработал
+    // (например нет прав на com.apple.system-task-ports)
+    if (get_task == MACH_PORT_NULL) {
+        task_for_pid(mach_task_self(), pid, &get_task);
     }
-    
-    kern_return_t kret = task_for_pid(mach_task_self(), pid, &get_task);
-    
+
     if (get_task != MACH_PORT_NULL) {
-        kern_return_t kr = mach_vm_region_recurse(get_task, &vmoffset, &vmsize, &nesting_depth, (vm_region_recurse_info_t)&vbr, &vbrcount);
+        kern_return_t kr = mach_vm_region_recurse(get_task, &vmoffset, &vmsize,
+            &nesting_depth, (vm_region_recurse_info_t)&vbr, &vbrcount);
         if (kr == KERN_SUCCESS) {
             return vmoffset;
         }
     }
-    
+
     return 0;
 }
 
@@ -91,4 +129,3 @@ bool _write(long addr, const void *buffer, int len)
     }
     return true;
 }
-
