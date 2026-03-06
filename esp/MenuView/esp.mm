@@ -150,6 +150,7 @@ static bool isStreamerMode = NO;   // Stream Proof
 }
 - (void)toggle {
     self.on = !self.on;
+    [self setNeedsDisplay];
     [self sendActionsForControlEvents:UIControlEventValueChanged];
 }
 - (void)updateThumbPosition {
@@ -833,10 +834,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     aimTabContainer.hidden = YES;
     extraTabContainer.hidden = YES;
     settingTabContainer.hidden = YES;
-    mainTabContainer.userInteractionEnabled = NO;
-    aimTabContainer.userInteractionEnabled = NO;
-    extraTabContainer.userInteractionEnabled = NO;
-    settingTabContainer.userInteractionEnabled = NO;
+    mainTabContainer.userInteractionEnabled = YES;
+    aimTabContainer.userInteractionEnabled = YES;
+    extraTabContainer.userInteractionEnabled = YES;
+    settingTabContainer.userInteractionEnabled = YES;
     
     for (UIView *sub in _sidebar.subviews) {
         if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 103) {
