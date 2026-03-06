@@ -93,12 +93,13 @@ static bool isStreamerMode = NO;   // Stream Proof
 @property (nonatomic, assign, getter=isOn) BOOL on;
 @end
 
-@implementation CustomSwitch { UIView *_thumb; BOOL _touchActive; }
+@implementation CustomSwitch { UIView *_thumb; BOOL _touchActive; NSTimeInterval _lastToggleTime; }
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
         self.backgroundColor = [UIColor clearColor];
         self.userInteractionEnabled = YES;
+        _lastToggleTime = 0;
         _thumb = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 22, 22)];
         _thumb.backgroundColor = [UIColor colorWithWhite:0.75 alpha:1.0];
         _thumb.layer.cornerRadius = 11;
@@ -122,11 +123,16 @@ static bool isStreamerMode = NO;   // Stream Proof
     }
 }
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    if (_touchActive) {
-        CGPoint pt = [touches.anyObject locationInView:self];
-        if ([self pointInside:pt withEvent:event]) [self toggle];
-    }
+    if (!_touchActive) return;
     _touchActive = NO;
+    // Дебаунс 300мс — TSEventFetcher присылает два Ended подряд, это отсекает второй
+    NSTimeInterval now = CACurrentMediaTime();
+    if (now - _lastToggleTime < 0.3) return;
+    CGPoint pt = [touches.anyObject locationInView:self];
+    if ([self pointInside:pt withEvent:event]) {
+        _lastToggleTime = now;
+        [self toggle];
+    }
 }
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     _touchActive = NO;
@@ -154,6 +160,8 @@ static bool isStreamerMode = NO;   // Stream Proof
 }
 @end
 
+// (PassThroughScrollView удалён — AIM таб больше не использует ScrollView)
+// ExpandedHitView: передаёт hitTest subviews даже если они выходят за bounds контейнера.
 @interface ExpandedHitView : UIView
 @end
 @implementation ExpandedHitView
@@ -173,8 +181,10 @@ static bool isStreamerMode = NO;   // Stream Proof
 @property (nonatomic, strong) CADisplayLink *displayLink;
 @property (nonatomic, strong) NSMutableArray<CALayer *> *drawingLayers;
 - (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers;
+- (CALayer *)poolLayerOfClass:(Class)cls;
 @end
 
+// Кастомный слайдер — обрабатывает touches с правильным конвертированием координат
 @interface HUDSlider : UIView
 @property (nonatomic) float minimumValue;
 @property (nonatomic) float maximumValue;
@@ -210,20 +220,24 @@ static bool isStreamerMode = NO;   // Stream Proof
     CGFloat h = self.bounds.size.height;
     CGFloat w = self.bounds.size.width;
     CGFloat trackH = 4;
+    
     _track = [[UIView alloc] initWithFrame:CGRectMake(10, (h - trackH)/2, w - 20, trackH)];
     _track.backgroundColor = [UIColor colorWithWhite:0.4 alpha:1.0];
     _track.layer.cornerRadius = trackH/2;
     _track.userInteractionEnabled = NO;
     [self addSubview:_track];
+    
     _fill = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, trackH)];
     _fill.layer.cornerRadius = trackH/2;
     _fill.userInteractionEnabled = NO;
     [_track addSubview:_fill];
+    
     CGFloat thumbSize = 22;
     _thumb = [[UIView alloc] initWithFrame:CGRectMake(0, 0, thumbSize, thumbSize)];
     _thumb.layer.cornerRadius = thumbSize/2;
     _thumb.userInteractionEnabled = NO;
     [self addSubview:_thumb];
+    
     [self updateAppearance];
     [self updateThumbPosition];
 }
@@ -247,7 +261,9 @@ static bool isStreamerMode = NO;   // Stream Proof
     CGFloat pct = (range > 0) ? (_value - _minimumValue) / range : 0;
     CGFloat trackW = _track.bounds.size.width;
     CGFloat x = pct * trackW;
+    
     _fill.frame = CGRectMake(0, 0, x, _track.bounds.size.height);
+    
     CGFloat thumbSize = _thumb.bounds.size.width;
     CGFloat thumbX = _track.frame.origin.x + x - thumbSize/2;
     CGFloat thumbY = (self.bounds.size.height - thumbSize)/2;
@@ -256,6 +272,7 @@ static bool isStreamerMode = NO;   // Stream Proof
 
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = touches.anyObject;
+    // locationInView конвертирует глобальные координаты в локальные автоматически
     CGPoint loc = [touch locationInView:self];
     _dragStartX = loc.x;
     _dragStartValue = _value;
@@ -264,25 +281,32 @@ static bool isStreamerMode = NO;   // Stream Proof
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = touches.anyObject;
     CGPoint loc = [touch locationInView:self];
+    
     CGFloat trackW = _track.bounds.size.width;
     CGFloat trackX = _track.frame.origin.x;
     CGFloat relX = loc.x - trackX;
     CGFloat pct = MAX(0, MIN(1, relX / trackW));
+    
     float newVal = _minimumValue + pct * (_maximumValue - _minimumValue);
     _value = newVal;
     [self updateThumbPosition];
+    
     if (_onValueChanged) _onValueChanged(_value);
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     [self touchesMoved:touches withEvent:event];
 }
+
 @end
 
+// Скрывает view от ReplayKit/скриншотов через приватный CALayer ключ disableUpdateMask.
+// View остаётся ВИДИМОЙ на экране пользователя.
 static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     static NSString *maskKey = nil;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
+        // base64("disableUpdateMask")
         NSData *data = [[NSData alloc] initWithBase64EncodedString:@"ZGlzYWJsZVVwZGF0ZU1hc2s="
                                                             options:NSDataBase64DecodingIgnoreUnknownCharacters];
         if (data) maskKey = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -298,21 +322,30 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *menuContainer;
     UIView *floatingButton;
     CGPoint _initialTouchPoint;
+    
+    // Tab Views
     UIView *mainTabContainer;
     UIView *aimTabContainer;
     UIView *settingTabContainer;
     UIView *extraTabContainer;
     UIView *_sidebar;
+
     UIView *previewView;
     UIView *previewContentContainer;
+    
     UILabel *previewNameLabel;
     UILabel *previewDistLabel;
     UIView *healthBarContainer;
     UIView *boxContainer;
+    
+    // HUD freeze detection
     uint64_t _lastMatchPtr;
     NSTimeInterval _lastValidFrame;
     UIView *skeletonContainer;
     float previewScale;
+
+    // Layer pool — переиспользуем CALayer вместо создания каждый кадр
+    NSInteger _poolIndex;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -323,11 +356,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         self.drawingLayers = [NSMutableArray array];
         
         [self SetUpBase];
-        [[NSNotificationCenter defaultCenter] addObserver:self
-            selector:@selector(appDidBecomeActive)
-            name:UIApplicationDidBecomeActiveNotification
-            object:nil];
-
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
         if (@available(iOS 15.0, *)) { self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(15, 20, 20); } else { self.displayLink.preferredFramesPerSecond = 20; }
         [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
@@ -339,14 +367,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     return self;
 }
 
-- (void)appDidBecomeActive {
-    // Сбрасываем флаг, чтобы принудительно обновить базу
-    Moudule_Base = -1;
-    [self SetUpBase];
-}
-
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
+
+    // Когда меню закрыто — ТОЛЬКО floatingButton, всё в игру
     if (!menuContainer || menuContainer.hidden) {
         if (floatingButton && !floatingButton.hidden) {
             CGPoint p = [self convertPoint:point toView:floatingButton];
@@ -357,11 +381,16 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (menuContainer && !menuContainer.hidden) {
         CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
         if ([menuContainer pointInside:pInMenu withEvent:event]) {
+#ifdef DEBUG
+            espLog([NSString stringWithFormat:@"[HITTEST] point=(%.0f,%.0f) menuContainer OK", pInMenu.x, pInMenu.y]);
+#endif
+            // Стандартный hitTest UIKit — он правильно найдёт нужный view
             UIView *hit = [menuContainer hitTest:pInMenu withEvent:event];
             if (hit) return hit;
             return menuContainer;
         }
     }
+
     return nil;
 }
 
@@ -373,6 +402,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     floatingButton.layer.borderColor = [UIColor whiteColor].CGColor;
     floatingButton.clipsToBounds = YES;
     floatingButton.userInteractionEnabled = YES;
+    
     UILabel *iconLabel = [[UILabel alloc] initWithFrame:floatingButton.bounds];
     iconLabel.text = @"M";
     iconLabel.textColor = [UIColor whiteColor];
@@ -380,15 +410,20 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     iconLabel.font = [UIFont boldSystemFontOfSize:22];
     iconLabel.userInteractionEnabled = NO;
     [floatingButton addSubview:iconLabel];
+    
+    // Pan для перетаскивания — minimumNumberOfTouches=1
     UIPanGestureRecognizer *iconPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
     iconPan.maximumNumberOfTouches = 1;
     iconPan.minimumNumberOfTouches = 1;
     [floatingButton addGestureRecognizer:iconPan];
+    
+    // Tap для открытия — должен провалиться если идёт pan
     UITapGestureRecognizer *openTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(showMenu)];
     openTap.numberOfTapsRequired = 1;
     openTap.numberOfTouchesRequired = 1;
     [openTap requireGestureRecognizerToFail:iconPan];
     [floatingButton addGestureRecognizer:openTap];
+    
     [self addSubview:floatingButton];
 }
 
@@ -398,12 +433,15 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     label.textColor = [UIColor whiteColor];
     label.font = [UIFont systemFontOfSize:13];
     [view addSubview:label];
+    
     CGFloat swX = MIN(240, view.bounds.size.width - 65);
     CustomSwitch *customSwitch = [[CustomSwitch alloc] initWithFrame:CGRectMake(swX, y, 52, 26)];
     customSwitch.on = isOn;
     [customSwitch addTarget:self action:action forControlEvents:UIControlEventValueChanged];
     [view addSubview:customSwitch];
 }
+
+// ==================== HELPER UI BUILDERS ====================
 
 - (UILabel *)makeSectionLabel:(NSString *)title atY:(CGFloat)y width:(CGFloat)w {
     UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, y, w, 16)];
@@ -413,11 +451,15 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     return lbl;
 }
 
+// addSegmentTo: — старая рабочая реализация без ScrollView.
+// UITapGestureRecognizer на segContainer, cancelsTouchesInView=NO.
 - (void)addSegmentTo:(UIView *)parent atY:(CGFloat)y title:(NSString *)title options:(NSArray *)options selectedRef:(int *)selectedRef tag:(NSInteger)baseTag {
     CGFloat padding = 10;
     CGFloat segW = (parent.bounds.size.width - padding * 2) / options.count;
     CGFloat segH = 28;
+
     CGFloat titleH = (title.length > 0) ? 14 : 0;
+
     if (title.length > 0) {
         UILabel *titleLbl = [[UILabel alloc] initWithFrame:CGRectMake(padding, y, parent.bounds.size.width - padding * 2, 12)];
         titleLbl.text = title;
@@ -426,18 +468,23 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         titleLbl.userInteractionEnabled = NO;
         [parent addSubview:titleLbl];
     }
+
     UIView *segContainer = [[UIView alloc] initWithFrame:CGRectMake(padding, y + titleH, parent.bounds.size.width - padding * 2, segH)];
     segContainer.backgroundColor = [UIColor colorWithRed:0.12 green:0.12 blue:0.18 alpha:1.0];
     segContainer.layer.cornerRadius = 7;
     segContainer.clipsToBounds = YES;
     [parent addSubview:segContainer];
+
     for (int i = 0; i < (int)options.count; i++) {
         UIView *segBtn = [[UIView alloc] initWithFrame:CGRectMake(i * segW + 2, 2, segW - 4, segH - 4)];
-        segBtn.backgroundColor = (*selectedRef == i) ? [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0] : [UIColor clearColor];
+        segBtn.backgroundColor = (*selectedRef == i)
+            ? [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0]
+            : [UIColor clearColor];
         segBtn.layer.cornerRadius = 5;
         segBtn.tag = baseTag * 100 + i;
         segBtn.userInteractionEnabled = NO;
         [segContainer addSubview:segBtn];
+
         UILabel *lbl = [[UILabel alloc] initWithFrame:segBtn.bounds];
         lbl.text = options[i];
         lbl.textAlignment = NSTextAlignmentCenter;
@@ -446,10 +493,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         lbl.userInteractionEnabled = NO;
         [segBtn addSubview:lbl];
     }
+
     NSInteger capturedBase = baseTag;
     UIView * __unsafe_unretained segRef = segContainer;
     int *ref = selectedRef;
     NSArray *capturedOptions = options;
+
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] init];
     tap.cancelsTouchesInView = NO;
     objc_setAssociatedObject(tap, &kSegHandlerKey, ^(UITapGestureRecognizer *t) {
@@ -460,7 +509,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         *ref = idx;
         for (int j = 0; j < (int)capturedOptions.count; j++) {
             UIView *btn = [segRef viewWithTag:capturedBase * 100 + j];
-            btn.backgroundColor = (j == idx) ? [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0] : [UIColor clearColor];
+            btn.backgroundColor = (j == idx)
+                ? [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0]
+                : [UIColor clearColor];
             UILabel *l = btn.subviews.firstObject;
             l.textColor = (j == idx) ? [UIColor blackColor] : [UIColor colorWithWhite:0.7 alpha:1.0];
         }
@@ -469,12 +520,18 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [segContainer addGestureRecognizer:tap];
 }
 
+// ============================================================
+
+
 - (void)setupMenuUI {
     CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
     CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
     CGFloat menuWidth = MIN(550, screenW - 10);
     CGFloat menuHeight = MIN(370, screenH * 0.55);
+    
+    // Масштаб для адаптации всех элементов
     CGFloat scale = menuWidth / 550.0;
+    
     menuContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, menuHeight)];
     menuContainer.backgroundColor = [UIColor colorWithRed:0.05 green:0.05 blue:0.05 alpha:0.95];
     menuContainer.layer.cornerRadius = 15;
@@ -482,43 +539,54 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     menuContainer.layer.borderWidth = 2;
     menuContainer.clipsToBounds = NO;
     menuContainer.hidden = YES;
+    // absorbTap убран — menuContainer.hitTest сам решает что перехватить
     [self addSubview:menuContainer];
+    
+    // Header
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, 40)];
     headerView.backgroundColor = [UIColor clearColor];
     headerView.userInteractionEnabled = YES;
     [menuContainer addSubview:headerView];
+    
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(menuWidth * 0.25, 5, menuWidth * 0.45, 30)];
     titleLabel.text = @"MENU TIPA";
     titleLabel.textColor = [UIColor whiteColor];
     titleLabel.font = [UIFont fontWithName:@"HelveticaNeue-Bold" size:22];
     [headerView addSubview:titleLabel];
+    
     UILabel *subTitle = [[UILabel alloc] initWithFrame:CGRectMake(menuWidth * 0.58, 12, menuWidth * 0.3, 20)];
     subTitle.text = @"Fryzz🥶";
     subTitle.textColor = [UIColor lightGrayColor];
     subTitle.font = [UIFont systemFontOfSize:10];
     [headerView addSubview:subTitle];
+    
     NSArray *colors = @[[UIColor greenColor], [UIColor yellowColor], [UIColor redColor]];
     for (int i = 0; i < 3; i++) {
         UIView *circle = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - 95 + (i * 25), 10, 18, 18)];
         circle.backgroundColor = colors[i];
         circle.layer.cornerRadius = 9;
+        
         UILabel *btnIcon = [[UILabel alloc] initWithFrame:circle.bounds];
         btnIcon.textAlignment = NSTextAlignmentCenter;
         btnIcon.font = [UIFont boldSystemFontOfSize:12];
         btnIcon.textColor = [UIColor blackColor];
+        
         if (i == 0) btnIcon.text = @"□";
         if (i == 1) btnIcon.text = @"-";
         if (i == 2) {
             btnIcon.text = @"X";
-            circle.tag = 200;
+            circle.tag = 200; // tag 200 = close button
             UITapGestureRecognizer *closeTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleCloseTap:)];
             [circle addGestureRecognizer:closeTap];
         }
         [circle addSubview:btnIcon];
         [headerView addSubview:circle];
     }
+    
     UIPanGestureRecognizer *menuPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
     [headerView addGestureRecognizer:menuPan];
+    
+    // Sidebar Buttons
     CGFloat sidebarW = 75 * scale;
     UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - sidebarW - 10, 50, sidebarW, 310 * scale)];
     sidebar.backgroundColor = [UIColor colorWithWhite:0.8 alpha:1.0];
@@ -526,13 +594,14 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     sidebar.userInteractionEnabled = YES;
     _sidebar = sidebar;
     [menuContainer addSubview:sidebar];
+    
     NSArray *tabs = @[@"Main", @"AIM", @"Extra", @"Setting"];
     for (int i = 0; i < tabs.count; i++) {
         UIView *btn = [[UIView alloc] initWithFrame:CGRectMake(3, 8 + (i * 50 * scale), sidebarW - 6, 35 * scale)];
         btn.backgroundColor = (i == 0) ? [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0] : [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
         btn.layer.cornerRadius = 17.5;
         btn.userInteractionEnabled = YES;
-        btn.tag = 100 + i;
+        btn.tag = 100 + i; // tag 100=Main, 101=AIM, 102=Setting
         UILabel *btnLbl = [[UILabel alloc] initWithFrame:btn.bounds];
         btnLbl.text = tabs[i];
         btnLbl.textColor = [UIColor whiteColor];
@@ -540,59 +609,79 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         btnLbl.textAlignment = NSTextAlignmentCenter;
         btnLbl.userInteractionEnabled = NO;
         [btn addSubview:btnLbl];
+        // Gesture recognizer — надёжнее чем touchesEnded для UIView (не UIButton)
         UITapGestureRecognizer *tabTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTabTap:)];
         [btn addGestureRecognizer:tabTap];
         [sidebar addSubview:btn];
     }
+
+    // --- MAIN TAB (ESP) ---
     CGFloat tabW = menuWidth - sidebarW - 25;
     CGFloat tabH = menuHeight - 55;
     mainTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     mainTabContainer.backgroundColor = [UIColor clearColor];
     [menuContainer addSubview:mainTabContainer];
+
+    // Preview Section (Left)
     UIView *previewBorder = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 130, 250)];
     previewBorder.layer.borderColor = [UIColor whiteColor].CGColor;
     previewBorder.layer.borderWidth = 1;
     previewBorder.layer.cornerRadius = 10;
     [mainTabContainer addSubview:previewBorder];
+    
     UILabel *pvTitle = [[UILabel alloc] initWithFrame:CGRectMake(0, 5, 130, 20)];
     pvTitle.text = @"Preview";
     pvTitle.textColor = [UIColor whiteColor];
     pvTitle.textAlignment = NSTextAlignmentCenter;
     pvTitle.font = [UIFont boldSystemFontOfSize:14];
     [previewBorder addSubview:pvTitle];
+    
     UIView *line = [[UIView alloc] initWithFrame:CGRectMake(10, 28, 110, 1)];
     line.backgroundColor = [UIColor whiteColor];
     [previewBorder addSubview:line];
+    
     previewView = [[UIView alloc] initWithFrame:CGRectMake(0, 30, 130, 220)];
     previewView.backgroundColor = [UIColor blackColor];
     previewView.clipsToBounds = YES;
     [previewBorder addSubview:previewView];
+    
     previewContentContainer = [[UIView alloc] initWithFrame:previewView.bounds];
     [previewView addSubview:previewContentContainer];
+    
     [self drawPreviewElements];
     [self updatePreviewVisibility];
+
+    // Feature Box (Right)
     UIView *featureBox = [[UIView alloc] initWithFrame:CGRectMake(140, 0, tabW - 145, tabH)];
     featureBox.layer.borderColor = [UIColor whiteColor].CGColor;
     featureBox.layer.borderWidth = 1;
     featureBox.layer.cornerRadius = 10;
     featureBox.backgroundColor = [UIColor blackColor];
     [mainTabContainer addSubview:featureBox];
+    
     UILabel *ftTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, 200, 20)];
     ftTitle.text = @"ESP Feature";
     ftTitle.textColor = [UIColor whiteColor];
     ftTitle.font = [UIFont boldSystemFontOfSize:16];
     [featureBox addSubview:ftTitle];
+    
     UIView *ftLine = [[UIView alloc] initWithFrame:CGRectMake(15, 35, tabW - 155, 1)];
     ftLine.backgroundColor = [UIColor whiteColor];
     [featureBox addSubview:ftLine];
+    
     [self addFeatureToView:featureBox withTitle:@"Box" atY:45 initialValue:isBox andAction:@selector(toggleBox:)];
     [self addFeatureToView:featureBox withTitle:@"Bone" atY:80 initialValue:isBone andAction:@selector(toggleBone:)];
     [self addFeatureToView:featureBox withTitle:@"Health" atY:115 initialValue:isHealth andAction:@selector(toggleHealth:)];
     [self addFeatureToView:featureBox withTitle:@"Name" atY:150 initialValue:isName andAction:@selector(toggleName:)];
     [self addFeatureToView:featureBox withTitle:@"Distance" atY:185 initialValue:isDis andAction:@selector(toggleDist:)];
     [self addFeatureToView:featureBox withTitle:@"Lines" atY:220 initialValue:isLine andAction:@selector(toggleLine:)];
+
     NSArray *lineOriginOpts = @[@"Top", @"Center", @"Bottom"];
     [self addSegmentTo:featureBox atY:256 title:@"" options:lineOriginOpts selectedRef:&lineOrigin tag:20];
+
+    // Size slider убран — не влияет на функционал
+
+    // --- AIM TAB ---
     aimTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     aimTabContainer.backgroundColor = [UIColor blackColor];
     aimTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
@@ -600,26 +689,38 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     aimTabContainer.layer.cornerRadius = 10;
     aimTabContainer.hidden = YES;
     [menuContainer addSubview:aimTabContainer];
+
+    // --- AIM TAB: toggles + сегменты, без ScrollView ---
     CGFloat aW = aimTabContainer.bounds.size.width;
     CGFloat ay = 6;
+
     UILabel *aimTitle = [self makeSectionLabel:@"AIMBOT" atY:ay width:aW];
     [aimTabContainer addSubview:aimTitle]; ay += 18;
     UIView *aimSep1 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
     aimSep1.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
     [aimTabContainer addSubview:aimSep1]; ay += 6;
+
     [self addFeatureToView:aimTabContainer withTitle:@"Enable Aimbot" atY:ay initialValue:isAimbot andAction:@selector(toggleAimbot:)]; ay += 30;
+
     ay += 4;
     UIView *aimSep2 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
     aimSep2.backgroundColor = aimSep1.backgroundColor;
     [aimTabContainer addSubview:aimSep2]; ay += 6;
+
     UILabel *aimModeTitle = [self makeSectionLabel:@"AIM MODE" atY:ay width:aW];
     [aimTabContainer addSubview:aimModeTitle]; ay += 16;
+
     NSArray *aimModeOpts = @[@"Closest Player", @"Crosshair"];
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimModeOpts selectedRef:&aimMode tag:10]; ay += 32;
+
     NSArray *aimTargetOpts = @[@"Head", @"Neck", @"Hip"];
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTargetOpts selectedRef:&aimTarget tag:11]; ay += 32;
+
     NSArray *aimTriggerOpts = @[@"Always", @"Shooting"];
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTriggerOpts selectedRef:&aimTrigger tag:12];
+
+
+    // --- EXTRA TAB: слайдеры ---
     extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     extraTabContainer.backgroundColor = [UIColor blackColor];
     extraTabContainer.layer.borderColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0].CGColor;
@@ -627,13 +728,17 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     extraTabContainer.layer.cornerRadius = 10;
     extraTabContainer.hidden = YES;
     [menuContainer addSubview:extraTabContainer];
+
     CGFloat eW = extraTabContainer.bounds.size.width;
     CGFloat ey = 10;
+
     UILabel *exTitle = [self makeSectionLabel:@"PARAMETERS" atY:ey width:eW];
     [extraTabContainer addSubview:exTitle]; ey += 22;
     UIView *exSep1 = [[UIView alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 1)];
     exSep1.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
     [extraTabContainer addSubview:exSep1]; ey += 10;
+
+    // FOV Slider
     UILabel *fovLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ey, eW - 60, 14)];
     fovLbl.text = @"FOV Radius"; fovLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
     fovLbl.font = [UIFont systemFontOfSize:10]; [extraTabContainer addSubview:fovLbl];
@@ -649,6 +754,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UILabel * __unsafe_unretained fvRef = fovVal;
     fovSlider.onValueChanged = ^(float v){ aimFov = v; fvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
     [extraTabContainer addSubview:fovSlider]; ey += 44;
+
+    // Distance Slider
     UILabel *distLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ey, eW - 60, 14)];
     distLbl.text = @"Aim Distance"; distLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
     distLbl.font = [UIFont systemFontOfSize:10]; [extraTabContainer addSubview:distLbl];
@@ -664,6 +771,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UILabel * __unsafe_unretained dvRef = distVal;
     distSlider.onValueChanged = ^(float v){ aimDistance = v; dvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
     [extraTabContainer addSubview:distSlider]; ey += 44;
+
+    // Speed Slider
     UILabel *spdLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ey, eW - 60, 14)];
     spdLbl.text = @"Aim Speed"; spdLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
     spdLbl.font = [UIFont systemFontOfSize:10]; [extraTabContainer addSubview:spdLbl];
@@ -679,6 +788,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UILabel * __unsafe_unretained svRef = spdVal;
     spdSlider.onValueChanged = ^(float v){ aimSpeed = v; svRef.text = [NSString stringWithFormat:@"%.2f", v]; };
     [extraTabContainer addSubview:spdSlider];
+
+
+    // --- SETTING TAB ---
     settingTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     settingTabContainer.backgroundColor = [UIColor blackColor];
     settingTabContainer.layer.borderColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0].CGColor;
@@ -686,21 +798,27 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     settingTabContainer.layer.cornerRadius = 10;
     settingTabContainer.hidden = YES;
     [menuContainer addSubview:settingTabContainer];
+
     UILabel *stSectionTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 12, tabW - 30, 18)];
     stSectionTitle.text = @"SETTINGS";
     stSectionTitle.textColor = [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0];
     stSectionTitle.font = [UIFont boldSystemFontOfSize:11];
     [settingTabContainer addSubview:stSectionTitle];
+
     UIView *stSep = [[UIView alloc] initWithFrame:CGRectMake(15, 33, tabW - 30, 1)];
     stSep.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
     [settingTabContainer addSubview:stSep];
+
     [self addFeatureToView:settingTabContainer withTitle:@"Stream Proof" atY:40 initialValue:isStreamerMode andAction:@selector(toggleStreamerMode:)];
+
     UILabel *stDesc = [[UILabel alloc] initWithFrame:CGRectMake(15, 80, tabW - 30, 32)];
     stDesc.text = @"Hides the overlay from screen recordings & screenshots.";
     stDesc.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
     stDesc.font = [UIFont systemFontOfSize:10];
     stDesc.numberOfLines = 2;
     [settingTabContainer addSubview:stDesc];
+
+    // Поднять sidebar поверх всех табов
     [menuContainer bringSubviewToFront:sidebar];
 }
 
@@ -709,10 +827,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     aimTabContainer.hidden = YES;
     extraTabContainer.hidden = YES;
     settingTabContainer.hidden = YES;
-    mainTabContainer.userInteractionEnabled = YES;
-    aimTabContainer.userInteractionEnabled = YES;
-    extraTabContainer.userInteractionEnabled = YES;
-    settingTabContainer.userInteractionEnabled = YES;
+    mainTabContainer.userInteractionEnabled = NO;
+    aimTabContainer.userInteractionEnabled = NO;
+    extraTabContainer.userInteractionEnabled = NO;
+    settingTabContainer.userInteractionEnabled = NO;
+    
     for (UIView *sub in _sidebar.subviews) {
         if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 103) {
             sub.backgroundColor = [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
@@ -720,10 +839,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     }
     UIView *activeBtn = [_sidebar viewWithTag:100 + tabIndex];
     activeBtn.backgroundColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0];
-    if (tabIndex == 0) { mainTabContainer.hidden = NO; }
-    if (tabIndex == 1) { aimTabContainer.hidden = NO; }
-    if (tabIndex == 2) { extraTabContainer.hidden = NO; }
-    if (tabIndex == 3) { settingTabContainer.hidden = NO; }
+    
+    if (tabIndex == 0) { mainTabContainer.hidden = NO; mainTabContainer.userInteractionEnabled = YES; }
+    if (tabIndex == 1) { aimTabContainer.hidden = NO; aimTabContainer.userInteractionEnabled = YES; }
+    if (tabIndex == 2) { extraTabContainer.hidden = NO; extraTabContainer.userInteractionEnabled = YES; }
+    if (tabIndex == 3) { settingTabContainer.hidden = NO; settingTabContainer.userInteractionEnabled = YES; }
 }
 
 - (void)drawPreviewElements {
@@ -731,37 +851,52 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     CGFloat h = previewView.frame.size.height; 
     CGFloat cx = w / 2;
     CGFloat startY = 45; 
-    CGFloat boxW = 80;
-    CGFloat boxH = 140;
-    CGFloat by = startY;
-    boxContainer = [[UIView alloc] initWithFrame:CGRectMake(cx - boxW/2, by, boxW, boxH)];
-    boxContainer.layer.borderColor = [UIColor greenColor].CGColor;
-    boxContainer.layer.borderWidth = 1.5;
-    [previewContentContainer addSubview:boxContainer];
-    healthBarContainer = [[UIView alloc] initWithFrame:CGRectMake(cx - boxW/2 - 6, by, 3, boxH)];
-    healthBarContainer.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1.0];
-    [previewContentContainer addSubview:healthBarContainer];
-    UIView *hp = [[UIView alloc] initWithFrame:CGRectMake(0, boxH*0.3, 3, boxH*0.7)];
-    hp.backgroundColor = [UIColor greenColor];
-    [healthBarContainer addSubview:hp];
-    previewNameLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, by - 18, w, 15)];
-    previewNameLabel.text = @"Player Name";
-    previewNameLabel.textColor = [UIColor whiteColor];
+    
+    previewNameLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 20, w, 15)];
+    previewNameLabel.text = @"ID PlayerName";
+    previewNameLabel.textColor = [UIColor greenColor];
     previewNameLabel.textAlignment = NSTextAlignmentCenter;
-    previewNameLabel.font = [UIFont boldSystemFontOfSize:10];
+    previewNameLabel.font = [UIFont boldSystemFontOfSize:11];
     [previewContentContainer addSubview:previewNameLabel];
+    
+    CGFloat barW = 70;
+    healthBarContainer = [[UIView alloc] initWithFrame:CGRectMake(cx - barW/2, 38, barW, 2)];
+    healthBarContainer.backgroundColor = [UIColor greenColor];
+    [previewContentContainer addSubview:healthBarContainer];
+    
+    CGFloat boxW = 70;
+    CGFloat boxH = 130;
+    CGFloat bx = cx - boxW/2;
+    CGFloat by = startY;
+    
+    boxContainer = [[UIView alloc] initWithFrame:previewView.bounds];
+    [previewContentContainer addSubview:boxContainer];
+    
+    CGFloat lineLen = 15;
+    UIColor *boxColor = [UIColor whiteColor];
+    [self addLineRect:CGRectMake(bx, by, lineLen, 1) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx, by, 1, lineLen) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx + boxW - lineLen, by, lineLen, 1) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx + boxW, by, 1, lineLen) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx, by + boxH, lineLen, 1) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx, by + boxH - lineLen, 1, lineLen) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx + boxW - lineLen, by + boxH, lineLen, 1) color:boxColor parent:boxContainer];
+    [self addLineRect:CGRectMake(bx + boxW, by + boxH - lineLen, 1, lineLen) color:boxColor parent:boxContainer];
+
     skeletonContainer = [[UIView alloc] initWithFrame:previewView.bounds];
-    skeletonContainer.userInteractionEnabled = NO;
     [previewContentContainer addSubview:skeletonContainer];
+    
     UIColor *skelColor = [UIColor whiteColor];
     CGFloat skelThick = 1.0;
-    CGFloat headRad = 8;
-    CGFloat headY = by + 10;
-    UIView *head = [[UIView alloc] initWithFrame:CGRectMake(cx - headRad, headY, headRad*2, headRad*2)];
+    
+    CGFloat headRad = 7;
+    CGFloat headY = by + 15;
+    UIView *head = [[UIView alloc] initWithFrame:CGRectMake(cx - headRad, headY - headRad, headRad*2, headRad*2)];
     head.layer.borderColor = skelColor.CGColor;
     head.layer.borderWidth = skelThick;
     head.layer.cornerRadius = headRad;
     [skeletonContainer addSubview:head];
+    
     CGPoint pNeck = CGPointMake(cx, headY + headRad);
     CGPoint pPelvis = CGPointMake(cx, by + 65);
     CGPoint pShoulderL = CGPointMake(cx - 15, by + 30);
@@ -774,6 +909,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     CGPoint pKneeR = CGPointMake(cx + 12, by + 95);
     CGPoint pFootL = CGPointMake(cx - 15, by + 125);
     CGPoint pFootR = CGPointMake(cx + 15, by + 125);
+    
     [self addLineFrom:pNeck to:pPelvis color:skelColor width:skelThick inView:skeletonContainer];
     [self addLineFrom:pShoulderL to:pShoulderR color:skelColor width:skelThick inView:skeletonContainer];
     [self addLineFrom:CGPointMake(cx, by+30) to:pShoulderL color:skelColor width:skelThick inView:skeletonContainer];
@@ -786,6 +922,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addLineFrom:pKneeL to:pFootL color:skelColor width:skelThick inView:skeletonContainer];
     [self addLineFrom:pPelvis to:pKneeR color:skelColor width:skelThick inView:skeletonContainer];
     [self addLineFrom:pKneeR to:pFootR color:skelColor width:skelThick inView:skeletonContainer];
+    
     previewDistLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, by + boxH + 5, w, 15)];
     previewDistLabel.text = @"Distance";
     previewDistLabel.textColor = [UIColor whiteColor];
@@ -800,7 +937,35 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     healthBarContainer.hidden = !isHealth;
     previewNameLabel.hidden = !isName;
     previewDistLabel.hidden = !isDis;
-    if (isBox && isBone) { [previewContentContainer bringSubviewToFront:boxContainer]; }
+    
+    if (isBox && isBone) {
+        [previewContentContainer bringSubviewToFront:boxContainer];
+    }
+}
+
+// --- Toggle Handlers ---
+- (void)toggleBox:(CustomSwitch *)sender { isBox = sender.isOn; boxContainer.hidden = !isBox; }
+- (void)toggleBone:(CustomSwitch *)sender { isBone = sender.isOn; skeletonContainer.hidden = !isBone; }
+- (void)toggleHealth:(CustomSwitch *)sender { isHealth = sender.isOn; healthBarContainer.hidden = !isHealth; }
+- (void)toggleName:(CustomSwitch *)sender { isName = sender.isOn; previewNameLabel.hidden = !isName; }
+- (void)toggleDist:(CustomSwitch *)sender { isDis = sender.isOn; previewDistLabel.hidden = !isDis; }
+- (void)toggleLine:(CustomSwitch *)sender { isLine = sender.isOn; }
+- (void)toggleAimbot:(CustomSwitch *)sender { isAimbot = sender.isOn; }
+
+
+- (void)toggleStreamerMode:(CustomSwitch *)sender {
+    isStreamerMode = sender.isOn;
+
+    // Применяем disableUpdateMask к menuContainer и floatingButton напрямую.
+    // disableUpdateMask скрывает view от ReplayKit/скриншотов, но view остаётся ВИДИМОЙ на экране.
+    if (menuContainer) {
+        __applyHideCapture(menuContainer, isStreamerMode);
+    }
+    if (floatingButton) {
+        __applyHideCapture(floatingButton, isStreamerMode);
+    }
+    // Также применяем к self (MenuView) как страховка
+    __applyHideCapture(self, isStreamerMode);
 }
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
@@ -808,30 +973,58 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (handler) handler(t);
 }
 
+- (void)fovChanged:(UISlider *)sender { aimFov = sender.value; }
+- (void)distChanged:(UISlider *)sender { aimDistance = sender.value; }
+
+- (void)addLineRect:(CGRect)frame color:(UIColor *)color parent:(UIView *)parent {
+    UIView *v = [[UIView alloc] initWithFrame:frame];
+    v.backgroundColor = color;
+    [parent addSubview:v];
+}
 - (void)addLineFrom:(CGPoint)p1 to:(CGPoint)p2 color:(UIColor *)color width:(CGFloat)width inView:(UIView *)view {
-    CGFloat angle = atan2(p2.y - p1.y, p2.x - p1.x);
-    CGFloat dist = hypot(p2.x - p1.x, p2.y - p1.y);
-    UIView *line = [[UIView alloc] initWithFrame:CGRectMake(0, 0, dist, width)];
-    line.center = CGPointMake((p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
-    line.transform = CGAffineTransformMakeRotation(angle);
+    UIView *line = [[UIView alloc] init];
     line.backgroundColor = color;
-    line.userInteractionEnabled = NO;
+    CGFloat dx = p2.x - p1.x;
+    CGFloat dy = p2.y - p1.y;
+    CGFloat len = sqrt(dx*dx + dy*dy);
+    CGFloat angle = atan2(dy, dx);
+    line.frame = CGRectMake(p1.x, p1.y, len, width);
+    line.layer.anchorPoint = CGPointMake(0, 0.5);
+    line.center = p1;
+    line.transform = CGAffineTransformMakeRotation(angle);
     [view addSubview:line];
+}
+
+- (void)sliderValueChanged:(UISlider *)sender {
+    previewScale = sender.value;
+    [UIView animateWithDuration:0.1 animations:^{
+        self->previewContentContainer.transform = CGAffineTransformMakeScale(self->previewScale, self->previewScale);
+    }];
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
     if (self.superview) {
         CGRect newFrame = self.superview.bounds;
-        // Используем анимацию для плавного изменения фрейма при повороте
-        if (!CGRectEqualToRect(self.frame, newFrame)) {
-            [UIView animateWithDuration:0.2 delay:0 options:UIViewAnimationOptionLayoutSubviews animations:^{
-                self.frame = newFrame;
-                if (self->menuContainer && !self->menuContainer.hidden) {
-                    self->menuContainer.center = CGPointMake(newFrame.size.width / 2, newFrame.size.height / 2);
-                }
-            } completion:nil];
+        // Меняем frame только если размер реально изменился (поворот экрана)
+        if (!CGSizeEqualToSize(self.frame.size, newFrame.size)) {
+            self.frame = newFrame;
+            CGRect screenBounds = self.bounds;
+            if (menuContainer && !menuContainer.hidden) {
+                menuContainer.center = CGPointMake(screenBounds.size.width / 2, screenBounds.size.height / 2);
+            }
         }
+    }
+    if (floatingButton) {
+        CGRect sb = self.bounds;
+        CGPoint btnCenter = floatingButton.center;
+        CGFloat halfW = floatingButton.bounds.size.width / 2;
+        CGFloat halfH = floatingButton.bounds.size.height / 2;
+        if (btnCenter.x < halfW) btnCenter.x = halfW;
+        if (btnCenter.x > sb.size.width - halfW) btnCenter.x = sb.size.width - halfW;
+        if (btnCenter.y < halfH) btnCenter.y = halfH;
+        if (btnCenter.y > sb.size.height - halfH) btnCenter.y = sb.size.height - halfH;
+        floatingButton.center = btnCenter;
     }
 }
 
@@ -859,38 +1052,109 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)centerMenu {
-    menuContainer.center = CGPointMake(self.bounds.size.width / 2, self.bounds.size.height / 2);
+    CGRect bounds = self.bounds;
+    if (CGRectIsEmpty(bounds)) {
+        bounds = [UIScreen mainScreen].bounds;
+    }
+    menuContainer.center = CGPointMake(bounds.size.width / 2, bounds.size.height / 2);
 }
-
+// Обработчики tap — используем gesture recognizers вместо ручного touchesEnded
+// Это надёжно работает со всей иерархией UIScrollView/PassThroughScrollView
 - (void)handleTabTap:(UITapGestureRecognizer *)gr {
     NSInteger tag = gr.view.tag;
     if (tag >= 100 && tag <= 103) {
+#ifdef DEBUG
+        espLog([NSString stringWithFormat:@"[TAP] sidebar btn tag=%ld", (long)tag]);
+#endif
         [self switchToTab:(int)(tag - 100)];
     }
 }
 
-- (void)handleCloseTap:(UITapGestureRecognizer *)gr { [self hideMenu]; }
+- (void)handleCloseTap:(UITapGestureRecognizer *)gr {
+    [self hideMenu];
+}
+
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
     UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
     CGPoint translation = [gesture translationInView:self];
-    if (gesture.state == UIGestureRecognizerStateBegan || gesture.state == UIGestureRecognizerStateChanged) {
-        viewToMove.center = CGPointMake(viewToMove.center.x + translation.x, viewToMove.center.y + translation.y);
+    
+    if (gesture.state == UIGestureRecognizerStateBegan ||
+        gesture.state == UIGestureRecognizerStateChanged) {
+        viewToMove.center = CGPointMake(
+            viewToMove.center.x + translation.x,
+            viewToMove.center.y + translation.y
+        );
         [gesture setTranslation:CGPointZero inView:self];
     }
 }
 
-- (void)toggleBox:(CustomSwitch *)sender { isBox = sender.isOn; [self updatePreviewVisibility]; }
-- (void)toggleBone:(CustomSwitch *)sender { isBone = sender.isOn; [self updatePreviewVisibility]; }
-- (void)toggleHealth:(CustomSwitch *)sender { isHealth = sender.isOn; [self updatePreviewVisibility]; }
-- (void)toggleName:(CustomSwitch *)sender { isName = sender.isOn; [self updatePreviewVisibility]; }
-- (void)toggleDist:(CustomSwitch *)sender { isDis = sender.isOn; [self updatePreviewVisibility]; }
-- (void)toggleLine:(CustomSwitch *)sender { isLine = sender.isOn; }
-- (void)toggleAimbot:(CustomSwitch *)sender { isAimbot = sender.isOn; }
-- (void)toggleStreamerMode:(CustomSwitch *)sender {
-    isStreamerMode = sender.isOn;
-    __applyHideCapture(menuContainer, isStreamerMode);
-    __applyHideCapture(floatingButton, isStreamerMode);
+- (void)SetUpBase {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        Moudule_Base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
+    });
+}
+
+- (void)updateFrame {
+    if (!self.window) return;
+    // Throttle: рендерим ESP не чаще 20fps — экономим CPU
+    static CFTimeInterval _lastESPTime = 0;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (now - _lastESPTime < 0.05) return; // 20fps = 50ms
+    _lastESPTime = now;
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    [CATransaction setAnimationDuration:0];
+
+    // Скрываем старые слои (не удаляем — переиспользуем через пул)
+    for (CALayer *layer in self.drawingLayers) {
+        layer.hidden = YES;
+    }
+    // Сбрасываем индекс пула
+    _poolIndex = 0;
+
+    if (isAimbot) {
+        float screenX = self.bounds.size.width / 2;
+        float screenY = self.bounds.size.height / 2;
+        CAShapeLayer *circleLayer = (CAShapeLayer *)[self poolLayerOfClass:[CAShapeLayer class]];
+        UIBezierPath *path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(screenX, screenY)
+            radius:aimFov startAngle:0 endAngle:2 * M_PI clockwise:YES];
+        circleLayer.path = path.CGPath;
+        circleLayer.fillColor = [UIColor clearColor].CGColor;
+        circleLayer.strokeColor = [UIColor colorWithRed:1.0 green:1.0 blue:1.0 alpha:0.5].CGColor;
+        circleLayer.lineWidth = 1.0;
+        circleLayer.hidden = NO;
+    }
+
+    [self renderESPToLayers:self.drawingLayers];
+    [CATransaction commit];
+}
+
+// Пул CALayer — берём существующий или создаём новый, добавляем в self.layer
+- (CALayer *)poolLayerOfClass:(Class)cls {
+    // Растим массив если нужно
+    while (_poolIndex >= (NSInteger)self.drawingLayers.count) {
+        CALayer *newLayer = [cls layer];
+        [self.layer addSublayer:newLayer];
+        [self.drawingLayers addObject:newLayer];
+    }
+    CALayer *layer = self.drawingLayers[_poolIndex];
+    // Если класс не тот — пересоздаём
+    if (![layer isKindOfClass:cls]) {
+        [layer removeFromSuperlayer];
+        layer = [cls layer];
+        [self.layer addSublayer:layer];
+        self.drawingLayers[_poolIndex] = layer;
+    }
+    layer.hidden = NO;
+    _poolIndex++;
+    return layer;
 }
 
 - (void)dealloc {
@@ -898,19 +1162,36 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     self.displayLink = nil;
 }
 
-static inline void DrawBoneLine(NSMutableArray<CALayer *> *layers, CGPoint p1, CGPoint p2, UIColor *color, CGFloat width) {
+// Pool-based line draw — использует слои из пула MenuView вместо создания новых
+static inline void DrawPoolLine(
+    MenuView * __unsafe_unretained mv,
+    NSMutableArray<CALayer *> * __unsafe_unretained layers,
+    CGPoint p1,
+    CGPoint p2,
+    UIColor *color,
+    CGFloat width
+) {
     CGFloat dx = p2.x - p1.x;
     CGFloat dy = p2.y - p1.y;
-    CGFloat len = sqrt(dx*dx + dy*dy);
-    if (len < 1.0f) return;
-    CALayer *line = [CALayer layer];
+    CGFloat len = sqrtf(dx*dx + dy*dy);
+    if (len < 2.0f) return;
+    CALayer *line = [mv poolLayerOfClass:[CALayer class]];
     line.backgroundColor = color.CGColor;
     line.bounds = CGRectMake(0, 0, len, width);
     line.position = p1;
     line.anchorPoint = CGPointMake(0, 0.5);
-    line.transform = CATransform3DMakeRotation(atan2(dy, dx), 0, 0, 1);
-    [layers addObject:line];
+    line.transform = CATransform3DMakeRotation(atan2f(dy, dx), 0, 0, 1);
 }
+
+// Оставляем для совместимости — не используется в новом коде
+static inline void DrawBoneLine(
+    NSMutableArray<CALayer *> *layers,
+    CGPoint p1, CGPoint p2,
+    UIColor *color, CGFloat width
+) {
+    (void)layers; (void)p1; (void)p2; (void)color; (void)width;
+}
+
 
 Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 myLoc){
     return Quaternion::LookRotation((targetLocation + Vector3(0, y_bias, 0)) - myLoc, Vector3(0, 1, 0));
@@ -918,186 +1199,272 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
+    
     WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);
 }
 
+// IsFiring = стреляет (нажата кнопка огня)
 bool get_IsFiring(uint64_t player) {
     if (!isVaildPtr(player)) return false;
     return ReadAddr<bool>(player + OFF_FIRING);
 }
 
-- (void)SetUpBase {
-    if (Moudule_Base != -1) return;
-    Moudule_Base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
-}
 
-- (void)updateFrame {
-    if (!self.window) return;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    for (CALayer *layer in self.drawingLayers) { [layer removeFromSuperlayer]; }
-    [self.drawingLayers removeAllObjects];
-    if (isAimbot) {
-        float screenX = self.bounds.size.width / 2;
-        float screenY = self.bounds.size.height / 2;
-        CAShapeLayer *circleLayer = [CAShapeLayer layer];
-        UIBezierPath *path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(screenX, screenY) radius:aimFov startAngle:0 endAngle:2 * M_PI clockwise:YES];
-        circleLayer.path = path.CGPath;
-        circleLayer.fillColor = [UIColor clearColor].CGColor;
-        circleLayer.strokeColor = [UIColor colorWithRed:1.0 green:1.0 blue:1.0 alpha:0.5].CGColor;
-        circleLayer.lineWidth = 1.0;
-        [self.drawingLayers addObject:circleLayer];
-    }
-    [self renderESPToLayers:self.drawingLayers];
-    for (CALayer *layer in self.drawingLayers) { [self.layer addSublayer:layer]; }
-    [CATransaction commit];
-}
+
+
 
 - (void)renderESPToLayers:(NSMutableArray<CALayer *> *)layers {
     if (Moudule_Base == -1) return;
+
     uint64_t matchGame = getMatchGame(Moudule_Base);
     uint64_t camera = CameraMain(matchGame);
     if (!isVaildPtr(camera)) return;
+
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
+
     uint64_t myPawnObject = getLocalPlayer(match);
     if (!isVaildPtr(myPawnObject)) return;
+
     uint64_t mainCameraTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLocation = getPositionExt(mainCameraTransform);
-    uint64_t player = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
-    uint64_t tValue = ReadAddr<uint64_t>(player + OFF_PLAYERLIST_ARR);
-    int coutValue = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
-    float *matrix = GetViewMatrix(camera);
-    float viewWidth = self.bounds.size.width;
-    float viewHeight = self.bounds.size.height;
+
+    uint64_t player   = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
+    uint64_t tValue   = ReadAddr<uint64_t>(player + OFF_PLAYERLIST_ARR);
+    int coutValue     = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
+
+    float *matrix     = GetViewMatrix(camera);
+    float viewWidth   = self.bounds.size.width;
+    float viewHeight  = self.bounds.size.height;
     CGPoint screenCenter = CGPointMake(viewWidth / 2, viewHeight / 2);
+
     uint64_t bestTarget = 0;
-    float minScore = 99999.0f;
-    bool isFire = get_IsFiring(myPawnObject);
+    float    bestScore  = FLT_MAX;
+    bool     isFire     = get_IsFiring(myPawnObject);
+
+    // Кешируем часто используемые CGColor — не создаём каждый кадр
+    static CGColorRef _whiteColor   = nil;
+    static CGColorRef _bgDarkColor  = nil;
+    static dispatch_once_t _colorOnce;
+    dispatch_once(&_colorOnce, ^{
+        _whiteColor  = CGColorRetain([UIColor whiteColor].CGColor);
+        _bgDarkColor = CGColorRetain([UIColor colorWithWhite:0.0 alpha:0.55].CGColor);
+    });
 
     for (int i = 0; i < coutValue; i++) {
         uint64_t PawnObject = ReadAddr<uint64_t>(tValue + OFF_PLAYERLIST_ITEM + 8 * i);
         if (!isVaildPtr(PawnObject)) continue;
         if (isLocalTeamMate(myPawnObject, PawnObject)) continue;
+
         int CurHP = get_CurHP(PawnObject);
-        if (CurHP <= 0) continue; 
+        if (CurHP <= 0) continue;
+
         Vector3 HeadPos = getPositionExt(getHead(PawnObject));
         float dis = Vector3::Distance(myLocation, HeadPos);
         if (dis > 400.0f) continue;
 
+        // === AIMBOT TARGET SELECTION ===
         if (isAimbot && dis <= aimDistance) {
             Vector3 aimPos = HeadPos;
             if (aimTarget == 1) aimPos = HeadPos + Vector3(0, -0.15f, 0);
             else if (aimTarget == 2) aimPos = getPositionExt(getHip(PawnObject));
             Vector3 w2sAim = WorldToScreen(aimPos, matrix, viewWidth, viewHeight);
-            float deltaX = w2sAim.x - screenCenter.x;
-            float deltaY = w2sAim.y - screenCenter.y;
-            float distFromCenter = sqrt(deltaX * deltaX + deltaY * deltaY);
-            if (distFromCenter <= aimFov) {
-                float score = (aimMode == 0) ? dis : distFromCenter;
-                if (score < minScore) { minScore = score; bestTarget = PawnObject; }
+            float dx = w2sAim.x - screenCenter.x;
+            float dy = w2sAim.y - screenCenter.y;
+            float dist2D = sqrtf(dx*dx + dy*dy);
+            if (dist2D <= aimFov) {
+                float score = (aimMode == 0) ? dis : dist2D;
+                if (score < bestScore) { bestScore = score; bestTarget = PawnObject; }
             }
         }
 
-        if (dis > 220.0f) continue; 
+        if (dis > 220.0f) continue;
+
         Vector3 RightToePos = getPositionExt(getRightToeNode(PawnObject));
-        Vector3 w2sHead = WorldToScreen(HeadPos + Vector3(0, 0.2f, 0), matrix, viewWidth, viewHeight);
-        Vector3 w2sToe = WorldToScreen(RightToePos, matrix, viewWidth, viewHeight);
+        Vector3 HipPos      = getPositionExt(getHip(PawnObject));
+
+        Vector3 HeadTop = HeadPos; HeadTop.y += 0.2f;
+        Vector3 w2sHead = WorldToScreen(HeadTop,      matrix, viewWidth, viewHeight);
+        Vector3 w2sToe  = WorldToScreen(RightToePos,  matrix, viewWidth, viewHeight);
+        Vector3 wHead   = WorldToScreen(HeadPos,       matrix, viewWidth, viewHeight);
+        Vector3 wHip    = WorldToScreen(HipPos,        matrix, viewWidth, viewHeight);
+
         float boxHeight = fabsf(w2sHead.y - w2sToe.y);
-        if (boxHeight < 5.0f) continue;
+        if (boxHeight < 8.0f) continue;
         float boxWidth = boxHeight * 0.45f;
         float bx = w2sHead.x - boxWidth * 0.5f;
         float by = w2sHead.y;
 
+        // Цвет обводки по дистанции
+        UIColor *accentUI;
+        if      (dis < 30.0f)  accentUI = [UIColor colorWithRed:1.0 green:0.25 blue:0.25 alpha:1.0];
+        else if (dis < 80.0f)  accentUI = [UIColor colorWithRed:1.0 green:0.85 blue:0.0  alpha:1.0];
+        else                   accentUI = [UIColor colorWithRed:0.3 green:0.9  blue:1.0  alpha:1.0];
+        CGColorRef accentCG = accentUI.CGColor;
+
+        // === SKELETON ===
         if (isBone) {
-            Vector3 HipPos = getPositionExt(getHip(PawnObject));
-            Vector3 L_Ankle = getPositionExt(getLeftAnkle(PawnObject));
-            Vector3 R_Ankle = getPositionExt(getRightAnkle(PawnObject));
             Vector3 L_Shoulder = getPositionExt(getLeftShoulder(PawnObject));
             Vector3 R_Shoulder = getPositionExt(getRightShoulder(PawnObject));
-            Vector3 L_Elbow = getPositionExt(getLeftElbow(PawnObject));
-            Vector3 R_Elbow = getPositionExt(getRightElbow(PawnObject));
-            Vector3 L_Hand = getPositionExt(getLeftHand(PawnObject));
-            Vector3 R_Hand = getPositionExt(getRightHand(PawnObject));
-            Vector3 wHead = WorldToScreen(HeadPos, matrix, viewWidth, viewHeight);
-            Vector3 wHip = WorldToScreen(HipPos, matrix, viewWidth, viewHeight);
+            Vector3 L_Elbow    = getPositionExt(getLeftElbow(PawnObject));
+            Vector3 R_Elbow    = getPositionExt(getRightElbow(PawnObject));
+            Vector3 L_Hand     = getPositionExt(getLeftHand(PawnObject));
+            Vector3 R_Hand     = getPositionExt(getRightHand(PawnObject));
+            Vector3 L_Ankle    = getPositionExt(getLeftAnkle(PawnObject));
+            Vector3 R_Ankle    = getPositionExt(getRightAnkle(PawnObject));
+
             Vector3 wLS = WorldToScreen(L_Shoulder, matrix, viewWidth, viewHeight);
             Vector3 wRS = WorldToScreen(R_Shoulder, matrix, viewWidth, viewHeight);
-            Vector3 wLE = WorldToScreen(L_Elbow, matrix, viewWidth, viewHeight);
-            Vector3 wRE = WorldToScreen(R_Elbow, matrix, viewWidth, viewHeight);
-            Vector3 wLH = WorldToScreen(L_Hand, matrix, viewWidth, viewHeight);
-            Vector3 wRH = WorldToScreen(R_Hand, matrix, viewWidth, viewHeight);
-            Vector3 wLA = WorldToScreen(L_Ankle, matrix, viewWidth, viewHeight);
-            Vector3 wRA = WorldToScreen(R_Ankle, matrix, viewWidth, viewHeight);
-            UIColor *boneColor = [UIColor whiteColor];
-            DrawBoneLine(layers, CGPointMake(wHead.x, wHead.y), CGPointMake(wHip.x, wHip.y), boneColor, 1.0f);
-            DrawBoneLine(layers, CGPointMake(wLS.x, wLS.y), CGPointMake(wRS.x, wRS.y), boneColor, 1.0f);
-            DrawBoneLine(layers, CGPointMake(wLS.x, wLS.y), CGPointMake(wLE.x, wLE.y), boneColor, 1.0f);
-            DrawBoneLine(layers, CGPointMake(wLE.x, wLE.y), CGPointMake(wLH.x, wLH.y), boneColor, 1.0f);
-            DrawBoneLine(layers, CGPointMake(wRS.x, wRS.y), CGPointMake(wRE.x, wRE.y), boneColor, 1.0f);
-            DrawBoneLine(layers, CGPointMake(wRE.x, wRE.y), CGPointMake(wRH.x, wRH.y), boneColor, 1.0f);
-            DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wLA.x, wLA.y), boneColor, 1.0f);
-            DrawBoneLine(layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wRA.x, wRA.y), boneColor, 1.0f);
+            Vector3 wLE = WorldToScreen(L_Elbow,    matrix, viewWidth, viewHeight);
+            Vector3 wRE = WorldToScreen(R_Elbow,    matrix, viewWidth, viewHeight);
+            Vector3 wLH = WorldToScreen(L_Hand,     matrix, viewWidth, viewHeight);
+            Vector3 wRH = WorldToScreen(R_Hand,     matrix, viewWidth, viewHeight);
+            Vector3 wLA = WorldToScreen(L_Ankle,    matrix, viewWidth, viewHeight);
+            Vector3 wRA = WorldToScreen(R_Ankle,    matrix, viewWidth, viewHeight);
+
+            UIColor *boneCol = [UIColor colorWithWhite:1.0 alpha:0.75];
+            CGFloat bw = 1.0f;
+            DrawPoolLine(self, layers, CGPointMake(wHead.x, wHead.y), CGPointMake(wHip.x, wHip.y), boneCol, bw);
+            DrawPoolLine(self, layers, CGPointMake(wLS.x, wLS.y),   CGPointMake(wRS.x, wRS.y),   boneCol, bw);
+            DrawPoolLine(self, layers, CGPointMake(wLS.x, wLS.y),   CGPointMake(wLE.x, wLE.y),   boneCol, bw);
+            DrawPoolLine(self, layers, CGPointMake(wLE.x, wLE.y),   CGPointMake(wLH.x, wLH.y),   boneCol, bw);
+            DrawPoolLine(self, layers, CGPointMake(wRS.x, wRS.y),   CGPointMake(wRE.x, wRE.y),   boneCol, bw);
+            DrawPoolLine(self, layers, CGPointMake(wRE.x, wRE.y),   CGPointMake(wRH.x, wRH.y),   boneCol, bw);
+            DrawPoolLine(self, layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wLA.x, wLA.y),   boneCol, bw);
+            DrawPoolLine(self, layers, CGPointMake(wHip.x, wHip.y), CGPointMake(wRA.x, wRA.y),   boneCol, bw);
         }
 
-        UIColor *accentColor = (dis < 30.0f) ? [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0] : (dis < 80.0f ? [UIColor colorWithRed:1.0 green:0.85 blue:0.0 alpha:1.0] : [UIColor colorWithRed:0.9 green:0.9 blue:0.9 alpha:0.85]);
-
+        // === BOX: filled + corner brackets ===
         if (isBox) {
-            float cLen = MIN(boxWidth, boxHeight) * 0.22f;
-            float lw = 1.2f;
-            float pts[][4] = {{bx, by, bx+cLen, by}, {bx, by, bx, by+cLen}, {bx+boxWidth-cLen, by, bx+boxWidth, by}, {bx+boxWidth, by, bx+boxWidth, by+cLen}, {bx, by+boxHeight-cLen, bx, by+boxHeight}, {bx, by+boxHeight, bx+cLen, by+boxHeight}, {bx+boxWidth, by+boxHeight-cLen, bx+boxWidth, by+boxHeight}, {bx+boxWidth-cLen, by+boxHeight, bx+boxWidth, by+boxHeight}};
+            // Полупрозрачная заливка
+            CALayer *fill = [self poolLayerOfClass:[CALayer class]];
+            fill.frame = CGRectMake(bx, by, boxWidth, boxHeight);
+            fill.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.18].CGColor;
+            fill.borderColor = accentCG;
+            fill.borderWidth = 0.8f;
+            fill.cornerRadius = 1.0f;
+
+            // Уголки поверх
+            float cLen = MIN(boxWidth, boxHeight) * 0.25f;
+            float lw = 1.6f;
+            float pts[][4] = {
+                {bx, by, bx+cLen, by},           {bx, by, bx, by+cLen},
+                {bx+boxWidth-cLen, by, bx+boxWidth, by}, {bx+boxWidth, by, bx+boxWidth, by+cLen},
+                {bx, by+boxHeight-cLen, bx, by+boxHeight}, {bx, by+boxHeight, bx+cLen, by+boxHeight},
+                {bx+boxWidth, by+boxHeight-cLen, bx+boxWidth, by+boxHeight},
+                {bx+boxWidth-cLen, by+boxHeight, bx+boxWidth, by+boxHeight}
+            };
             for (int ci = 0; ci < 8; ci++) {
-                CALayer *c = [CALayer layer];
-                c.frame = CGRectMake(MIN(pts[ci][0], pts[ci][2]), MIN(pts[ci][1], pts[ci][3]), MAX(fabs(pts[ci][2]-pts[ci][0]), lw), MAX(fabs(pts[ci][3]-pts[ci][1]), lw));
-                c.backgroundColor = accentColor.CGColor;
-                [layers addObject:c];
+                CALayer *c = [self poolLayerOfClass:[CALayer class]];
+                float cx2 = MIN(pts[ci][0], pts[ci][2]);
+                float cy2 = MIN(pts[ci][1], pts[ci][3]);
+                float cw  = MAX(fabsf(pts[ci][2]-pts[ci][0]), lw);
+                float ch  = MAX(fabsf(pts[ci][3]-pts[ci][1]), lw);
+                c.frame = CGRectMake(cx2, cy2, cw, ch);
+                c.backgroundColor = accentCG;
+                c.cornerRadius = 0;
             }
         }
 
-        if (isName) {
-            NSString *name = GetNickName(PawnObject);
-            float nW = MAX(boxWidth, 50.0f), nH = 11.0f;
-            float nX = bx + (boxWidth - nW) * 0.5f, nY = by - nH - 3.0f;
-            CALayer *nbg = [CALayer layer]; nbg.frame = CGRectMake(nX, nY, nW, nH); nbg.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.45].CGColor; nbg.cornerRadius = 2.0f; [layers addObject:nbg];
-            CATextLayer *nl = [CATextLayer layer]; nl.string = name ?: @"?"; nl.fontSize = 8.5f; nl.frame = CGRectMake(nX, nY, nW, nH); nl.alignmentMode = kCAAlignmentCenter; nl.foregroundColor = [UIColor whiteColor].CGColor; nl.contentsScale = [UIScreen mainScreen].scale; [layers addObject:nl];
-        }
-
+        // === HEALTH: вертикальная полоска слева от бокса + цифры HP ===
         if (isHealth) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
                 float ratio = fmaxf(0.0f, fminf(1.0f, (float)CurHP / MaxHP));
-                float barW = MAX(boxWidth, 50.0f), barH = 3.0f;
-                float barX = bx + (boxWidth - barW) * 0.5f, barY = by - 14.0f - barH - 2.0f;
-                CALayer *bgH = [CALayer layer]; bgH.frame = CGRectMake(barX, barY, barW, barH); bgH.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.55].CGColor; [layers addObject:bgH];
-                CALayer *fillH = [CALayer layer]; fillH.frame = CGRectMake(barX, barY, barW * ratio, barH); fillH.backgroundColor = (ratio > 0.6f ? [UIColor greenColor] : (ratio > 0.3f ? [UIColor yellowColor] : [UIColor redColor])).CGColor; [layers addObject:fillH];
-                
-                // ЦИФРОВОЕ HP
-                CATextLayer *ht = [CATextLayer layer];
-                ht.string = [NSString stringWithFormat:@"%d", CurHP];
-                ht.fontSize = 7.0f;
-                ht.frame = CGRectMake(barX, barY - 9.0f, barW, 9.0f);
-                ht.alignmentMode = kCAAlignmentCenter;
-                ht.foregroundColor = [UIColor whiteColor].CGColor;
-                ht.contentsScale = [UIScreen mainScreen].scale;
-                [layers addObject:ht];
+
+                CGColorRef hpCG;
+                if      (ratio > 0.6f) hpCG = [UIColor colorWithRed:0.15 green:0.9 blue:0.35 alpha:1.0].CGColor;
+                else if (ratio > 0.3f) hpCG = [UIColor colorWithRed:1.0  green:0.75 blue:0.0 alpha:1.0].CGColor;
+                else                   hpCG = [UIColor colorWithRed:1.0  green:0.2  blue:0.2 alpha:1.0].CGColor;
+
+                float barW  = 3.5f;
+                float barH  = boxHeight;
+                float barX  = bx - barW - 3.0f;
+                float barY  = by;
+
+                // Фон полоски
+                CALayer *bgH = [self poolLayerOfClass:[CALayer class]];
+                bgH.frame = CGRectMake(barX, barY, barW, barH);
+                bgH.backgroundColor = _bgDarkColor;
+                bgH.cornerRadius = 1.5f;
+
+                // Заполнение (снизу вверх)
+                float fillH = barH * ratio;
+                CALayer *fillLayer = [self poolLayerOfClass:[CALayer class]];
+                fillLayer.frame = CGRectMake(barX, barY + barH - fillH, barW, fillH);
+                fillLayer.backgroundColor = hpCG;
+                fillLayer.cornerRadius = 1.5f;
+
+                // Цифры HP/MaxHP справа от полоски (над боксом)
+                CATextLayer *hpTxt = (CATextLayer *)[self poolLayerOfClass:[CATextLayer class]];
+                hpTxt.string = [NSString stringWithFormat:@"%d/%d", CurHP, MaxHP];
+                hpTxt.fontSize = 7.5f;
+                hpTxt.foregroundColor = hpCG;
+                hpTxt.contentsScale = [UIScreen mainScreen].scale;
+                hpTxt.alignmentMode = kCAAlignmentLeft;
+                hpTxt.frame = CGRectMake(barX, barY - 9.0f, 42.0f, 9.0f);
             }
         }
 
+        // === NAME: над боксом ===
+        if (isName) {
+            NSString *name = GetNickName(PawnObject);
+            if (!name || name.length == 0) name = @"?";
+            float nW  = MAX(boxWidth, 60.0f);
+            float nH  = 11.0f;
+            float nX  = bx + (boxWidth - nW) * 0.5f;
+            float nY  = by - nH - 2.0f;
+            // Коррекция если Health тоже показывается (HP цифры занимают место)
+            if (isHealth) nY -= 10.0f;
+
+            CALayer *nbg = [self poolLayerOfClass:[CALayer class]];
+            nbg.frame = CGRectMake(nX, nY, nW, nH);
+            nbg.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.5].CGColor;
+            nbg.cornerRadius = 2.0f;
+
+            CATextLayer *nl = (CATextLayer *)[self poolLayerOfClass:[CATextLayer class]];
+            nl.string = name;
+            nl.fontSize = 8.5f;
+            nl.frame = CGRectMake(nX, nY, nW, nH);
+            nl.alignmentMode = kCAAlignmentCenter;
+            nl.foregroundColor = _whiteColor;
+            nl.contentsScale = [UIScreen mainScreen].scale;
+        }
+
+        // === DISTANCE: под боксом ===
         if (isDis) {
-            CATextLayer *dl = [CATextLayer layer]; dl.string = [NSString stringWithFormat:@"%.0fm", dis]; dl.fontSize = 8.0f; dl.frame = CGRectMake(bx, by+boxHeight+1.0f, boxWidth, 10.0f); dl.alignmentMode = kCAAlignmentCenter; dl.foregroundColor = [UIColor colorWithWhite:0.7 alpha:0.8].CGColor; dl.contentsScale = [UIScreen mainScreen].scale; [layers addObject:dl];
+            CATextLayer *dl = (CATextLayer *)[self poolLayerOfClass:[CATextLayer class]];
+            dl.string = [NSString stringWithFormat:@"%.0fm", dis];
+            dl.fontSize = 8.0f;
+            dl.frame = CGRectMake(bx, by + boxHeight + 1.5f, boxWidth, 10.0f);
+            dl.alignmentMode = kCAAlignmentCenter;
+            dl.foregroundColor = [UIColor colorWithWhite:0.75 alpha:0.85].CGColor;
+            dl.contentsScale = [UIScreen mainScreen].scale;
         }
 
+        // === ESP LINE ===
         if (isLine) {
-            CGFloat sw = viewWidth, sh = viewHeight;
-            CGPoint from = (lineOrigin == 0) ? CGPointMake(sw*0.5f, 0) : ((lineOrigin == 1) ? CGPointMake(sw*0.5f, sh*0.5f) : CGPointMake(sw*0.5f, sh));
-            CGPoint to = (lineOrigin == 2) ? CGPointMake(bx + boxWidth*0.5f, by + boxHeight) : CGPointMake(bx + boxWidth*0.5f, by);
-            DrawBoneLine(layers, from, to, [accentColor colorWithAlphaComponent:0.5], 0.8f);
+            CGFloat sw = self.bounds.size.width;
+            CGFloat sh = self.bounds.size.height;
+            CGPoint from;
+            if      (lineOrigin == 0) from = CGPointMake(sw*0.5f, 0);
+            else if (lineOrigin == 1) from = CGPointMake(sw*0.5f, sh*0.5f);
+            else                      from = CGPointMake(sw*0.5f, sh);
+            CGPoint to = (lineOrigin == 2)
+                ? CGPointMake(bx + boxWidth*0.5f, by + boxHeight)
+                : CGPointMake(bx + boxWidth*0.5f, by);
+            DrawPoolLine(self, layers, from, to, [accentUI colorWithAlphaComponent:0.4], 0.7f);
         }
     }
 
-    if (isAimbot && isVaildPtr(bestTarget) && (aimTrigger == 0 || (aimTrigger == 1 && isFire))) {
-        Vector3 aimPos = (aimTarget == 0) ? getPositionExt(getHead(bestTarget)) : (aimTarget == 1 ? getPositionExt(getHead(bestTarget)) + Vector3(0, -0.15f, 0) : getPositionExt(getHip(bestTarget)));
-        set_aim(myPawnObject, GetRotationToLocation(aimPos, 0.1f, myLocation));
+    // === AIMBOT APPLY ===
+    bool shouldAim = (aimTrigger == 0) || (aimTrigger == 1 && isFire);
+    if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
+        Vector3 aimPos;
+        if      (aimTarget == 0) aimPos = getPositionExt(getHead(bestTarget));
+        else if (aimTarget == 1) aimPos = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.15f, 0);
+        else                     aimPos = getPositionExt(getHip(bestTarget));
+        Quaternion rot = GetRotationToLocation(aimPos, 0.1f, myLocation);
+        set_aim(myPawnObject, rot);
     }
-}
-@end
+}@end
