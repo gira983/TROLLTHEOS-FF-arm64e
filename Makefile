@@ -7,24 +7,23 @@ APPLICATION_NAME := Fryzz
 PACKAGE_NAME := xyris
 Fryzz_USE_MODULES := 0
 
-Fryzz_FILES += $(wildcard core/*.mm core/*.m)
+# HUDApp.mm исключён из Fryzz_FILES и компилируется в core/ subproject без Obscura
+# (Obscura вызывает segfault Apple clang 17 на этом файле)
+CORE_FILES := $(filter-out core/HUDApp.mm,$(wildcard core/*.mm core/*.m))
+Fryzz_FILES += $(CORE_FILES)
 Fryzz_FILES += $(wildcard esp/lib/*.mm) $(wildcard esp/lib/*.cpp)
 Fryzz_FILES += $(wildcard esp/MenuView/*.cpp) $(wildcard esp/MenuView/*.mm)
-
-# platform_stub.c — без плагинов, чистая компиляция
-platform_stub.c_CFLAGS = -fobjc-arc
 Fryzz_FILES += platform_stub.c
+platform_stub.c_CFLAGS = -fobjc-arc
+
+# Subproject core/ компилирует HUDApp.mm без Obscura и даёт libHUDAppLib.a
+SUBPROJECTS += core
+Fryzz_LIBRARIES += HUDAppLib
 
 # ════════════════════════════════════════════════════════════════════════
-# Obscura флаги
-# ВАЖНО: глобальные флаги БЕЗ L2G_ENABLE — он включается только
-# для HUDApp.mm через per-file override ниже.
-# Причина: Theos per-file _CFLAGS добавляются К глобальным, не заменяют.
-# L2G на HUDMainApplication.mm убивает runner по OOM (Exit 137).
+# Obscura — только ENC_FULL, без ENC_FULL_TIMES/ENC_DEEP_INLINE
 # ════════════════════════════════════════════════════════════════════════
 ifdef OBSCURA_LIB
-# ENC_FULL_TIMES=2 и ENC_DEEP_INLINE убраны — вызывают segfault Apple clang 17
-# HUDApp.mm защищён #pragma clang optimize off в начале файла
 OBSCURA_FLAGS := \
   -fpass-plugin=$(OBSCURA_LIB)          \
   -DENC_FULL                            \
@@ -35,19 +34,15 @@ OBSCURA_FLAGS :=
 endif
 
 # ════════════════════════════════════════════════════════════════════════
-# Компилятор — системный clang (Xcode), совместим с Obscura
-# Hikari убран: несовместим с Apple clang 17 (Trace/BPT trap: 5)
+# Компилятор — системный clang (Xcode)
 # ════════════════════════════════════════════════════════════════════════
 TARGET := iphone:clang:16.5:14.0
-THEOS_IOS_SDK  := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
+THEOS_IOS_SDK := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
 ifneq ($(THEOS_IOS_SDK),)
 Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/Frameworks
 Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/PrivateFrameworks
 endif
 
-# ════════════════════════════════════════════════════════════════════════
-# Глобальные флаги (без L2G_ENABLE)
-# ════════════════════════════════════════════════════════════════════════
 Fryzz_CFLAGS += -fobjc-arc                          \
   -Wno-unused-function                               \
   -Wno-deprecated-declarations                       \
@@ -58,8 +53,6 @@ Fryzz_CFLAGS += -fobjc-arc                          \
 Fryzz_CFLAGS += -Iinclude
 Fryzz_CFLAGS += -include hud-prefix.pch
 Fryzz_CFLAGS += $(OBSCURA_FLAGS)
-
-# L2G_ENABLE убран: вызывает Segmentation fault на Apple clang 17 (HUDApp.mm слишком большой)
 
 Fryzz_CCFLAGS += -std=c++14
 Fryzz_CCFLAGS += -DNOTIFY_LAUNCHED_HUD=\"ch.xxtou.notification.hud.launched\"
