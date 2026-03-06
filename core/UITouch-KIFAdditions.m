@@ -28,29 +28,15 @@
 
   [self setView:hitTestView];
   [self setPhase:UITouchPhaseBegan];
-  if (@available(iOS 14.0, *)) {
-    if (![[NSProcessInfo processInfo] isiOSAppOnMac] &&
-        ![[NSProcessInfo processInfo] isMacCatalystApp])
-    {
-      [self _setIsTapToClick:NO];
-    }
-    else
-    {
-      [self _setIsFirstTouchForView:YES];
-      [self setIsTap:NO];
-    }
-  } else if (@available(iOS 13.0, *)) {
-    if (![[NSProcessInfo processInfo] isMacCatalystApp])
-    {
-      [self _setIsTapToClick:NO];
-    }
-    else
-    {
-      [self _setIsFirstTouchForView:YES];
-      [self setIsTap:NO];
-    }
-  } else {
+  if (![[NSProcessInfo processInfo] isiOSAppOnMac] &&
+      ![[NSProcessInfo processInfo] isMacCatalystApp])
+  {
     [self _setIsTapToClick:NO];
+  }
+  else
+  {
+    [self _setIsFirstTouchForView:YES];
+    [self setIsTap:NO];
   }
 
   [self setTimestamp:[[NSProcessInfo processInfo] systemUptime]];
@@ -68,15 +54,11 @@
   if (self == nil)
     return nil;
   
-  UIWindow *window;
-  if (@available(iOS 13.0, *)) {
-    NSArray *scenes =
-        [[[UIApplication sharedApplication] connectedScenes] allObjects];
-    NSArray *windows = [[scenes objectAtIndex:0] windows];
-    window = [windows lastObject];
-  } else {
-    window = [[[UIApplication sharedApplication] windows] lastObject];
-  }
+  NSArray *scenes =
+      [[[UIApplication sharedApplication] connectedScenes] allObjects];
+  
+  NSArray *windows = [[scenes objectAtIndex:0] windows];
+  UIWindow *window = [windows lastObject];
   CGPoint point = CGPointMake(0, 0);
   
   [self setWindow:window];  // Wipes out some values.  Needs to be first.
@@ -87,29 +69,15 @@
   [self setView:hitTestView];
   [self setPhase:UITouchPhaseEnded];
 
-  if (@available(iOS 14.0, *)) {
-    if (![[NSProcessInfo processInfo] isiOSAppOnMac] &&
-        ![[NSProcessInfo processInfo] isMacCatalystApp])
-    {
-      [self _setIsTapToClick:NO];
-    }
-    else
-    {
-      [self _setIsFirstTouchForView:YES];
-      [self setIsTap:NO];
-    }
-  } else if (@available(iOS 13.0, *)) {
-    if (![[NSProcessInfo processInfo] isMacCatalystApp])
-    {
-      [self _setIsTapToClick:NO];
-    }
-    else
-    {
-      [self _setIsFirstTouchForView:YES];
-      [self setIsTap:NO];
-    }
-  } else {
+  if (![[NSProcessInfo processInfo] isiOSAppOnMac] &&
+      ![[NSProcessInfo processInfo] isMacCatalystApp])
+  {
     [self _setIsTapToClick:NO];
+  }
+  else
+  {
+    [self _setIsFirstTouchForView:YES];
+    [self setIsTap:NO];
   }
 
   [self setTimestamp:[[NSProcessInfo processInfo] systemUptime]];
