@@ -93,18 +93,18 @@ static bool isStreamerMode = NO;   // Stream Proof
 @property (nonatomic, assign, getter=isOn) BOOL on;
 @end
 
-@implementation CustomSwitch { UIView *_thumb; BOOL _touchActive; }
+@implementation CustomSwitch { UIView *_thumb; BOOL _touchActive; NSTimeInterval _lastToggleTime; }
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
         self.backgroundColor = [UIColor clearColor];
         self.userInteractionEnabled = YES;
+        _lastToggleTime = 0;
         _thumb = [[UIView alloc] initWithFrame:CGRectMake(2, 2, 22, 22)];
         _thumb.backgroundColor = [UIColor colorWithWhite:0.75 alpha:1.0];
         _thumb.layer.cornerRadius = 11;
-        _thumb.userInteractionEnabled = NO; // не перехватывает touches — иначе hitTest не найдёт CustomSwitch
+        _thumb.userInteractionEnabled = NO;
         [self addSubview:_thumb];
-        // НЕТ UITapGestureRecognizer — конфликтует с UIScrollView pan и крашит при скролле
     }
     return self;
 }
@@ -124,14 +124,20 @@ static bool isStreamerMode = NO;   // Stream Proof
     }
 }
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    if (_touchActive) {
-        CGPoint pt = [touches.anyObject locationInView:self];
-        if ([self pointInside:pt withEvent:event]) [self toggle];
-    }
+    if (!_touchActive) return;
     _touchActive = NO;
+    // Защита от двойного срабатывания — TSEventFetcher может прислать два Ended подряд
+    // 0.3 сек дебаунс: второй Ended в течение 300мс игнорируется
+    NSTimeInterval now = CACurrentMediaTime();
+    if (now - _lastToggleTime < 0.3) return;
+    CGPoint pt = [touches.anyObject locationInView:self];
+    if ([self pointInside:pt withEvent:event]) {
+        _lastToggleTime = now;
+        [self toggle];
+    }
 }
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    _touchActive = NO; // scroll отменил touch — не переключаем
+    _touchActive = NO;
 }
 - (void)drawRect:(CGRect)rect {
     CGContextRef ctx = UIGraphicsGetCurrentContext();
