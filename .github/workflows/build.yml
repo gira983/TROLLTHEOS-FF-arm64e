@@ -22,15 +22,6 @@ jobs:
           curl -L "https://github.com/theos/sdks/archive/refs/heads/master.tar.gz" -o sdks.tar.gz
           tar -xzf sdks.tar.gz --strip-components=1 -C $HOME/theos/sdks/ '*/iPhoneOS16.5.sdk'
 
-      - name: Install LLVM 17
-        run: |
-          brew install llvm@17 ninja cmake
-          LLVM_PREFIX=$(brew --prefix llvm@17)
-          echo "LLVM_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
-          echo "LLVM_BIN=$LLVM_PREFIX/bin" >> $GITHUB_ENV
-          echo "CC=$LLVM_PREFIX/bin/clang" >> $GITHUB_ENV
-          echo "CXX=$LLVM_PREFIX/bin/clang++" >> $GITHUB_ENV
-
       - name: Install Obscura
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,45 +42,21 @@ jobs:
           echo "OBSCURA_LIB=$(pwd)/lib/libObscura.dylib" >> $GITHUB_ENV
           echo "OBSCURA_INCLUDE=$(pwd)/include" >> $GITHUB_ENV
 
-      - name: Build Hikari pass
-        run: |
-          git clone --depth=1 https://github.com/lich4/llvm-pass-hikari $HOME/ollvm-pass
-          cd $HOME/ollvm-pass
-          LLVM_CMAKE="$LLVM_PREFIX/lib/cmake/llvm"
-          cmake -S hikari -G Ninja -B hikari/build -DCMAKE_BUILD_TYPE=Release -DLLVM_DIR="$LLVM_CMAKE"
-          cmake --build hikari/build
-          HIKARI_LIB=$(find $HOME/ollvm-pass/hikari/build -name "*.dylib" | head -1)
-          echo "HIKARI_LIB=$HIKARI_LIB" >> $GITHUB_ENV
-          echo "Hikari built: $HIKARI_LIB"
-
-      - name: Setup policy.json
-        run: |
-          if [ ! -f policy.json ]; then
-            cp $HOME/ollvm-pass/hikari/test/policy.json policy.json
-          fi
-          echo "Policy:" && cat policy.json
-
-      - name: Verify plugins
+      - name: Verify Obscura
         run: |
           echo "int x = 0x1337;" > /tmp/t.c
-          $LLVM_BIN/clang -fpass-plugin="$OBSCURA_LIB" -DENC_FULL -DENC_DEEP_INLINE -DL2G_ENABLE -I"$OBSCURA_INCLUDE" -include "$OBSCURA_INCLUDE/config.h" -target arm64-apple-ios14.0 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -c /tmp/t.c -o /tmp/t_o.o && echo "Obscura: OK" || echo "Obscura: FAIL"
-          $LLVM_BIN/clang -fpass-plugin="$HIKARI_LIB" -target arm64-apple-ios14.0 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) -c /tmp/t.c -o /tmp/t_h.o && echo "Hikari: OK" || echo "Hikari: FAIL"
+          xcrun clang -fpass-plugin="$OBSCURA_LIB" -DENC_FULL -DENC_DEEP_INLINE -DL2G_ENABLE \
+            -I"$OBSCURA_INCLUDE" -include "$OBSCURA_INCLUDE/config.h" \
+            -target arm64-apple-ios14.0 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
+            -c /tmp/t.c -o /tmp/t_o.o && echo "Obscura: OK" || echo "Obscura: FAIL"
 
       - name: Build
         run: |
-          # brew LLVM clang — для компиляции (плагины Hikari/Obscura)
-          # Системный Apple clang — только для линковки (знает iOS sysroot)
-          SYSTEM_CLANG=$(xcrun --find clang)
-          SYSTEM_CLANGXX=$(xcrun --find clang++)
           THEOS_SDK=$(ls -d $HOME/theos/sdks/iPhoneOS*.sdk | head -1)
           echo "Theos SDK: $THEOS_SDK"
-          echo "LLVM_BIN: $LLVM_BIN"
-          echo "System clang: $SYSTEM_CLANG"
 
           make clean
           make package ARCHS="arm64 arm64e" \
-            LD="$SYSTEM_CLANG" \
-            LDXX="$SYSTEM_CLANGXX" \
             2>&1 | tee build.log
           echo "=== ERRORS ==="
           grep "error:" build.log | head -10 || true
