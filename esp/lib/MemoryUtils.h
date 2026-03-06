@@ -2,6 +2,8 @@
 #define MemoryUtils_h
 
 #include <mach/mach.h>
+#include <mach/processor_set.h>
+#include <mach/mach_host.h>
 #include <sys/sysctl.h>
 #include <string>
 
