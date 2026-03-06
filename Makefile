@@ -35,11 +35,9 @@ endif
 # Компилятор: brew LLVM для компиляции (совместим с Obscura)
 # TARGET через LLVM_BIN если задан в env, иначе системный
 # ════════════════════════════════════════════════════════════════════════
-ifdef LLVM_BIN
-TARGET := iphone:$(LLVM_BIN)/clang:16.5:14.0
-else
+# clang в PATH = brew LLVM 17 (добавлен через $GITHUB_PATH в build.yml)
+# Obscura требует brew LLVM — с Apple clang 17 segfault
 TARGET := iphone:clang:16.5:14.0
-endif
 
 THEOS_IOS_SDK := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
 ifneq ($(THEOS_IOS_SDK),)
