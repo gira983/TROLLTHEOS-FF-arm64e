@@ -7,8 +7,7 @@ APPLICATION_NAME := Fryzz
 PACKAGE_NAME := xyris
 Fryzz_USE_MODULES := 0
 
-# core/ компилируется как subproject БЕЗ Obscura (Apple clang 17 крашит с плагином)
-# esp/ компилируется с Obscura
+# core/ — subproject без Obscura
 SUBPROJECTS += core
 Fryzz_LIBRARIES += CoreLib
 
@@ -30,7 +29,18 @@ else
 OBSCURA_FLAGS :=
 endif
 
-TARGET := iphone:clang:16.5:14.0
+# ════════════════════════════════════════════════════════════════════════
+# TARGET — читаем путь к brew clang из файла .llvm_bin (записывается в build.yml)
+# Это единственный способ передать абсолютный путь в Theos TARGET
+# ════════════════════════════════════════════════════════════════════════
+LLVM_BIN_FILE := $(CURDIR)/.llvm_bin
+ifneq ($(wildcard $(LLVM_BIN_FILE)),)
+  LLVM_BIN_PATH := $(shell cat $(LLVM_BIN_FILE))
+  TARGET := iphone:$(LLVM_BIN_PATH)/clang:16.5:14.0
+else
+  TARGET := iphone:clang:16.5:14.0
+endif
+
 THEOS_IOS_SDK := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
 ifneq ($(THEOS_IOS_SDK),)
 Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/Frameworks
