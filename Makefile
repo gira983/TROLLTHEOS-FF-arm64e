@@ -1,13 +1,7 @@
-# TARGET ДО include common.mk — обязательно для Theos
-# Путь к brew clang передаётся через переменную BREW_CLANG из командной строки make
-ifdef BREW_CLANG
-TARGET := iphone:$(BREW_CLANG):16.5:14.0
-else
-TARGET := iphone:clang:16.5:14.0
-endif
-
 ARCHS := arm64 arm64e
 INSTALL_TARGET_PROCESSES := Fryzz
+TARGET := iphone:clang:16.5:14.0
+
 include $(THEOS)/makefiles/common.mk
 
 IS_NEW_ABI := 1
@@ -15,29 +9,11 @@ APPLICATION_NAME := Fryzz
 PACKAGE_NAME := xyris
 Fryzz_USE_MODULES := 0
 
-SUBPROJECTS += core
-Fryzz_LIBRARIES += CoreLib
-
+Fryzz_FILES += $(wildcard core/*.mm core/*.m)
 Fryzz_FILES += $(wildcard esp/lib/*.mm) $(wildcard esp/lib/*.cpp)
 Fryzz_FILES += $(wildcard esp/MenuView/*.cpp) $(wildcard esp/MenuView/*.mm)
 Fryzz_FILES += platform_stub.c
 platform_stub.c_CFLAGS = -fobjc-arc
-
-ifdef OBSCURA_LIB
-OBSCURA_FLAGS := \
-  -fpass-plugin=$(OBSCURA_LIB)          \
-  -DENC_FULL                            \
-  -I$(OBSCURA_INCLUDE)                  \
-  -include $(OBSCURA_INCLUDE)/config.h
-else
-OBSCURA_FLAGS :=
-endif
-
-THEOS_IOS_SDK := $(wildcard $(THEOS)/sdks/iPhoneOS*.sdk)
-ifneq ($(THEOS_IOS_SDK),)
-Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/Frameworks
-Fryzz_LDFLAGS += -F$(THEOS_IOS_SDK)/System/Library/PrivateFrameworks
-endif
 
 Fryzz_CFLAGS += -fobjc-arc                          \
   -Wno-unused-function                               \
@@ -48,7 +24,6 @@ Fryzz_CFLAGS += -fobjc-arc                          \
   -Wno-unused-but-set-variable
 Fryzz_CFLAGS += -Iinclude
 Fryzz_CFLAGS += -include hud-prefix.pch
-Fryzz_CFLAGS += $(OBSCURA_FLAGS)
 
 Fryzz_CCFLAGS += -std=c++14
 Fryzz_CCFLAGS += -DNOTIFY_LAUNCHED_HUD=\"ch.xxtou.notification.hud.launched\"
