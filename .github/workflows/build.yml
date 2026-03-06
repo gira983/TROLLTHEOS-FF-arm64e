@@ -72,8 +72,11 @@ jobs:
           # SDKROOT = iOS SDK — линковщик берёт libobjc из iOS, не macOS
           export SDKROOT="$THEOS_SDK"
 
-          make clean
-          make package ARCHS="arm64 arm64e" \
+          BREW_CLANG="$LLVM_BIN/clang"
+          echo "BREW_CLANG: $BREW_CLANG"
+
+          make clean BREW_CLANG="$BREW_CLANG"
+          make package ARCHS="arm64 arm64e" BREW_CLANG="$BREW_CLANG" \
             2>&1 | tee build.log
           echo "=== ERRORS ==="
           grep "error:" build.log | head -20 || true
