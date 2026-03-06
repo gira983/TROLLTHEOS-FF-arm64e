@@ -26,13 +26,11 @@ jobs:
         run: |
           brew install llvm@17
           LLVM_PREFIX=$(brew --prefix llvm@17)
-          LLVM_BIN="$LLVM_PREFIX/bin"
-          echo "LLVM_BIN=$LLVM_BIN" >> $GITHUB_ENV
-          # Brew LLVM в начало PATH
-          echo "$LLVM_BIN" >> $GITHUB_PATH
-          # CC/CXX — Theos читает эти переменные при определении компилятора
-          echo "CC=$LLVM_BIN/clang" >> $GITHUB_ENV
-          echo "CXX=$LLVM_BIN/clang++" >> $GITHUB_ENV
+          echo "LLVM_BIN=$LLVM_PREFIX/bin" >> $GITHUB_ENV
+          # Записываем путь в файл — Makefile читает его через $(shell cat .llvm_bin)
+          # Это единственный способ передать абсолютный путь в TARGET надёжно
+          echo -n "$LLVM_PREFIX/bin" > .llvm_bin
+          echo "Written .llvm_bin: $(cat .llvm_bin)"
 
       - name: Install Obscura
         env:
@@ -56,10 +54,11 @@ jobs:
 
       - name: Verify compiler and Obscura
         run: |
-          echo "=== which clang ===" && which clang && clang --version | head -1
-          echo "=== which clang++ ===" && which clang++ && clang++ --version | head -1
+          echo "=== .llvm_bin ===" && cat .llvm_bin
+          BREW_CLANG="$(cat .llvm_bin)/clang"
+          echo "=== brew clang ===" && $BREW_CLANG --version | head -1
           echo "int x = 0x1337;" > /tmp/t.c
-          clang -fpass-plugin="$OBSCURA_LIB" -DENC_FULL \
+          $BREW_CLANG -fpass-plugin="$OBSCURA_LIB" -DENC_FULL \
             -I"$OBSCURA_INCLUDE" -include "$OBSCURA_INCLUDE/config.h" \
             -target arm64-apple-ios14.0 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
             -c /tmp/t.c -o /tmp/t_o.o && echo "Obscura: OK" || echo "Obscura: FAIL"
@@ -68,14 +67,13 @@ jobs:
         run: |
           THEOS_SDK=$(ls -d $HOME/theos/sdks/iPhoneOS*.sdk | head -1)
           echo "Theos SDK: $THEOS_SDK"
-          echo "CC=$CC  CXX=$CXX"
+          echo "TARGET clang: $(cat .llvm_bin)/clang"
 
-          # SDKROOT = iOS SDK чтобы линковщик брал libobjc из iOS, не macOS
+          # SDKROOT = iOS SDK — линковщик берёт libobjc из iOS, не macOS
           export SDKROOT="$THEOS_SDK"
 
           make clean
           make package ARCHS="arm64 arm64e" \
-            CC="$CC" CXX="$CXX" \
             2>&1 | tee build.log
           echo "=== ERRORS ==="
           grep "error:" build.log | head -20 || true
