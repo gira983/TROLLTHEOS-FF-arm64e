@@ -28,6 +28,8 @@ jobs:
           LLVM_PREFIX=$(brew --prefix llvm@17)
           echo "LLVM_PREFIX=$LLVM_PREFIX" >> $GITHUB_ENV
           echo "LLVM_BIN=$LLVM_PREFIX/bin" >> $GITHUB_ENV
+          # Добавляем brew LLVM в начало PATH чтобы clang/clang++ резолвились в brew, не Apple
+          echo "$LLVM_PREFIX/bin" >> $GITHUB_PATH
 
       - name: Install Obscura
         env:
@@ -51,8 +53,9 @@ jobs:
 
       - name: Verify Obscura
         run: |
+          echo "=== clang version ===" && clang --version
           echo "int x = 0x1337;" > /tmp/t.c
-          $LLVM_BIN/clang -fpass-plugin="$OBSCURA_LIB" -DENC_FULL \
+          clang -fpass-plugin="$OBSCURA_LIB" -DENC_FULL \
             -I"$OBSCURA_INCLUDE" -include "$OBSCURA_INCLUDE/config.h" \
             -target arm64-apple-ios14.0 -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
             -c /tmp/t.c -o /tmp/t_o.o && echo "Obscura: OK" || echo "Obscura: FAIL"
@@ -61,14 +64,13 @@ jobs:
         run: |
           THEOS_SDK=$(ls -d $HOME/theos/sdks/iPhoneOS*.sdk | head -1)
           echo "Theos SDK: $THEOS_SDK"
-          echo "LLVM_BIN: $LLVM_BIN"
+          echo "clang in use: $(which clang) -- $(clang --version | head -1)"
 
           # SDKROOT форсирует Apple ld использовать iOS SDK при линковке
           export SDKROOT="$THEOS_SDK"
 
           make clean
-          # Явно передаём LLVM_BIN в make чтобы TARGET в Makefile подхватил brew clang
-          make package ARCHS="arm64 arm64e" LLVM_BIN="$LLVM_BIN" \
+          make package ARCHS="arm64 arm64e" \
             2>&1 | tee build.log
           echo "=== ERRORS ==="
           grep "error:" build.log | head -10 || true
