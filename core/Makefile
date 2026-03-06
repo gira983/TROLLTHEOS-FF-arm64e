@@ -1,6 +1,4 @@
-# core/ subproject — БЕЗ Obscura, но тоже использует brew LLVM через .llvm_bin
-include $(THEOS)/makefiles/common.mk
-
+# TARGET ДО include common.mk
 LLVM_BIN_FILE := $(CURDIR)/../.llvm_bin
 ifneq ($(wildcard $(LLVM_BIN_FILE)),)
   LLVM_BIN_PATH := $(shell cat $(LLVM_BIN_FILE))
@@ -8,6 +6,8 @@ ifneq ($(wildcard $(LLVM_BIN_FILE)),)
 else
   TARGET := iphone:clang:16.5:14.0
 endif
+
+include $(THEOS)/makefiles/common.mk
 
 LIBRARY_NAME = CoreLib
 CoreLib_FILES = $(wildcard *.mm *.m)
