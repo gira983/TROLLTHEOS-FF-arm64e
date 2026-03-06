@@ -77,15 +77,19 @@ jobs:
 
       - name: Build
         run: |
-          BREW_CLANG="$LLVM_BIN/clang"
-          BREW_CLANGXX="$LLVM_BIN/clang++"
+          # brew LLVM clang — для компиляции (плагины Hikari/Obscura)
+          # Системный Apple clang — только для линковки (знает iOS sysroot)
+          SYSTEM_CLANG=$(xcrun --find clang)
+          SYSTEM_CLANGXX=$(xcrun --find clang++)
           THEOS_SDK=$(ls -d $HOME/theos/sdks/iPhoneOS*.sdk | head -1)
           echo "Theos SDK: $THEOS_SDK"
+          echo "LLVM_BIN: $LLVM_BIN"
+          echo "System clang: $SYSTEM_CLANG"
 
           make clean
           make package ARCHS="arm64 arm64e" \
-            THEOS_PLATFORM_CC="$BREW_CLANG" \
-            THEOS_PLATFORM_CXX="$BREW_CLANGXX" \
+            LD="$SYSTEM_CLANG" \
+            LDXX="$SYSTEM_CLANGXX" \
             2>&1 | tee build.log
           echo "=== ERRORS ==="
           grep "error:" build.log | head -10 || true
