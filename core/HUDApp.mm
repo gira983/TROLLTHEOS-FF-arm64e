@@ -1,6 +1,3 @@
-// Отключаем агрессивную оптимизацию — иначе Obscura плагин вызывает segfault
-// на Apple clang 17 из-за слишком большого IR после inline expansion
-#pragma clang optimize off
 #import <cstddef>
 #import <cstring>
 #import <cstdlib>
