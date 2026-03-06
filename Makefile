@@ -59,12 +59,7 @@ Fryzz_CFLAGS += -Iinclude
 Fryzz_CFLAGS += -include hud-prefix.pch
 Fryzz_CFLAGS += $(OBSCURA_FLAGS)
 
-# ════════════════════════════════════════════════════════════════════════
-# Per-file: HUDApp.mm получает L2G_ENABLE дополнительно
-# ════════════════════════════════════════════════════════════════════════
-ifdef OBSCURA_LIB
-core/HUDApp.mm_CFLAGS = -DL2G_ENABLE
-endif
+# L2G_ENABLE убран: вызывает Segmentation fault на Apple clang 17 (HUDApp.mm слишком большой)
 
 Fryzz_CCFLAGS += -std=c++14
 Fryzz_CCFLAGS += -DNOTIFY_LAUNCHED_HUD=\"ch.xxtou.notification.hud.launched\"
