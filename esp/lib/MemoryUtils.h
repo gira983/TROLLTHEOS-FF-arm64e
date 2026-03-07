@@ -9,7 +9,7 @@
 
 #pragma mark - Get PID
 
-static mach_port_t get_task;
+extern mach_port_t get_task;
 static pid_t Processpid;
 
 extern "C" kern_return_t mach_vm_region_recurse(vm_map_t                 map,
@@ -40,5 +40,13 @@ template<typename T>
 bool WriteAddr(long address, const T &data) {
     return _write(address, reinterpret_cast<const void *>(&data), sizeof(T));
 }
+
+// Сканирует память игрового процесса в диапазоне [rangeStart, rangeEnd),
+// ищет pattern размером patSize байт, записывает найденные адреса в outAddrs.
+// Возвращает количество найденных совпадений.
+// Безопасно вызывать из любого потока — использует глобальный get_task.
+int scanForValue(uint64_t rangeStart, uint64_t rangeEnd,
+                 const void *pattern, size_t patSize,
+                 uint64_t *outAddrs, int maxResults);
 
 #endif
