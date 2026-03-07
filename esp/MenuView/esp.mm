@@ -90,11 +90,14 @@ static bool isLine = NO;       // ESP Lines
 static int  lineOrigin = 1;    // 0 = Top, 1 = Center, 2 = Bottom
 
 // --- Aimbot Config ---
-static bool isAimbot    = NO;
-static bool isSilentAim = NO;  // silent aim — камера не двигается, пуля летит в цель
-static bool isIgnoreKnocked = YES; // не целиться в нокнутых
-static float aimFov = 150.0f; // Bán kính vòng tròn FOV
-static float aimDistance = 200.0f; // Khoảng cách aim mặc định
+// ── Обычный Aimbot ──────────────────────────────────────────────────
+static bool  isAimbot      = NO;
+static float aimFov        = 150.0f;
+static float aimDistance   = 200.0f;
+// ── Silent Aim ───────────────────────────────────────────────────────
+static bool  isSilentAim     = NO;
+static float silentFov       = 150.0f;
+static float silentDistance  = 200.0f;
 
 // --- Advanced Aimbot Config ---
 
@@ -802,9 +805,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     aimSep1.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
     [aimTabContainer addSubview:aimSep1]; ay += 6;
 
+    // ─ Aimbot ─────────────────────────────────────────────────────────
     [self addFeatureToView:aimTabContainer withTitle:@"Enable Aimbot" atY:ay initialValue:isAimbot andAction:@selector(toggleAimbot:)]; ay += 30;
-    [self addFeatureToView:aimTabContainer withTitle:@"Silent Aim" atY:ay initialValue:isSilentAim andAction:@selector(toggleSilentAim:)]; ay += 30;
-    [self addFeatureToView:aimTabContainer withTitle:@"Ignore Knocked" atY:ay initialValue:isIgnoreKnocked andAction:@selector(toggleIgnoreKnocked:)]; ay += 30;
 
     ay += 4;
     UIView *aimSep2 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
@@ -821,7 +823,51 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTargetOpts selectedRef:&aimTarget tag:11]; ay += 32;
 
     NSArray *aimTriggerOpts = @[@"Always", @"Shooting"];
-    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTriggerOpts selectedRef:&aimTrigger tag:12];
+    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTriggerOpts selectedRef:&aimTrigger tag:12]; ay += 38;
+
+    // ─ Silent Aim ─────────────────────────────────────────────────────
+    UIView *silSep = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
+    silSep.backgroundColor = aimSep1.backgroundColor;
+    [aimTabContainer addSubview:silSep]; ay += 6;
+
+    UILabel *silTitle = [self makeSectionLabel:@"SILENT AIM" atY:ay width:aW];
+    [aimTabContainer addSubview:silTitle]; ay += 16;
+
+    [self addFeatureToView:aimTabContainer withTitle:@"Enable Silent Aim" atY:ay initialValue:isSilentAim andAction:@selector(toggleSilentAim:)]; ay += 30;
+
+    // Silent FOV slider
+    UILabel *sfovLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ay, aW - 60, 14)];
+    sfovLbl.text = @"Silent FOV"; sfovLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    sfovLbl.font = [UIFont systemFontOfSize:10]; [aimTabContainer addSubview:sfovLbl];
+    UILabel *sfovVal = [[UILabel alloc] initWithFrame:CGRectMake(aW - 45, ay, 40, 14)];
+    sfovVal.text = [NSString stringWithFormat:@"%.0f", silentFov];
+    sfovVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    sfovVal.font = [UIFont systemFontOfSize:10]; sfovVal.textAlignment = NSTextAlignmentRight;
+    [aimTabContainer addSubview:sfovVal]; ay += 16;
+    HUDSlider *sfovSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 36)];
+    sfovSlider.minimumValue = 10; sfovSlider.maximumValue = 500; sfovSlider.value = silentFov;
+    sfovSlider.minimumTrackTintColor = [UIColor colorWithRed:0.8 green:0.4 blue:1.0 alpha:1.0];
+    sfovSlider.thumbTintColor = [UIColor whiteColor];
+    UILabel * __unsafe_unretained sfvRef = sfovVal;
+    sfovSlider.onValueChanged = ^(float v){ silentFov = v; sfvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
+    [aimTabContainer addSubview:sfovSlider]; ay += 44;
+
+    // Silent Distance slider
+    UILabel *sdistLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ay, aW - 60, 14)];
+    sdistLbl.text = @"Silent Distance"; sdistLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    sdistLbl.font = [UIFont systemFontOfSize:10]; [aimTabContainer addSubview:sdistLbl];
+    UILabel *sdistVal = [[UILabel alloc] initWithFrame:CGRectMake(aW - 45, ay, 40, 14)];
+    sdistVal.text = [NSString stringWithFormat:@"%.0f", silentDistance];
+    sdistVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
+    sdistVal.font = [UIFont systemFontOfSize:10]; sdistVal.textAlignment = NSTextAlignmentRight;
+    [aimTabContainer addSubview:sdistVal]; ay += 16;
+    HUDSlider *sdistSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 36)];
+    sdistSlider.minimumValue = 10; sdistSlider.maximumValue = 600; sdistSlider.value = silentDistance;
+    sdistSlider.minimumTrackTintColor = [UIColor colorWithRed:0.4 green:0.8 blue:1.0 alpha:1.0];
+    sdistSlider.thumbTintColor = [UIColor whiteColor];
+    UILabel * __unsafe_unretained sdvRef = sdistVal;
+    sdistSlider.onValueChanged = ^(float v){ silentDistance = v; sdvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
+    [aimTabContainer addSubview:sdistSlider];
 
 
     // --- EXTRA TAB: слайдеры ---
@@ -1056,7 +1102,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleLine:(CustomSwitch *)sender { isLine = sender.isOn; }
 - (void)toggleAimbot:(CustomSwitch *)sender    { isAimbot    = sender.isOn; }
 - (void)toggleSilentAim:(CustomSwitch *)sender { isSilentAim = sender.isOn; }
-- (void)toggleIgnoreKnocked:(CustomSwitch *)sender { isIgnoreKnocked = sender.isOn; }
 
 
 - (void)toggleStreamerMode:(CustomSwitch *)sender {
@@ -1372,7 +1417,7 @@ bool get_IsFiring(uint64_t player) {
         // Убираем лишний cut-off — ESP работает до 600м
         if (dis > 600.0f) continue;
 
-        // ── AIMBOT ──────────────────────────────────────────────────
+        // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
             Vector3 ap = HeadPos;
             if (aimTarget == 1) ap = HeadPos + Vector3(0,-0.15f,0);
@@ -1381,6 +1426,19 @@ bool get_IsFiring(uint64_t player) {
             float dx = ws.x - center.x, dy = ws.y - center.y;
             float d2 = sqrtf(dx*dx+dy*dy);
             if (d2 <= aimFov) {
+                float sc = (aimMode == 0) ? dis : d2;
+                if (sc < bestScore) { bestScore = sc; bestTarget = PawnObject; }
+            }
+        }
+        // ── Silent Aim ───────────────────────────────────────────────
+        if (isSilentAim && dis <= silentDistance) {
+            Vector3 ap = HeadPos;
+            if (aimTarget == 1) ap = HeadPos + Vector3(0,-0.15f,0);
+            else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
+            Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
+            float dx = ws.x - center.x, dy = ws.y - center.y;
+            float d2 = sqrtf(dx*dx+dy*dy);
+            if (d2 <= silentFov) {
                 float sc = (aimMode == 0) ? dis : d2;
                 if (sc < bestScore) { bestScore = sc; bestTarget = PawnObject; }
             }
@@ -1535,23 +1593,25 @@ bool get_IsFiring(uint64_t player) {
         }
     } // end player loop
 
-    // ── Aimbot apply ─────────────────────────────────────────────────
+    // ── Обычный Aimbot apply ─────────────────────────────────────────
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
         else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
         else                   ap = getPositionExt(getHip(bestTarget));
+        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
+    }
+    // ── Silent Aim apply ─────────────────────────────────────────────
+    // Пишем только в m_CurrentAimRotation (rotation пули) — камера не двигается.
+    // Срабатывает всегда (trigger не нужен — игрок сам решает когда стрелять).
+    if (isSilentAim && isVaildPtr(bestTarget)) {
+        Vector3 ap;
+        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
+        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
+        else                   ap = getPositionExt(getHip(bestTarget));
         Quaternion targetRot = GetRotationToLocation(ap, 0.1f, myLoc);
-        if (isSilentAim) {
-            // Silent aim: сохраняем оригинальный, пишем в CurrentAimRotation (пуля),
-            // сразу возвращаем камеру — визуально прицел не двигается
-            Quaternion origRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
-            WriteAddr<Quaternion>(myPawnObject + OFF_SILENT_ROTATION, targetRot);
-            WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, origRot);
-        } else {
-            set_aim(myPawnObject, targetRot);
-        }
+        WriteAddr<Quaternion>(myPawnObject + OFF_SILENT_ROTATION, targetRot);
     }
 
     // ── Передаём на main thread ──────────────────────────────────────
