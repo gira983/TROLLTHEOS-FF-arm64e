@@ -559,9 +559,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     iconLabel.userInteractionEnabled = NO;
     [floatingButton addSubview:iconLabel];
 
-    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(33, 33, 5, 5)];
-    dot.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
-    dot.layer.cornerRadius = 2.5;
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(33, 33, 8, 8)];
+    dot.tag = 77; // индикатор матча: жёлтый = лобби, зелёный = матч
+    dot.backgroundColor = [UIColor colorWithRed:1.0 green:0.8 blue:0.0 alpha:1.0]; // жёлтый по умолчанию
+    dot.layer.cornerRadius = 4;
     [floatingButton addSubview:dot];
 
     UIPanGestureRecognizer *iconPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
@@ -1780,12 +1781,13 @@ bool get_IsFiring(uint64_t player) {
 
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
-            Vector3 ap = HeadPos;
-            if (aimTarget == 1) ap = HeadPos + Vector3(0,-0.15f,0);
-            else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
+            Vector3 ap;
+            if      (aimTarget == 0) ap = HeadPos + Vector3(0, -0.05f, 0);
+            else if (aimTarget == 1) ap = HeadPos + Vector3(0, -0.22f, 0);
+            else                     ap = getPositionExt(getHip(PawnObject));
             Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
             float dx = ws.x - center.x, dy = ws.y - center.y;
-            float d2 = sqrtf(dx*dx+dy*dy);
+            float d2 = sqrtf(dx*dx + dy*dy);
             if (d2 <= aimFov) {
                 float sc = (aimMode == 0) ? dis : d2;
                 if (sc < bestScore) { bestScore = sc; bestTarget = PawnObject; }
@@ -1942,14 +1944,30 @@ bool get_IsFiring(uint64_t player) {
         }
     } // end player loop
 
-    // ── Обычный Aimbot apply ─────────────────────────────────────────
+    // ── Aimbot apply — точный прицел + smoothing ────────────────────
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
-    if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
+    if (isAimbot && isInMatch && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
-        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
-        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
-        else                   ap = getPositionExt(getHip(bestTarget));
-        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
+        if (aimTarget == 0) {
+            // HEAD: чуть ниже центра головы = лоб, точная зона
+            ap = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.05f, 0);
+        } else if (aimTarget == 1) {
+            // NECK: между головой и плечами
+            ap = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.22f, 0);
+        } else {
+            // HIP: центр тела
+            ap = getPositionExt(getHip(bestTarget));
+        }
+        Quaternion targetRot = GetRotationToLocation(ap, 0.0f, myLoc);
+
+        // Smoothing через SLERP — aimSpeed=1.0 мгновенно, 0.05 плавно
+        Quaternion currentRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+        float smooth = fmaxf(0.05f, fminf(1.0f, aimSpeed));
+        Quaternion finalRot = SlerpAim(currentRot, targetRot, smooth);
+
+        // Пишем в камеру (0x53C) и направление пули (0x172C)
+        WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, finalRot);
+        WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), finalRot);
     }
 
 
