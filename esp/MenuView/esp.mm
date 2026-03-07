@@ -140,8 +140,11 @@ static bool isSpeedActive = NO;
 }
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     CGPoint pt = [touches.anyObject locationInView:self];
-    if (pt.x < -10 || pt.x > self.bounds.size.width + 10 ||
-        pt.y < -10 || pt.y > self.bounds.size.height + 10) {
+    // bounds проверяем с запасом — для HUD overlay view
+    CGFloat bW = self.bounds.size.width  > 10 ? self.bounds.size.width  : self.superview.bounds.size.width;
+    CGFloat bH = self.bounds.size.height > 10 ? self.bounds.size.height : self.superview.bounds.size.height;
+    if (pt.x < -10 || pt.x > bW + 10 ||
+        pt.y < -10 || pt.y > bH + 10) {
         _touchActive = NO;
     }
 }
@@ -497,15 +500,18 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)didMoveToWindow {
     [super didMoveToWindow];
     if (self.window) {
-        // Теперь bounds точно известны — центрируем меню и кнопку
-        CGFloat W = self.bounds.size.width;
-        CGFloat H = self.bounds.size.height;
-        if (W > 10 && H > 10) {
-            menuContainer.center = CGPointMake(W / 2.0, H / 2.0);
-            // Кнопка — левый верхний + небольшой отступ
-            CGFloat btnSz = floatingButton.bounds.size.width;
-            floatingButton.center = CGPointMake(btnSz / 2.0 + 20, btnSz / 2.0 + 60);
-        }
+        // Откладываем на следующий runloop — гарантируем что layout уже прошёл
+        dispatch_async(dispatch_get_main_queue(), ^{
+            CGFloat W = self.bounds.size.width;
+            CGFloat H = self.bounds.size.height;
+            if (W < 10 || H < 10) {
+                W = [UIScreen mainScreen].bounds.size.width;
+                H = [UIScreen mainScreen].bounds.size.height;
+            }
+            self->menuContainer.center = CGPointMake(W / 2.0, H / 2.0);
+            CGFloat btnSz = self->floatingButton.bounds.size.width;
+            self->floatingButton.center = CGPointMake(btnSz / 2.0 + 20, btnSz / 2.0 + 60);
+        });
     }
 }
 
@@ -1697,8 +1703,14 @@ bool get_IsFiring(uint64_t player) {
     if (totalCount <= 0 || totalCount > 64) totalCount = 64;
 
     float *matrix = GetViewMatrix(camera);
-    float vW = self.bounds.size.width;
-    float vH = self.bounds.size.height;
+    // Берём РЕАЛЬНЫЙ размер отображения — self.bounds меняется с поворотом
+    // superview (_blurView) имеет autoresizingMask и правильный bounds после поворота
+    float vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
+    float vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
+    if (vW < 10 || vH < 10) {
+        vW = (float)self.bounds.size.width;
+        vH = (float)self.bounds.size.height;
+    }
     CGPoint center = CGPointMake(vW * 0.5f, vH * 0.5f);
 
     // Paths по цветовым зонам: Near(<40м) Mid(<100м) Far(>=100м) Knocked
