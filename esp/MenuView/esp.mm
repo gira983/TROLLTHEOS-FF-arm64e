@@ -1619,7 +1619,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     _espBusy = YES;
 
     // FOV круг — используем superview.bounds как и для ESP
-    if (isAimbot) {
+    // FOV круг — только в матче (не на главном экране/лобби)
+    if (isAimbot && isInMatch) {
         float vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
         float vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
         if (vW < 10 || vH < 10) { vW = self.bounds.size.width; vH = self.bounds.size.height; }
@@ -1703,17 +1704,23 @@ bool get_IsFiring(uint64_t player) {
         _cameraLostFrames++;
         if (_cameraLostFrames > 10) {
             _cameraLostFrames = 0;
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [CATransaction begin]; [CATransaction setDisableActions:YES];
-                for (CAShapeLayer *sl in @[self->_boneNear,self->_boneMid,self->_boneFar,self->_boneKnocked,
-                    self->_boxNear,self->_boxMid,self->_boxFar,self->_boxKnocked,
-                    self->_lineNear,self->_lineMid,self->_lineFar,
-                    self->_hpBgLayer,self->_hpFillGreen,self->_hpFillYellow,self->_hpFillRed]) {
-                    sl.path = nil;
-                }
-                for (CATextLayer *t in self->_textPool) t.hidden = YES;
-                [CATransaction commit];
-            });
+            // Камеры нет давно — мы в лобби/главном экране → сброс isInMatch
+            if (isInMatch) {
+                isInMatch = NO;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    UIView *dot = [self->floatingButton viewWithTag:77];
+                    if (dot) dot.backgroundColor = [UIColor colorWithRed:1.0 green:0.8 blue:0.0 alpha:1.0];
+                    [CATransaction begin]; [CATransaction setDisableActions:YES];
+                    for (CAShapeLayer *sl in @[self->_boneNear,self->_boneMid,self->_boneFar,self->_boneKnocked,
+                        self->_boxNear,self->_boxMid,self->_boxFar,self->_boxKnocked,
+                        self->_lineNear,self->_lineMid,self->_lineFar,
+                        self->_hpBgLayer,self->_hpFillGreen,self->_hpFillYellow,self->_hpFillRed]) {
+                        sl.path = nil; sl.hidden = YES;
+                    }
+                    for (CATextLayer *t in self->_textPool) t.hidden = YES;
+                    [CATransaction commit];
+                });
+            }
         }
         return;
     }
@@ -2013,53 +2020,19 @@ bool get_IsFiring(uint64_t player) {
         }
     } // end player loop
 
-    // ── Aimbot apply ────────────────────────────────────────────────
-    // Trigger: Always(0) — всегда, Shooting(1) — только при стрельбе
-    bool shouldAim = (aimTrigger == 0) || (aimTrigger == 1 && isFire);
-    // ── Aimbot apply ────────────────────────────────────────────────
-    if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
-        uint64_t aimHeadNode = getHead(bestTarget);
-        if (isVaildPtr(aimHeadNode)) {
-
-            // Позиция цели
-            Vector3 freshHead = getPositionExt(aimHeadNode);
-            Vector3 targetPos;
-            if (aimTarget == 0) {
-                targetPos = freshHead;
-            } else if (aimTarget == 1) {
-                targetPos = freshHead + Vector3(0, -0.18f, 0);
-            } else {
-                uint64_t hipNode = getHip(bestTarget);
-                targetPos = isVaildPtr(hipNode)
-                    ? getPositionExt(hipNode)
-                    : freshHead + Vector3(0, -0.5f, 0);
-            }
-
-            // Позиция стрелка — берём hip (не камеру!) чтобы вектор был точным
-            uint64_t myHipNode = getHip(myPawnObject);
-            Vector3 shooterPos = isVaildPtr(myHipNode)
-                ? getPositionExt(myHipNode)
-                : myLoc;
-
-            // Целевой кватернион
-            Quaternion targetRot = GetRotationToLocation(targetPos, 0.0f, shooterPos);
-
-            // Пишем ТОЛЬКО в 0x172C (направление пули)
-            // НЕ пишем в OFF_ROTATION (0x53C) — это вызывает дёрганье камеры
-            // потому что игра сама управляет 0x53C через анимацию
-            if (aimSpeed >= 0.99f) {
-                // Снэп — сразу
-                WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), targetRot);
-            } else {
-                // Плавно — Slerp от targetRot прошлого кадра к новому targetRot
-                // НЕ от текущего cur (который игра уже изменила) — это устраняет осцилляцию
-                static Quaternion s_lastAimRot = Quaternion::Identity();
-                float slerp_t = fmaxf(0.05f, fminf(0.98f, aimSpeed));
-                Quaternion smoothed = SlerpAim(s_lastAimRot, targetRot, slerp_t);
-                s_lastAimRot = smoothed;
-                WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), smoothed);
-            }
-        }
+    // ── Aimbot apply ─────────────────────────────────────────────────
+    bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
+    if (isAimbot && isInMatch && isVaildPtr(bestTarget) && shouldAim) {
+        Vector3 ap;
+        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget)) + Vector3(0,-0.05f,0);
+        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget)) + Vector3(0,-0.22f,0);
+        else                   ap = getPositionExt(getHip(bestTarget));
+        Quaternion targetRot = GetRotationToLocation(ap, 0.0f, myLoc);
+        Quaternion currentRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+        float smooth = fmaxf(0.05f, fminf(1.0f, aimSpeed));
+        Quaternion finalRot = SlerpAim(currentRot, targetRot, smooth);
+        WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, finalRot);
+        WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), finalRot);
     }
 
 
