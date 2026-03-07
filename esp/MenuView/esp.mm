@@ -837,6 +837,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIPanGestureRecognizer *menuPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
     [hdr addGestureRecognizer:menuPan];
 
+    // Pan на весь menuContainer — можно тащить за любую точку
+    UIPanGestureRecognizer *containerPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+    containerPan.cancelsTouchesInView = NO; // не блокировать тапы на кнопки
+    containerPan.delaysTouchesBegan = NO;
+    [menuContainer addGestureRecognizer:containerPan];
+
     // ── SIDEBAR (СЛЕВА) ───────────────────────────────────────────────
     CGFloat sbW = 52 * scale;
     CGFloat sbY = hdrH;
@@ -1388,8 +1394,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)layoutSubviews {
     [super layoutSubviews];
 
-    CGFloat W = self.bounds.size.width;
-    CGFloat H = self.bounds.size.height;
+    CGFloat W = self.superview ? self.superview.bounds.size.width  : self.bounds.size.width;
+    CGFloat H = self.superview ? self.superview.bounds.size.height : self.bounds.size.height;
+    if (W < 10 || H < 10) { W = self.bounds.size.width; H = self.bounds.size.height; }
 
     // При повороте экрана — центрируем меню и возвращаем кнопку в безопасное место
     static CGSize _lastSize;
@@ -1443,8 +1450,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)centerMenu {
-    CGFloat w = self.bounds.size.width;
-    CGFloat h = self.bounds.size.height;
+    CGFloat w = self.superview ? self.superview.bounds.size.width  : self.bounds.size.width;
+    CGFloat h = self.superview ? self.superview.bounds.size.height : self.bounds.size.height;
+    if (w < 10 || h < 10) { w = self.bounds.size.width; h = self.bounds.size.height; }
     menuContainer.center = CGPointMake(w / 2.0, h / 2.0);
 }
 // Обработчики tap — используем gesture recognizers вместо ручного touchesEnded
@@ -1486,17 +1494,20 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (gesture.state == UIGestureRecognizerStateEnded ||
         gesture.state == UIGestureRecognizerStateCancelled) {
 
-        // self.bounds актуален — autoresizingMask растягивает MenuView при повороте
-        CGFloat containerW = self.bounds.size.width;
-        CGFloat containerH = self.bounds.size.height;
+        // superview (_blurView) всегда полноэкранный — берём его размеры
+        CGFloat containerW = self.superview ? self.superview.bounds.size.width  : self.bounds.size.width;
+        CGFloat containerH = self.superview ? self.superview.bounds.size.height : self.bounds.size.height;
+        if (containerW < 10 || containerH < 10) {
+            containerW = [UIScreen mainScreen].bounds.size.width;
+            containerH = [UIScreen mainScreen].bounds.size.height;
+        }
         CGFloat halfW = viewToMove.bounds.size.width  / 2.0;
         CGFloat halfH = viewToMove.bounds.size.height / 2.0;
-        CGFloat margin = 4.0;
+        CGFloat margin = 8.0;
 
         CGFloat cx = viewToMove.center.x;
         CGFloat cy = viewToMove.center.y;
 
-        // Хотя бы половина view должна быть видна
         // Меню полностью внутри экрана при отпускании
         cx = MAX(halfW + margin, MIN(cx, containerW - halfW - margin));
         cy = MAX(halfH + margin, MIN(cy, containerH - halfH - margin));
