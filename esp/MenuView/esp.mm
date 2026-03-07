@@ -107,12 +107,10 @@ static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
 static float aimSpeed = 1.0f;      // Aim smoothing 0.05 - 1.0
 static bool isStreamerMode = NO;   // Stream Proof
 
-// ── No Recoil (value scan) ────────────────────────────────────────────
-static bool isNoRecoil = NO;
-static NSMutableArray<NSNumber*> *noRecoilAddrs = nil; // найденные адреса
-// ── Speed (value scan) ───────────────────────────────────────────────
+// ── No Recoil (value scan, loop) ─────────────────────────────────────
+static bool isNoRecoil   = NO;
+// ── Speed (value scan, loop) ─────────────────────────────────────────
 static bool isSpeedActive = NO;
-static NSMutableArray<NSNumber*> *speedAddrs = nil;    // найденные адреса
 
 @interface CustomSwitch : UIControl
 @property (nonatomic, assign, getter=isOn) BOOL on;
@@ -1147,60 +1145,63 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 // ── Value scan helper ────────────────────────────────────────────────
 // ── No Recoil ─────────────────────────────────────────────────────────
 // h5gg: searchNumber('1016018816','I32','0x100000000','0x160000000') → editAll('180','I32')
+// ── No Recoil — loop каждые 2 сек, ловит новые оружия ───────────────
+// scan: I32=1016018816 → patch: 180  (range 0x100000000..0x160000000)
 - (void)toggleNoRecoil:(CustomSwitch *)sender {
     isNoRecoil = sender.isOn;
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        const int MAX = 4096;
-        int32_t searchVal = 1016018816;
-        int32_t patchVal  = 180;
-        if (isNoRecoil) {
+    if (isNoRecoil) {
+        // Запускаем фоновый loop
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            const int MAX   = 4096;
+            int32_t search  = 1016018816;
+            int32_t patch   = 180;
             uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
-            int count = scanForValue(0x100000000, 0x160000000,
-                                     &searchVal, sizeof(searchVal), addrs, MAX);
-            if (count == 0) { NSLog(@"[NoRecoil] not found"); free(addrs); return; }
-            noRecoilAddrs = [NSMutableArray arrayWithCapacity:count];
-            for (int i = 0; i < count; i++) {
-                [noRecoilAddrs addObject:@(addrs[i])];
-                WriteAddr<int32_t>((long)addrs[i], patchVal);
+            while (isNoRecoil) {
+                int count = scanForValue(0x100000000, 0x160000000,
+                                         &search, sizeof(search), addrs, MAX);
+                for (int i = 0; i < count; i++)
+                    WriteAddr<int32_t>((long)addrs[i], patch);
+                // Ждём 2 секунды перед следующим сканом
+                [NSThread sleepForTimeInterval:2.0];
             }
+            // Восстанавливаем при выключении — один последний скан
+            int count = scanForValue(0x100000000, 0x160000000,
+                                     &patch, sizeof(patch), addrs, MAX);
+            for (int i = 0; i < count; i++)
+                WriteAddr<int32_t>((long)addrs[i], search);
             free(addrs);
-            NSLog(@"[NoRecoil] patched %d addrs", count);
-        } else {
-            for (NSNumber *a in noRecoilAddrs)
-                WriteAddr<int32_t>((long)a.unsignedLongLongValue, searchVal);
-            noRecoilAddrs = nil;
-            NSLog(@"[NoRecoil] restored");
-        }
-    });
+            NSLog(@"[NoRecoil] stopped & restored");
+        });
+    }
+    // isNoRecoil = NO уже установлен — loop сам остановится
 }
 
-// ── Speed ─────────────────────────────────────────────────────────────
-// h5gg: searchNumber('4397530849764387586','I64') → editAll('4366458311853765201','I64')
+// ── Speed — loop каждые 2 сек, ловит новые оружия/регионы ───────────
+// scan: I64=4397530849764387586 → patch: 4366458311853765201
 - (void)toggleSpeed:(CustomSwitch *)sender {
     isSpeedActive = sender.isOn;
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        const int MAX = 4096;
-        int64_t origI64  = 4397530849764387586LL;
-        int64_t speedI64 = 4366458311853765201LL;
-        if (isSpeedActive) {
-            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
-            int count = scanForValue(0x100000000, 0x200000000,
-                                     &origI64, sizeof(origI64), addrs, MAX);
-            if (count == 0) { NSLog(@"[Speed] not found"); free(addrs); return; }
-            speedAddrs = [NSMutableArray arrayWithCapacity:count];
-            for (int i = 0; i < count; i++) {
-                [speedAddrs addObject:@(addrs[i])];
-                WriteAddr<int64_t>((long)addrs[i], speedI64);
+    if (isSpeedActive) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            const int MAX    = 4096;
+            int64_t search   = 4397530849764387586LL;
+            int64_t patch    = 4366458311853765201LL;
+            uint64_t *addrs  = (uint64_t *)malloc(MAX * sizeof(uint64_t));
+            while (isSpeedActive) {
+                int count = scanForValue(0x100000000, 0x200000000,
+                                         &search, sizeof(search), addrs, MAX);
+                for (int i = 0; i < count; i++)
+                    WriteAddr<int64_t>((long)addrs[i], patch);
+                [NSThread sleepForTimeInterval:2.0];
             }
+            // Восстанавливаем
+            int count = scanForValue(0x100000000, 0x200000000,
+                                     &patch, sizeof(patch), addrs, MAX);
+            for (int i = 0; i < count; i++)
+                WriteAddr<int64_t>((long)addrs[i], search);
             free(addrs);
-            NSLog(@"[Speed] patched %d addrs", count);
-        } else {
-            for (NSNumber *a in speedAddrs)
-                WriteAddr<int64_t>((long)a.unsignedLongLongValue, origI64);
-            speedAddrs = nil;
-            NSLog(@"[Speed] restored");
-        }
-    });
+            NSLog(@"[Speed] stopped & restored");
+        });
+    }
 }
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
@@ -1629,7 +1630,8 @@ bool get_IsFiring(uint64_t player) {
                 char hpBuf[32];
                 if (isKnocked) snprintf(hpBuf,sizeof(hpBuf),"KO");
                 else           snprintf(hpBuf,sizeof(hpBuf),"%d",CurHP);
-                addText(hpBuf, hpBX-2.f, hpBY-10.f, 48.f, 10.f, 9.f, hr,hg,hb,1.f, 0.f, 1);
+                float tW = 24.f;
+                addText(hpBuf, hpBX + hpBW*0.5f - tW*0.5f, hpBY-10.f, tW, 10.f, 9.f, hr,hg,hb,1.f, 0.f, 1);
             }
         }
 
