@@ -25,7 +25,13 @@ static void espLog(NSString *msg) {
 #define OFF_ROTATION        ENCRYPTOFFSET("0x53C")
 #define OFF_FIRING          ENCRYPTOFFSET("0x750")
 
-#define OFF_IPRIDATAPOOL    ENCRYPTOFFSET("0x68")
+// Knocked detection — прямые field reads из нового IL2CPP дампа (новая версия FF)
+// IsFrozenKnockDown @ 0xA0  — не изменился
+// IsKnockedDownBleed @ 0x1110 — было 0x1040 в старом дампе
+// IsDieingOnParachute @ 0x1C58 — было 0x1A98 в старом дампе
+#define OFF_ISFROZENKOCKDOWN    ENCRYPTOFFSET("0xA0")
+#define OFF_ISKNOCKDOWNBLEED    ENCRYPTOFFSET("0x1110")
+#define OFF_ISDIEINGONPARACHUTE ENCRYPTOFFSET("0x1C58")
 #define OFF_PLAYERID        ENCRYPTOFFSET("0x338")
 #define OFF_CAMERA_TRANSFORM ENCRYPTOFFSET("0x318")
 #define OFF_HEAD_NODE       ENCRYPTOFFSET("0x5B8")
@@ -1249,22 +1255,19 @@ bool get_IsFiring(uint64_t player) {
     return ReadAddr<bool>(player + OFF_FIRING);
 }
 
-// get_IsDieing — читаем backing field из памяти игры (external, не вызов метода)
-// RVA даёт нам понять что поле лежит рядом — ищем bool field около offset 0x750-0x760
-// Типичный backing field для bool property в IL2CPP = имя поля без "get_"
-// Для get_IsDieing() поле обычно называется <IsDieing>k__BackingField
-// offset нужно найти реверсом — пока используем varID=2 из data pool как fallback
+// get_IsDieing — прямые field reads из нового IL2CPP дампа
+// Три независимых bool поля — knocked если любое из них true:
+//   IsFrozenKnockDown  @ 0xA0   — игрок заморожен в нокдауне
+//   IsKnockedDownBleed @ 0x1110  — нокдаун с кровотечением (основной флаг)
+//   IsDieingOnParachute @ 0x1C58 — умирает на парашюте
+// НЕ вызов метода — только ReadAddr. Вызов function pointer в чужом
+// адресном пространстве (external читалка) = SIGSEGV.
 bool get_IsDieing(uint64_t player) {
     if (!isVaildPtr(player)) return false;
-    // varID=2 из IPRIDataPool — knocked state в Free Fire
-    // 0 = жив, 1 = нокнут
-    uint64_t IPRIDataPool = ReadAddr<uint64_t>(player + OFF_IPRIDATAPOOL);
-    if (!isVaildPtr(IPRIDataPool)) return false;
-    uint64_t list = ReadAddr<uint64_t>(IPRIDataPool + 0x10);
-    if (!isVaildPtr(list)) return false;
-    uint64_t item = ReadAddr<uint64_t>(list + 0x8 * 2 + 0x20);
-    if (!isVaildPtr(item)) return false;
-    return ReadAddr<int>(item + 0x18) == 1;
+    bool frozen   = ReadAddr<bool>(player + OFF_ISFROZENKOCKDOWN);
+    bool bleeding = ReadAddr<bool>(player + OFF_ISKNOCKDOWNBLEED);
+    bool parachute = ReadAddr<bool>(player + OFF_ISDIEINGONPARACHUTE);
+    return frozen || bleeding || parachute;
 }
 
 // Pool текстовых слоёв — берёт существующий или создаёт новый
