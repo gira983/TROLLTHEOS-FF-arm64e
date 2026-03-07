@@ -234,9 +234,33 @@ static bool isSpeedActive = NO;
         _minimumTrackTintColor = [UIColor systemBlueColor];
         _thumbTintColor = [UIColor whiteColor];
         self.userInteractionEnabled = YES;
+        self.multipleTouchEnabled = NO;
         [self buildUI];
+        // Собственный pan — перехватывает горизонтальное движение раньше containerPan
+        UIPanGestureRecognizer *sliderPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSliderPan:)];
+        sliderPan.maximumNumberOfTouches = 1;
+        [self addGestureRecognizer:sliderPan];
     }
     return self;
+}
+
+- (void)handleSliderPan:(UIPanGestureRecognizer *)gr {
+    if (gr.state == UIGestureRecognizerStateBegan ||
+        gr.state == UIGestureRecognizerStateChanged) {
+        CGPoint loc = [gr locationInView:self];
+        [self updateValueFromX:loc.x];
+    }
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (_track && self.bounds.size.width > 0) {
+        CGFloat h = self.bounds.size.height;
+        CGFloat w = self.bounds.size.width;
+        CGFloat trackH = 4;
+        _track.frame = CGRectMake(10, (h - trackH)/2, w - 20, trackH);
+        [self updateThumbPosition];
+    }
 }
 
 - (void)buildUI {
@@ -293,35 +317,10 @@ static bool isSpeedActive = NO;
     _thumb.frame = CGRectMake(thumbX, thumbY, thumbSize, thumbSize);
 }
 
-// Эксклюзивный захват touches — никакой родительский gesture не вмешивается
+// Запрещаем родительским gesture получать touches когда слайдер активен
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gr {
-    return NO;
-}
-
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    self.exclusiveTouch = YES;
-    UITouch *touch = touches.anyObject;
-    CGPoint loc = [touch locationInView:self];
-    _dragStartX = loc.x;
-    _dragStartValue = _value;
-    [self updateValueFromX:loc.x];
-}
-
-- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    UITouch *touch = touches.anyObject;
-    CGPoint loc = [touch locationInView:self];
-    [self updateValueFromX:loc.x];
-}
-
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    UITouch *touch = touches.anyObject;
-    CGPoint loc = [touch locationInView:self];
-    [self updateValueFromX:loc.x];
-    self.exclusiveTouch = NO;
-}
-
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    self.exclusiveTouch = NO;
+    // Разрешаем только собственный sliderPan
+    return (gr.view == self);
 }
 
 - (void)updateValueFromX:(CGFloat)x {
@@ -836,28 +835,29 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     subLbl.font = [UIFont fontWithName:@"Courier" size:8];
     [hdr addSubview:subLbl];
 
-    // Кнопка закрытия — закруглённый квадрат в правом верхнем углу меню
-    // Прилипает к углу: нижний левый угол кнопки = правый верхний угол меню
-    CGFloat closeSz = 32.0;
-    UIView *closeBtn = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - closeSz + 2, -closeSz + 2, closeSz, closeSz)];
+    // Кнопка закрытия — встроена в правый верхний угол menuContainer
+    // Скруглён только нижний левый угол (внутренний), остальные = угол меню
+    CGFloat closeSz = 36.0;
+    UIView *closeBtn = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - closeSz, 0, closeSz, closeSz)];
     closeBtn.backgroundColor = COL_RED;
-    // Только верхний правый угол скруглён (внешний), нижний левый — острый (прижат к углу меню)
-    closeBtn.layer.cornerRadius = 8;
+    closeBtn.layer.cornerRadius = 12;
     if (@available(iOS 13.0, *)) {
         closeBtn.layer.cornerCurve = kCACornerCurveContinuous;
     }
-    closeBtn.layer.maskedCorners = kCALayerMinXMinYCorner | kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner;
+    // Скруглён только нижний левый угол — он "врезается" в меню
+    // Верхний правый = совпадает с углом menuContainer (уже скруглён им)
+    closeBtn.layer.maskedCorners = kCALayerMinXMaxYCorner;
     closeBtn.tag = 200;
     UILabel *closeLbl = [[UILabel alloc] initWithFrame:closeBtn.bounds];
     closeLbl.text = @"✕";
     closeLbl.textColor = [UIColor whiteColor];
-    closeLbl.font = [UIFont boldSystemFontOfSize:13];
+    closeLbl.font = [UIFont boldSystemFontOfSize:14];
     closeLbl.textAlignment = NSTextAlignmentCenter;
     closeLbl.userInteractionEnabled = NO;
     [closeBtn addSubview:closeLbl];
     UITapGestureRecognizer *closeTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleCloseTap:)];
     [closeBtn addGestureRecognizer:closeTap];
-    // (добавится позже через bringSubviewToFront)
+    // (добавляется в menuContainer после sidebar)
 
     UIPanGestureRecognizer *menuPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
     [hdr addGestureRecognizer:menuPan];
@@ -1520,6 +1520,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
+    // Если один из них — слайдерный pan — containerPan уступает
+    UIView *otherView = other.view;
+    while (otherView) {
+        if ([otherView isKindOfClass:[HUDSlider class]]) return NO;
+        otherView = otherView.superview;
+    }
     return NO;
 }
 
