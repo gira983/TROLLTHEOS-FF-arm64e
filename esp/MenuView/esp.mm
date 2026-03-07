@@ -1117,8 +1117,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [menuContainer bringSubviewToFront:sidebar];
 }
 
-}
-
 - (void)switchToTab:(NSInteger)tabIndex {
     mainTabContainer.hidden = YES;
     aimTabContainer.hidden = YES;
