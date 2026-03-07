@@ -23,7 +23,10 @@ static void espLog(NSString *msg) {
 // --- Obfuscated offsets (compile-time encrypted, runtime decrypted) ---
 // Player fields
 #define OFF_ROTATION        ENCRYPTOFFSET("0x53C")    // m_AimRotation (камера)
-#define OFF_SILENT_ROTATION ENCRYPTOFFSET("0x172C")   // m_CurrentAimRotation (пуля)
+// SetAimRotation RVA из дампа — официальный метод игры
+// void SetAimRotation(Quaternion rot, bool flag=true)
+// typedef: (uint64_t instance, Quaternion rot, bool flag, void* method)
+#define RVA_SET_AIM_ROTATION 0x51468F0ULL
 #define OFF_FIRING          ENCRYPTOFFSET("0x750")
 
 // Knocked state через PropertyData pool @ player+0x68 (varID=2)
@@ -1356,6 +1359,28 @@ bool get_IsFiring(uint64_t player) {
     return ReadAddr<bool>(player + OFF_FIRING);
 }
 
+// SetAimRotation — официальный IL2CPP метод (RVA: 0x51468F0)
+// Сигнатура: void SetAimRotation(Quaternion rot, bool flag, MethodInfo*)
+// Используется для silent aim: устанавливаем rotation на цель → пуля летит туда
+typedef void (*fn_SetAimRot_t)(uint64_t instance, Quaternion rot, bool flag, void* method);
+static fn_SetAimRot_t _fn_SetAimRot = nullptr;
+
+static void try_init_SetAimRot() {
+    if (_fn_SetAimRot) return;
+    uint64_t base = Moudule_Base;
+    if (base && base != (uint64_t)-1)
+        _fn_SetAimRot = (fn_SetAimRot_t)(base + RVA_SET_AIM_ROTATION);
+}
+
+// Вызов SetAimRotation — только когда адрес функции валидный
+static bool call_SetAimRotation(uint64_t player, Quaternion rot) {
+    try_init_SetAimRot();
+    if (!_fn_SetAimRot) return false;
+    if (!isVaildPtr((uint64_t)_fn_SetAimRot)) return false;
+    _fn_SetAimRot(player, rot, true, nullptr);
+    return true;
+}
+
 // knocked detection — inline в renderESP loop (ReadAddr<bool> @ 0xA0, 0x1110)
 
 // Pool текстовых слоёв — берёт существующий или создаёт новый
@@ -1660,15 +1685,21 @@ bool get_IsFiring(uint64_t player) {
         set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
     }
     // ── Silent Aim apply ─────────────────────────────────────────────
-    // Пишем только в m_CurrentAimRotation (rotation пули) — камера не двигается.
-    // Срабатывает всегда (trigger не нужен — игрок сам решает когда стрелять).
+    // Принцип: SetAimRotation(target) → пуля летит в цель
+    //          SetAimRotation(original) → камера возвращается мгновенно
+    // Результат: прицел визуально стоит на месте, пуля попадает в цель
     if (isSilentAim && isVaildPtr(bestTarget)) {
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
         else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
         else                   ap = getPositionExt(getHip(bestTarget));
+        // Сохраняем оригинальный rotation камеры
+        Quaternion origRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+        // Устанавливаем rotation на цель через официальный метод
         Quaternion targetRot = GetRotationToLocation(ap, 0.1f, myLoc);
-        WriteAddr<Quaternion>(myPawnObject + OFF_SILENT_ROTATION, targetRot);
+        call_SetAimRotation(myPawnObject, targetRot);
+        // Сразу восстанавливаем — камера не двигается визуально
+        call_SetAimRotation(myPawnObject, origRot);
     }
 
     // ── Передаём на main thread ──────────────────────────────────────
