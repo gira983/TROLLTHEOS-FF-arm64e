@@ -507,16 +507,14 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)setupFloatingButton {
-    // Размер кнопки — квадратный с закруглёнными углами (не круглый)
     floatingButton = [[UIView alloc] initWithFrame:CGRectMake(50, 150, 46, 46)];
-    floatingButton.backgroundColor = [UIColor colorWithRed:0.07 green:0.08 blue:0.11 alpha:0.97];
+    floatingButton.backgroundColor = [UIColor colorWithRed:0.04 green:0.05 blue:0.07 alpha:0.97];
     floatingButton.layer.cornerRadius = 12;
     floatingButton.layer.borderWidth = 1;
-    floatingButton.layer.borderColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.5].CGColor;
+    floatingButton.layer.borderColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.45].CGColor;
     floatingButton.clipsToBounds = YES;
     floatingButton.userInteractionEnabled = YES;
 
-    // Буква F — Fryzz, моно шрифт
     UILabel *iconLabel = [[UILabel alloc] initWithFrame:floatingButton.bounds];
     iconLabel.text = @"F";
     iconLabel.textColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
@@ -525,101 +523,183 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     iconLabel.userInteractionEnabled = NO;
     [floatingButton addSubview:iconLabel];
 
-    // Точка-акцент внизу справа
-    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(32, 32, 6, 6)];
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(33, 33, 5, 5)];
     dot.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
-    dot.layer.cornerRadius = 3;
+    dot.layer.cornerRadius = 2.5;
     [floatingButton addSubview:dot];
-    
-    // Pan для перетаскивания — minimumNumberOfTouches=1
+
     UIPanGestureRecognizer *iconPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
     iconPan.maximumNumberOfTouches = 1;
     iconPan.minimumNumberOfTouches = 1;
     [floatingButton addGestureRecognizer:iconPan];
-    
-    // Tap для открытия — должен провалиться если идёт pan
+
     UITapGestureRecognizer *openTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(showMenu)];
     openTap.numberOfTapsRequired = 1;
     openTap.numberOfTouchesRequired = 1;
     [openTap requireGestureRecognizerToFail:iconPan];
     [floatingButton addGestureRecognizer:openTap];
-    
+
     [self addSubview:floatingButton];
 }
 
-- (void)addFeatureToView:(UIView *)view withTitle:(NSString *)title atY:(CGFloat)y initialValue:(BOOL)isOn andAction:(SEL)action {
-    // Row background — subtle hover feel
-    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(8, y - 1, view.bounds.size.width - 16, 28)];
-    row.backgroundColor = [UIColor colorWithRed:0.1 green:0.1 blue:0.14 alpha:0.0];
-    row.layer.cornerRadius = 6;
-    [view addSubview:row];
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
 
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(8, 0, row.bounds.size.width - 65, 28)];
-    label.text = title;
-    label.textColor = isOn
-        ? [UIColor colorWithRed:0.88 green:0.88 blue:0.95 alpha:1.0]
-        : [UIColor colorWithRed:0.38 green:0.38 blue:0.48 alpha:1.0];
-    label.font = [UIFont fontWithName:@"Courier" size:11];
-    [row addSubview:label];
+// Цвета дизайна
+#define COL_BG0     [UIColor colorWithRed:0.04  green:0.045 blue:0.062 alpha:1.0]
+#define COL_BG1     [UIColor colorWithRed:0.048 green:0.053 blue:0.073 alpha:1.0]
+#define COL_BG2     [UIColor colorWithRed:0.065 green:0.072 blue:0.098 alpha:1.0]
+#define COL_BG3     [UIColor colorWithRed:0.086 green:0.095 blue:0.13  alpha:1.0]
+#define COL_LINE    [UIColor colorWithRed:0.11  green:0.12  blue:0.16  alpha:1.0]
+#define COL_LINE2   [UIColor colorWithRed:0.14  green:0.155 blue:0.2   alpha:1.0]
+#define COL_ACC     [UIColor colorWithRed:0.78  green:0.95  blue:0.1   alpha:1.0]
+#define COL_ACC_DIM [UIColor colorWithRed:0.78  green:0.95  blue:0.1   alpha:0.55]
+#define COL_TEXT    [UIColor colorWithRed:0.8   green:0.8   blue:0.9   alpha:1.0]
+#define COL_DIM     [UIColor colorWithRed:0.31  green:0.32  blue:0.42  alpha:1.0]
+#define COL_DIM2    [UIColor colorWithRed:0.17  green:0.18  blue:0.24  alpha:1.0]
+#define COL_RED     [UIColor colorWithRed:0.94  green:0.28  blue:0.28  alpha:1.0]
 
-    CGFloat swX = row.bounds.size.width - 58;
-    CustomSwitch *customSwitch = [[CustomSwitch alloc] initWithFrame:CGRectMake(swX, 3, 50, 22)];
-    customSwitch.on = isOn;
-    [customSwitch addTarget:self action:action forControlEvents:UIControlEventValueChanged];
-    [row addSubview:customSwitch];
-}
+// Секционный заголовок с линией
+- (UIView *)makeSectionHeaderWithTitle:(NSString *)title atY:(CGFloat)y width:(CGFloat)w {
+    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, y, w, 16)];
 
-// ==================== HELPER UI BUILDERS ====================
-
-- (UILabel *)makeSectionLabel:(NSString *)title atY:(CGFloat)y width:(CGFloat)w {
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, y, w - 20, 14)];
+    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(10, 0, 80, 14)];
     lbl.text = title;
-    lbl.textColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.8];
-    lbl.font = [UIFont fontWithName:@"Courier-Bold" size:9];
-    return lbl;
+    lbl.textColor = COL_ACC_DIM;
+    lbl.font = [UIFont fontWithName:@"Courier-Bold" size:8.5];
+    [container addSubview:lbl];
+
+    UIView *line = [[UIView alloc] initWithFrame:CGRectMake(18 + lbl.intrinsicContentSize.width, 6, w - 28 - lbl.intrinsicContentSize.width, 1)];
+    line.backgroundColor = COL_LINE;
+    [container addSubview:line];
+
+    return container;
 }
 
-// addSegmentTo: — старая рабочая реализация без ScrollView.
-// UITapGestureRecognizer на segContainer, cancelsTouchesInView=NO.
+// Строка с чекбоксом — возвращает UIView
+- (UIView *)makeCheckRowWithTitle:(NSString *)title badge:(NSString *)badge badgeColor:(UIColor *)badgeColor atY:(CGFloat)y width:(CGFloat)w initialValue:(BOOL)isOn action:(SEL)action {
+    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(0, y, w, 28)];
+    row.tag = 999; // помечаем как row
+
+    // Чекбокс
+    UIView *cb = [[UIView alloc] initWithFrame:CGRectMake(10, 7, 14, 14)];
+    cb.backgroundColor = isOn ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.1] : COL_BG3;
+    cb.layer.cornerRadius = 3;
+    cb.layer.borderWidth = 1.5;
+    cb.layer.borderColor = isOn ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.6].CGColor : COL_DIM2.CGColor;
+    cb.tag = 500; // tag чекбокса
+    [row addSubview:cb];
+
+    // Галочка внутри чекбокса
+    UILabel *checkMark = [[UILabel alloc] initWithFrame:cb.bounds];
+    checkMark.text = @"✓";
+    checkMark.textColor = COL_ACC;
+    checkMark.font = [UIFont boldSystemFontOfSize:9];
+    checkMark.textAlignment = NSTextAlignmentCenter;
+    checkMark.hidden = !isOn;
+    checkMark.tag = 501;
+    [cb addSubview:checkMark];
+
+    // Лейбл
+    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(30, 5, w - 50, 18)];
+    lbl.text = title;
+    lbl.textColor = isOn ? COL_TEXT : COL_DIM;
+    lbl.font = [UIFont fontWithName:@"Courier" size:11];
+    lbl.tag = 502;
+    [row addSubview:lbl];
+
+    // Бейдж (LOOP/SCAN)
+    if (badge.length > 0) {
+        UILabel *bdg = [[UILabel alloc] initWithFrame:CGRectMake(30 + [title sizeWithAttributes:@{NSFontAttributeName: lbl.font}].width + 6, 8, 36, 12)];
+        bdg.text = badge;
+        bdg.textColor = badgeColor;
+        bdg.font = [UIFont fontWithName:@"Courier-Bold" size:7];
+        bdg.textAlignment = NSTextAlignmentCenter;
+        bdg.backgroundColor = [badgeColor colorWithAlphaComponent:0.1];
+        bdg.layer.cornerRadius = 2;
+        bdg.layer.borderWidth = 0.5;
+        bdg.layer.borderColor = [badgeColor colorWithAlphaComponent:0.3].CGColor;
+        bdg.clipsToBounds = YES;
+        [row addSubview:bdg];
+    }
+
+    // Tap gesture
+    objc_setAssociatedObject(row, "rowAction", NSStringFromSelector(action), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(row, "rowTarget", self, OBJC_ASSOCIATION_ASSIGN);
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleCheckRowTap:)];
+    tap.cancelsTouchesInView = NO;
+    [row addGestureRecognizer:tap];
+
+    return row;
+}
+
+- (void)handleCheckRowTap:(UITapGestureRecognizer *)gr {
+    UIView *row = gr.view;
+    UIView *cb = [row viewWithTag:500];
+    UILabel *checkMark = (UILabel *)[cb viewWithTag:501];
+    UILabel *lbl = (UILabel *)[row viewWithTag:502];
+
+    BOOL nowOn = checkMark.hidden; // было скрыто → включаем
+    checkMark.hidden = !nowOn;
+    cb.backgroundColor = nowOn ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.1] : COL_BG3;
+    cb.layer.borderColor = nowOn ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.6].CGColor : COL_DIM2.CGColor;
+    lbl.textColor = nowOn ? COL_TEXT : COL_DIM;
+
+    NSString *actionStr = objc_getAssociatedObject(row, "rowAction");
+    if (actionStr) {
+        SEL sel = NSSelectorFromString(actionStr);
+        // Создаём фиктивный CustomSwitch чтобы передать .on
+        CustomSwitch *fakeSw = [[CustomSwitch alloc] init];
+        fakeSw.on = nowOn;
+        if ([self respondsToSelector:sel]) {
+            #pragma clang diagnostic push
+            #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+            [self performSelector:sel withObject:fakeSw];
+            #pragma clang diagnostic pop
+        }
+    }
+}
+
+// Сегментный контрол
 - (void)addSegmentTo:(UIView *)parent atY:(CGFloat)y title:(NSString *)title options:(NSArray *)options selectedRef:(int *)selectedRef tag:(NSInteger)baseTag {
     CGFloat padding = 10;
     CGFloat segW = (parent.bounds.size.width - padding * 2) / options.count;
-    CGFloat segH = 28;
-
+    CGFloat segH = 26;
     CGFloat titleH = (title.length > 0) ? 14 : 0;
 
     if (title.length > 0) {
-        UILabel *titleLbl = [[UILabel alloc] initWithFrame:CGRectMake(padding, y, parent.bounds.size.width - padding * 2, 12)];
-        titleLbl.text = title;
-        titleLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-        titleLbl.font = [UIFont systemFontOfSize:10];
-        titleLbl.userInteractionEnabled = NO;
-        [parent addSubview:titleLbl];
+        UIView *sec = [self makeSectionHeaderWithTitle:title atY:y width:parent.bounds.size.width];
+        [parent addSubview:sec];
     }
 
     UIView *segContainer = [[UIView alloc] initWithFrame:CGRectMake(padding, y + titleH, parent.bounds.size.width - padding * 2, segH)];
-    segContainer.backgroundColor = [UIColor colorWithRed:0.08 green:0.09 blue:0.12 alpha:1.0];
-    segContainer.layer.cornerRadius = 6;
+    segContainer.backgroundColor = COL_BG0;
+    segContainer.layer.cornerRadius = 5;
+    segContainer.layer.borderWidth = 1;
+    segContainer.layer.borderColor = COL_LINE.CGColor;
     segContainer.clipsToBounds = YES;
     [parent addSubview:segContainer];
 
     for (int i = 0; i < (int)options.count; i++) {
-        UIView *segBtn = [[UIView alloc] initWithFrame:CGRectMake(i * segW + 2, 2, segW - 4, segH - 4)];
-        segBtn.backgroundColor = (*selectedRef == i)
-            ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.15]
-            : [UIColor clearColor];
-        segBtn.layer.cornerRadius = 5;
+        BOOL isActive = (*selectedRef == i);
+        UIView *segBtn = [[UIView alloc] initWithFrame:CGRectMake(i * segW, 0, segW, segH)];
+        segBtn.backgroundColor = isActive ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.09] : [UIColor clearColor];
         segBtn.tag = baseTag * 100 + i;
         segBtn.userInteractionEnabled = NO;
-        [segContainer addSubview:segBtn];
+
+        if (i < (int)options.count - 1) {
+            UIView *divider = [[UIView alloc] initWithFrame:CGRectMake(segW - 1, 5, 1, segH - 10)];
+            divider.backgroundColor = COL_LINE;
+            [segBtn addSubview:divider];
+        }
 
         UILabel *lbl = [[UILabel alloc] initWithFrame:segBtn.bounds];
         lbl.text = options[i];
         lbl.textAlignment = NSTextAlignmentCenter;
-        lbl.font = [UIFont boldSystemFontOfSize:10];
-        lbl.textColor = (*selectedRef == i) ? [UIColor blackColor] : [UIColor colorWithWhite:0.7 alpha:1.0];
+        lbl.font = [UIFont fontWithName:@"Courier" size:9.5];
+        lbl.textColor = isActive ? COL_ACC : COL_DIM;
         lbl.userInteractionEnabled = NO;
         [segBtn addSubview:lbl];
+        [segContainer addSubview:segBtn];
     }
 
     NSInteger capturedBase = baseTag;
@@ -637,393 +717,405 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         *ref = idx;
         for (int j = 0; j < (int)capturedOptions.count; j++) {
             UIView *btn = [segRef viewWithTag:capturedBase * 100 + j];
-            btn.backgroundColor = (j == idx)
-                ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.15]
-                : [UIColor clearColor];
-            UILabel *l = btn.subviews.firstObject;
-            l.textColor = (j == idx) ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0] : [UIColor colorWithRed:0.4 green:0.4 blue:0.5 alpha:1.0];
+            btn.backgroundColor = (j == idx) ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.09] : [UIColor clearColor];
+            UILabel *l = btn.subviews.lastObject;
+            l.textColor = (j == idx) ? COL_ACC : COL_DIM;
         }
     }, OBJC_ASSOCIATION_COPY_NONATOMIC);
     [tap addTarget:self action:@selector(handleSegmentTapGesture:)];
     [segContainer addGestureRecognizer:tap];
 }
 
-// ============================================================
+// Слайдер-строка
+- (void)addSliderTo:(UIView *)parent label:(NSString *)label atY:(CGFloat)y width:(CGFloat)w minVal:(float)minVal maxVal:(float)maxVal value:(float)val format:(NSString *)fmt onChanged:(void(^)(float))block {
+    UIView *sec = [self makeSectionHeaderWithTitle:label atY:y width:w];
+    [parent addSubview:sec]; y += 18;
 
+    UILabel *valLbl = [[UILabel alloc] initWithFrame:CGRectMake(w - 50, y - 18, 44, 14)];
+    valLbl.text = [NSString stringWithFormat:fmt, val];
+    valLbl.textColor = COL_ACC;
+    valLbl.font = [UIFont fontWithName:@"Courier" size:9];
+    valLbl.textAlignment = NSTextAlignmentRight;
+    [parent addSubview:valLbl];
+
+    HUDSlider *slider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, y, w - 20, 32)];
+    slider.minimumValue = minVal;
+    slider.maximumValue = maxVal;
+    slider.value = val;
+    slider.minimumTrackTintColor = COL_ACC;
+    slider.thumbTintColor = [UIColor colorWithRed:0.88 green:0.88 blue:0.95 alpha:1.0];
+    UILabel * __unsafe_unretained ref = valLbl;
+    NSString *captFmt = fmt;
+    slider.onValueChanged = ^(float v){
+        if (block) block(v);
+        ref.text = [NSString stringWithFormat:captFmt, v];
+    };
+    [parent addSubview:slider];
+}
+
+// Добавляет Feature через старый CustomSwitch (совместимость с toggleBox: и др.)
+- (void)addFeatureToView:(UIView *)view withTitle:(NSString *)title atY:(CGFloat)y initialValue:(BOOL)isOn andAction:(SEL)action {
+    UIView *row = [self makeCheckRowWithTitle:title badge:nil badgeColor:nil atY:y width:view.bounds.size.width initialValue:isOn action:action];
+    [view addSubview:row];
+}
+
+- (UILabel *)makeSectionLabel:(NSString *)title atY:(CGFloat)y width:(CGFloat)w {
+    UIView *sec = [self makeSectionHeaderWithTitle:title atY:y width:w];
+    UILabel *lbl = sec.subviews.firstObject;
+    return lbl;
+}
+
+// ─── SETUP MENU UI ────────────────────────────────────────────────────────────
 
 - (void)setupMenuUI {
     CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
     CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
-    CGFloat menuWidth = MIN(550, screenW - 10);
-    CGFloat menuHeight = MIN(370, screenH * 0.55);
-    
-    // Масштаб для адаптации всех элементов
-    CGFloat scale = menuWidth / 550.0;
-    
-    // ── MENU CONTAINER ────────────────────────────────────────────────
+    CGFloat menuWidth  = MIN(520, screenW - 10);
+    CGFloat menuHeight = MIN(360, screenH * 0.52);
+    CGFloat scale = menuWidth / 520.0;
+
+    // ── КОНТЕЙНЕР ─────────────────────────────────────────────────────
     menuContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, menuHeight)];
-    menuContainer.backgroundColor = [UIColor colorWithRed:0.05 green:0.055 blue:0.075 alpha:0.97];
-    menuContainer.layer.cornerRadius = 12;
-    menuContainer.layer.borderColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.18].CGColor;
+    menuContainer.backgroundColor = COL_BG1;
+    menuContainer.layer.cornerRadius = 10;
+    menuContainer.layer.borderColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.14].CGColor;
     menuContainer.layer.borderWidth = 1;
     menuContainer.clipsToBounds = YES;
     menuContainer.hidden = YES;
     [self addSubview:menuContainer];
 
-    // Тонкая акцентная линия сверху
-    UIView *topLine = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, 1)];
-    topLine.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.5];
+    // Верхняя акцентная линия (градиент имитируем тонкой view)
+    UIView *topLine = [[UIView alloc] initWithFrame:CGRectMake(menuWidth * 0.15, 0, menuWidth * 0.7, 1)];
+    topLine.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.55];
     [menuContainer addSubview:topLine];
 
     // ── HEADER ────────────────────────────────────────────────────────
-    UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, 38)];
-    headerView.backgroundColor = [UIColor colorWithRed:0.04 green:0.045 blue:0.062 alpha:1.0];
-    headerView.userInteractionEnabled = YES;
-    [menuContainer addSubview:headerView];
+    CGFloat hdrH = 36;
+    UIView *hdr = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, hdrH)];
+    hdr.backgroundColor = COL_BG0;
+    hdr.userInteractionEnabled = YES;
+    [menuContainer addSubview:hdr];
 
-    // Разделитель под хедером
-    UIView *headerLine = [[UIView alloc] initWithFrame:CGRectMake(0, 37, menuWidth, 1)];
-    headerLine.backgroundColor = [UIColor colorWithRed:0.12 green:0.13 blue:0.18 alpha:1.0];
-    [headerView addSubview:headerLine];
+    UIView *hdrLine = [[UIView alloc] initWithFrame:CGRectMake(0, hdrH - 1, menuWidth, 1)];
+    hdrLine.backgroundColor = COL_LINE;
+    [hdr addSubview:hdrLine];
 
-    // Dot-акцент слева
-    UIView *hDot = [[UIView alloc] initWithFrame:CGRectMake(14, 15, 6, 6)];
-    hDot.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
+    // Dot
+    UIView *hDot = [[UIView alloc] initWithFrame:CGRectMake(12, 14, 6, 6)];
+    hDot.backgroundColor = COL_ACC;
     hDot.layer.cornerRadius = 3;
-    [headerView addSubview:hDot];
+    [hdr addSubview:hDot];
 
     // Название
-    UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(28, 5, 120, 28)];
-    titleLabel.text = @"FRYZZ";
-    titleLabel.textColor = [UIColor colorWithRed:0.88 green:0.88 blue:0.95 alpha:1.0];
-    titleLabel.font = [UIFont fontWithName:@"Courier-Bold" size:14];
-    [headerView addSubview:titleLabel];
+    UILabel *titleLbl = [[UILabel alloc] initWithFrame:CGRectMake(24, 4, 110, 17)];
+    titleLbl.text = @"FRYZZ";
+    titleLbl.textColor = COL_TEXT;
+    titleLbl.font = [UIFont fontWithName:@"Courier-Bold" size:13];
+    [hdr addSubview:titleLbl];
 
-    // Subtitle
-    UILabel *subTitle = [[UILabel alloc] initWithFrame:CGRectMake(28, 20, 100, 14)];
-    subTitle.text = @"by Fryzz 🧊";
-    subTitle.textColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.7];
-    subTitle.font = [UIFont fontWithName:@"Courier" size:8];
-    [headerView addSubview:subTitle];
+    UILabel *subLbl = [[UILabel alloc] initWithFrame:CGRectMake(24, 20, 110, 12)];
+    subLbl.text = @"by Fryzz 🧊";
+    subLbl.textColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.6];
+    subLbl.font = [UIFont fontWithName:@"Courier" size:8];
+    [hdr addSubview:subLbl];
 
-    // ── КНОПКИ ОКНА (минимизировать / закрыть) ────────────────────────
-    // Закрыть — красный
-    UIView *closeBtn = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - 22, 12, 14, 14)];
-    closeBtn.backgroundColor = [UIColor colorWithRed:0.95 green:0.3 blue:0.3 alpha:1.0];
+    // Кнопка закрыть (красный круг с крестиком)
+    UIView *closeBtn = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - 20, 11, 14, 14)];
+    closeBtn.backgroundColor = COL_RED;
     closeBtn.layer.cornerRadius = 7;
     closeBtn.tag = 200;
+    UILabel *closeLbl = [[UILabel alloc] initWithFrame:closeBtn.bounds];
+    closeLbl.text = @"✕";
+    closeLbl.textColor = [UIColor colorWithWhite:1.0 alpha:0.85];
+    closeLbl.font = [UIFont boldSystemFontOfSize:8];
+    closeLbl.textAlignment = NSTextAlignmentCenter;
+    [closeBtn addSubview:closeLbl];
     UITapGestureRecognizer *closeTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleCloseTap:)];
     [closeBtn addGestureRecognizer:closeTap];
-    [headerView addSubview:closeBtn];
-
-    // Минимизировать — жёлтый
-    UIView *minBtn = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - 42, 12, 14, 14)];
-    minBtn.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.85];
-    minBtn.layer.cornerRadius = 7;
-    [headerView addSubview:minBtn];
+    [hdr addSubview:closeBtn];
 
     UIPanGestureRecognizer *menuPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-    [headerView addGestureRecognizer:menuPan];
+    [hdr addGestureRecognizer:menuPan];
 
-    // ── SIDEBAR ───────────────────────────────────────────────────────
-    CGFloat sidebarW = 58 * scale;
-    UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - sidebarW - 8, 46, sidebarW, menuHeight - 54)];
-    sidebar.backgroundColor = [UIColor colorWithRed:0.04 green:0.045 blue:0.062 alpha:1.0];
-    sidebar.layer.cornerRadius = 8;
-    sidebar.layer.borderColor = [UIColor colorWithRed:0.12 green:0.13 blue:0.18 alpha:1.0].CGColor;
-    sidebar.layer.borderWidth = 1;
+    // ── SIDEBAR (СЛЕВА) ───────────────────────────────────────────────
+    CGFloat sbW = 52 * scale;
+    CGFloat sbY = hdrH;
+    UIView *sidebar = [[UIView alloc] initWithFrame:CGRectMake(0, sbY, sbW, menuHeight - sbY)];
+    sidebar.backgroundColor = COL_BG0;
     sidebar.userInteractionEnabled = YES;
     _sidebar = sidebar;
-    [menuContainer addSubview:sidebar];
 
-    NSArray *tabs      = @[@"Main", @"AIM", @"Extra", @"Config"];
-    NSArray *tabIcons  = @[@"≡", @"◎", @"⊙", @"⚙"];
-    for (int i = 0; i < tabs.count; i++) {
-        CGFloat btnH = 38 * scale;
-        UIView *btn = [[UIView alloc] initWithFrame:CGRectMake(4, 6 + (i * (btnH + 4 * scale)), sidebarW - 8, btnH)];
-        btn.backgroundColor = (i == 0)
-            ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.1]
-            : [UIColor clearColor];
+    UIView *sbLine = [[UIView alloc] initWithFrame:CGRectMake(sbW - 1, 0, 1, menuHeight - sbY)];
+    sbLine.backgroundColor = COL_LINE;
+    [sidebar addSubview:sbLine];
+
+    NSArray *tabNames  = @[@"Main", @"AIM", @"Extra", @"Config"];
+    // SF Symbol-подобные unicode иконки (системный шрифт их поддерживает)
+    NSArray *tabSF     = @[@"square.3.layers.3d", @"scope", @"slider.horizontal.3", @"wrench.and.screwdriver"];
+    // Fallback текстовые иконки
+    NSArray *tabIconTx = @[@"⊞", @"⊕", @"⊛", @"⊜"];
+    CGFloat btnH = 44 * scale;
+    CGFloat btnPad = 6 * scale;
+
+    for (int i = 0; i < (int)tabNames.count; i++) {
+        UIView *btn = [[UIView alloc] initWithFrame:CGRectMake(4, btnPad + i * (btnH + 3 * scale), sbW - 8, btnH)];
+        BOOL isFirst = (i == 0);
+        btn.backgroundColor = isFirst ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.08] : [UIColor clearColor];
         btn.layer.cornerRadius = 6;
-        btn.layer.borderColor  = (i == 0)
-            ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.35].CGColor
-            : [UIColor clearColor].CGColor;
         btn.layer.borderWidth = 1;
+        btn.layer.borderColor = isFirst ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.28].CGColor : [UIColor clearColor].CGColor;
         btn.userInteractionEnabled = YES;
         btn.tag = 100 + i;
 
-        // Иконка
-        UILabel *iconLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 4, sidebarW - 8, 14)];
-        iconLbl.text = tabIcons[i];
-        iconLbl.textColor = (i == 0)
-            ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0]
-            : [UIColor colorWithRed:0.35 green:0.35 blue:0.45 alpha:1.0];
-        iconLbl.font = [UIFont systemFontOfSize:12];
-        iconLbl.textAlignment = NSTextAlignmentCenter;
-        iconLbl.userInteractionEnabled = NO;
-        [btn addSubview:iconLbl];
+        // Иконка (SF Symbol если поддерживается, иначе unicode)
+        UIImageView *iconView = nil;
+        if (@available(iOS 13.0, *)) {
+            UIImage *sfImg = [UIImage systemImageNamed:tabSF[i]];
+            if (sfImg) {
+                iconView = [[UIImageView alloc] initWithFrame:CGRectMake((sbW - 8 - 18) / 2, 5, 18, 18)];
+                iconView.image = sfImg;
+                iconView.tintColor = isFirst ? COL_ACC : COL_DIM;
+                iconView.contentMode = UIViewContentModeScaleAspectFit;
+                [btn addSubview:iconView];
+            }
+        }
+        if (!iconView) {
+            UILabel *iconLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 5, sbW - 8, 18)];
+            iconLbl.text = tabIconTx[i];
+            iconLbl.textColor = isFirst ? COL_ACC : COL_DIM;
+            iconLbl.font = [UIFont systemFontOfSize:14];
+            iconLbl.textAlignment = NSTextAlignmentCenter;
+            [btn addSubview:iconLbl];
+        }
 
-        // Текст
-        UILabel *btnLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, 19, sidebarW - 8, 12)];
-        btnLbl.text = tabs[i];
-        btnLbl.textColor = (i == 0)
-            ? [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0]
-            : [UIColor colorWithRed:0.35 green:0.35 blue:0.45 alpha:1.0];
-        btnLbl.font = [UIFont fontWithName:@"Courier" size:8];
-        btnLbl.textAlignment = NSTextAlignmentCenter;
-        btnLbl.userInteractionEnabled = NO;
-        [btn addSubview:btnLbl];
+        UILabel *nameLbl = [[UILabel alloc] initWithFrame:CGRectMake(0, btnH - 16, sbW - 8, 13)];
+        nameLbl.text = tabNames[i];
+        nameLbl.textColor = isFirst ? COL_ACC : COL_DIM;
+        nameLbl.font = [UIFont fontWithName:@"Courier" size:8];
+        nameLbl.textAlignment = NSTextAlignmentCenter;
+        [btn addSubview:nameLbl];
 
         UITapGestureRecognizer *tabTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTabTap:)];
         [btn addGestureRecognizer:tabTap];
         [sidebar addSubview:btn];
     }
+    [menuContainer addSubview:sidebar];
 
-    // --- MAIN TAB (ESP) ---
-    CGFloat tabW = menuWidth - sidebarW - 25;
-    CGFloat tabH = menuHeight - 55;
-    mainTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
-    mainTabContainer.backgroundColor = [UIColor colorWithRed:0.05 green:0.055 blue:0.075 alpha:1.0];
+    // ── ОБЩИЕ РАЗМЕРЫ ДЛЯ ТАБОВ ──────────────────────────────────────
+    CGFloat tabX = sbW;
+    CGFloat tabY = hdrH;
+    CGFloat tabW = menuWidth - sbW;
+    CGFloat tabH = menuHeight - hdrH;
+
+    // ══ MAIN TAB ══════════════════════════════════════════════════════
+    mainTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
+    mainTabContainer.backgroundColor = COL_BG1;
     [menuContainer addSubview:mainTabContainer];
 
-    // Preview Section (Left)
-    UIView *previewBorder = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 130, 250)];
-    previewBorder.layer.borderColor = [UIColor whiteColor].CGColor;
-    previewBorder.layer.borderWidth = 1;
-    previewBorder.layer.cornerRadius = 10;
-    [mainTabContainer addSubview:previewBorder];
-    
-    UILabel *pvTitle = [[UILabel alloc] initWithFrame:CGRectMake(0, 5, 130, 20)];
-    pvTitle.text = @"Preview";
-    pvTitle.textColor = [UIColor whiteColor];
-    pvTitle.textAlignment = NSTextAlignmentCenter;
-    pvTitle.font = [UIFont boldSystemFontOfSize:14];
-    [previewBorder addSubview:pvTitle];
-    
-    UIView *line = [[UIView alloc] initWithFrame:CGRectMake(10, 28, 110, 1)];
-    line.backgroundColor = [UIColor whiteColor];
-    [previewBorder addSubview:line];
-    
-    previewView = [[UIView alloc] initWithFrame:CGRectMake(0, 30, 130, 220)];
-    previewView.backgroundColor = [UIColor blackColor];
-    previewView.clipsToBounds = YES;
-    [previewBorder addSubview:previewView];
-    
-    previewContentContainer = [[UIView alloc] initWithFrame:previewView.bounds];
-    [previewView addSubview:previewContentContainer];
-    
-    [self drawPreviewElements];
-    [self updatePreviewVisibility];
+    CGFloat mW = tabW;
+    CGFloat my = 0;
 
-    // Feature Box (Right)
-    UIView *featureBox = [[UIView alloc] initWithFrame:CGRectMake(140, 0, tabW - 145, tabH)];
-    featureBox.layer.borderColor = [UIColor whiteColor].CGColor;
-    featureBox.layer.borderWidth = 1;
-    featureBox.layer.cornerRadius = 10;
-    featureBox.backgroundColor = [UIColor blackColor];
-    [mainTabContainer addSubview:featureBox];
-    
-    UILabel *ftTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 10, 200, 20)];
-    ftTitle.text = @"ESP Feature";
-    ftTitle.textColor = [UIColor whiteColor];
-    ftTitle.font = [UIFont boldSystemFontOfSize:16];
-    [featureBox addSubview:ftTitle];
-    
-    UIView *ftLine = [[UIView alloc] initWithFrame:CGRectMake(15, 35, tabW - 155, 1)];
-    ftLine.backgroundColor = [UIColor whiteColor];
-    [featureBox addSubview:ftLine];
-    
-    [self addFeatureToView:featureBox withTitle:@"Box" atY:45 initialValue:isBox andAction:@selector(toggleBox:)];
-    [self addFeatureToView:featureBox withTitle:@"Bone" atY:80 initialValue:isBone andAction:@selector(toggleBone:)];
-    [self addFeatureToView:featureBox withTitle:@"Health" atY:115 initialValue:isHealth andAction:@selector(toggleHealth:)];
-    [self addFeatureToView:featureBox withTitle:@"Name" atY:150 initialValue:isName andAction:@selector(toggleName:)];
-    [self addFeatureToView:featureBox withTitle:@"Distance" atY:185 initialValue:isDis andAction:@selector(toggleDist:)];
-    [self addFeatureToView:featureBox withTitle:@"Lines" atY:220 initialValue:isLine andAction:@selector(toggleLine:)];
+    // Tab header
+    UIView *mHdr = [[UIView alloc] initWithFrame:CGRectMake(0, my, mW, 28)];
+    mHdr.backgroundColor = COL_BG1;
+    UILabel *mHdrTtl = [[UILabel alloc] initWithFrame:CGRectMake(10, 7, 80, 14)];
+    mHdrTtl.text = @"ESP";
+    mHdrTtl.textColor = COL_ACC;
+    mHdrTtl.font = [UIFont fontWithName:@"Courier-Bold" size:9.5];
+    [mHdr addSubview:mHdrTtl];
+    UILabel *mHdrDesc = [[UILabel alloc] initWithFrame:CGRectMake(40, 9, mW - 50, 12)];
+    mHdrDesc.text = @"— Visual overlays";
+    mHdrDesc.textColor = COL_DIM;
+    mHdrDesc.font = [UIFont fontWithName:@"Courier" size:8];
+    [mHdr addSubview:mHdrDesc];
+    UIView *mHdrLine = [[UIView alloc] initWithFrame:CGRectMake(0, 27, mW, 1)];
+    mHdrLine.backgroundColor = COL_LINE;
+    [mHdr addSubview:mHdrLine];
+    [mainTabContainer addSubview:mHdr];
+    my += 30;
 
-    NSArray *lineOriginOpts = @[@"Top", @"Center", @"Bottom"];
-    [self addSegmentTo:featureBox atY:256 title:@"" options:lineOriginOpts selectedRef:&lineOrigin tag:20];
+    // Фичи — все выключены по умолчанию
+    my += 2;
+    UIView *mSec = [self makeSectionHeaderWithTitle:@"FEATURES" atY:my width:mW];
+    [mainTabContainer addSubview:mSec]; my += 18;
 
-    // Size slider убран — не влияет на функционал
+    struct { NSString *title; SEL action; } espRows[] = {
+        { @"Box",      @selector(toggleBox:)    },
+        { @"Skeleton", @selector(toggleBone:)   },
+        { @"Health",   @selector(toggleHealth:) },
+        { @"Name",     @selector(toggleName:)   },
+        { @"Distance", @selector(toggleDist:)   },
+        { @"Snaplines",@selector(toggleLine:)   },
+    };
+    for (int i = 0; i < 6; i++) {
+        UIView *row = [self makeCheckRowWithTitle:espRows[i].title badge:nil badgeColor:nil atY:my width:mW initialValue:NO action:espRows[i].action];
+        [mainTabContainer addSubview:row]; my += 26;
+    }
 
-    // --- AIM TAB ---
-    // menuHeight увеличен для AIM таба через switchToTab
-    aimTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
-    aimTabContainer.backgroundColor = [UIColor blackColor];
-    aimTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
-    aimTabContainer.layer.borderWidth = 1;
-    aimTabContainer.layer.cornerRadius = 10;
+    my += 2;
+    UIView *mSec2 = [self makeSectionHeaderWithTitle:@"SNAPLINE ORIGIN" atY:my width:mW];
+    [mainTabContainer addSubview:mSec2]; my += 16;
+    [self addSegmentTo:mainTabContainer atY:my title:@"" options:@[@"Top", @"Center", @"Bottom"] selectedRef:&lineOrigin tag:20];
+
+    // ══ AIM TAB ═══════════════════════════════════════════════════════
+    aimTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
+    aimTabContainer.backgroundColor = COL_BG1;
     aimTabContainer.hidden = YES;
-    aimTabContainer.clipsToBounds = YES;
     [menuContainer addSubview:aimTabContainer];
 
-    UIView *aimContent = aimTabContainer; // алиас — всё добавляется прямо в контейнер
     CGFloat aW = tabW;
-    CGFloat ay = 6;
+    CGFloat ay = 0;
 
-    UILabel *aimTitle = [self makeSectionLabel:@"AIMBOT" atY:ay width:aW];
-    [aimContent addSubview:aimTitle]; ay += 18;
-    UIView *aimSep1 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
-    aimSep1.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
-    [aimContent addSubview:aimSep1]; ay += 6;
+    UIView *aHdr = [[UIView alloc] initWithFrame:CGRectMake(0, ay, aW, 28)];
+    aHdr.backgroundColor = COL_BG1;
+    UILabel *aHdrTtl = [[UILabel alloc] initWithFrame:CGRectMake(10, 7, 80, 14)];
+    aHdrTtl.text = @"AIMBOT";
+    aHdrTtl.textColor = COL_ACC;
+    aHdrTtl.font = [UIFont fontWithName:@"Courier-Bold" size:9.5];
+    [aHdr addSubview:aHdrTtl];
+    UILabel *aHdrDesc = [[UILabel alloc] initWithFrame:CGRectMake(58, 9, aW - 68, 12)];
+    aHdrDesc.text = @"— Auto aim";
+    aHdrDesc.textColor = COL_DIM;
+    aHdrDesc.font = [UIFont fontWithName:@"Courier" size:8];
+    [aHdr addSubview:aHdrDesc];
+    UIView *aHdrLine = [[UIView alloc] initWithFrame:CGRectMake(0, 27, aW, 1)];
+    aHdrLine.backgroundColor = COL_LINE;
+    [aHdr addSubview:aHdrLine];
+    [aimTabContainer addSubview:aHdr];
+    ay += 30;
 
-    // ─ Aimbot ─────────────────────────────────────────────────────────
-    [self addFeatureToView:aimContent withTitle:@"Enable Aimbot" atY:ay initialValue:isAimbot andAction:@selector(toggleAimbot:)]; ay += 30;
+    // Enable toggle
+    ay += 2;
+    UIView *aSec0 = [self makeSectionHeaderWithTitle:@"TOGGLE" atY:ay width:aW];
+    [aimTabContainer addSubview:aSec0]; ay += 18;
+    UIView *aimRow = [self makeCheckRowWithTitle:@"Enable Aimbot" badge:nil badgeColor:nil atY:ay width:aW initialValue:NO action:@selector(toggleAimbot:)];
+    [aimTabContainer addSubview:aimRow]; ay += 26;
 
     ay += 4;
-    UIView *aimSep2 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
-    aimSep2.backgroundColor = aimSep1.backgroundColor;
-    [aimContent addSubview:aimSep2]; ay += 6;
+    UIView *aSec1 = [self makeSectionHeaderWithTitle:@"MODE" atY:ay width:aW];
+    [aimTabContainer addSubview:aSec1]; ay += 16;
+    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:@[@"Closest Player", @"Crosshair"] selectedRef:&aimMode tag:10]; ay += 30;
 
-    UILabel *aimModeTitle = [self makeSectionLabel:@"AIM MODE" atY:ay width:aW];
-    [aimContent addSubview:aimModeTitle]; ay += 16;
+    ay += 4;
+    UIView *aSec2 = [self makeSectionHeaderWithTitle:@"TARGET" atY:ay width:aW];
+    [aimTabContainer addSubview:aSec2]; ay += 16;
+    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:@[@"Head", @"Neck", @"Hip"] selectedRef:&aimTarget tag:11]; ay += 30;
 
-    NSArray *aimModeOpts = @[@"Closest Player", @"Crosshair"];
-    [self addSegmentTo:aimContent atY:ay title:@"" options:aimModeOpts selectedRef:&aimMode tag:10]; ay += 32;
+    ay += 4;
+    UIView *aSec3 = [self makeSectionHeaderWithTitle:@"TRIGGER" atY:ay width:aW];
+    [aimTabContainer addSubview:aSec3]; ay += 16;
+    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:@[@"Always", @"Shooting"] selectedRef:&aimTrigger tag:12];
 
-    NSArray *aimTargetOpts = @[@"Head", @"Neck", @"Hip"];
-    [self addSegmentTo:aimContent atY:ay title:@"" options:aimTargetOpts selectedRef:&aimTarget tag:11]; ay += 32;
-
-    NSArray *aimTriggerOpts = @[@"Always", @"Shooting"];
-    [self addSegmentTo:aimContent atY:ay title:@"" options:aimTriggerOpts selectedRef:&aimTrigger tag:12]; ay += 10;
-
-    CGFloat aimContentHeight = ay + 10;
-    objc_setAssociatedObject(aimTabContainer, "aimH", @(aimContentHeight), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-
-    // --- EXTRA TAB: слайдеры ---
-    extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
-    extraTabContainer.backgroundColor = [UIColor blackColor];
-    extraTabContainer.layer.borderColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0].CGColor;
-    extraTabContainer.layer.borderWidth = 1;
-    extraTabContainer.layer.cornerRadius = 10;
+    // ══ EXTRA TAB ═════════════════════════════════════════════════════
+    extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
+    extraTabContainer.backgroundColor = COL_BG1;
     extraTabContainer.hidden = YES;
     [menuContainer addSubview:extraTabContainer];
 
-    CGFloat eW = extraTabContainer.bounds.size.width;
-    CGFloat ey = 10;
+    CGFloat eW = tabW;
+    CGFloat ey = 0;
 
-    UILabel *exTitle = [self makeSectionLabel:@"PARAMETERS" atY:ey width:eW];
-    [extraTabContainer addSubview:exTitle]; ey += 22;
-    UIView *exSep1 = [[UIView alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 1)];
-    exSep1.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
-    [extraTabContainer addSubview:exSep1]; ey += 10;
+    UIView *eHdr = [[UIView alloc] initWithFrame:CGRectMake(0, ey, eW, 28)];
+    eHdr.backgroundColor = COL_BG1;
+    UILabel *eHdrTtl = [[UILabel alloc] initWithFrame:CGRectMake(10, 7, 80, 14)];
+    eHdrTtl.text = @"EXTRA";
+    eHdrTtl.textColor = COL_ACC;
+    eHdrTtl.font = [UIFont fontWithName:@"Courier-Bold" size:9.5];
+    [eHdr addSubview:eHdrTtl];
+    UILabel *eHdrDesc = [[UILabel alloc] initWithFrame:CGRectMake(46, 9, eW - 56, 12)];
+    eHdrDesc.text = @"— Parameters";
+    eHdrDesc.textColor = COL_DIM;
+    eHdrDesc.font = [UIFont fontWithName:@"Courier" size:8];
+    [eHdr addSubview:eHdrDesc];
+    UIView *eHdrLine = [[UIView alloc] initWithFrame:CGRectMake(0, 27, eW, 1)];
+    eHdrLine.backgroundColor = COL_LINE;
+    [eHdr addSubview:eHdrLine];
+    [extraTabContainer addSubview:eHdr];
+    ey += 32;
 
-    // FOV Slider
-    UILabel *fovLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ey, eW - 60, 14)];
-    fovLbl.text = @"FOV Radius"; fovLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    fovLbl.font = [UIFont systemFontOfSize:10]; [extraTabContainer addSubview:fovLbl];
-    UILabel *fovVal = [[UILabel alloc] initWithFrame:CGRectMake(eW - 45, ey, 40, 14)];
-    fovVal.text = [NSString stringWithFormat:@"%.0f", aimFov];
-    fovVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    fovVal.font = [UIFont systemFontOfSize:10]; fovVal.textAlignment = NSTextAlignmentRight;
-    [extraTabContainer addSubview:fovVal]; ey += 16;
-    HUDSlider *fovSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 36)];
-    fovSlider.minimumValue = 10; fovSlider.maximumValue = 400; fovSlider.value = aimFov;
-    fovSlider.minimumTrackTintColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0];
-    fovSlider.thumbTintColor = [UIColor whiteColor]; fovSlider.tag = 300;
-    UILabel * __unsafe_unretained fvRef = fovVal;
-    fovSlider.onValueChanged = ^(float v){ aimFov = v; fvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
-    [extraTabContainer addSubview:fovSlider]; ey += 44;
+    [self addSliderTo:extraTabContainer label:@"FOV RADIUS" atY:ey width:eW minVal:10 maxVal:400 value:aimFov format:@"%.0f" onChanged:^(float v){ aimFov = v; }]; ey += 54;
+    [self addSliderTo:extraTabContainer label:@"AIM DISTANCE" atY:ey width:eW minVal:10 maxVal:500 value:aimDistance format:@"%.0fm" onChanged:^(float v){ aimDistance = v; }]; ey += 54;
+    [self addSliderTo:extraTabContainer label:@"AIM SPEED" atY:ey width:eW minVal:0.05 maxVal:1.0 value:aimSpeed format:@"%.2f" onChanged:^(float v){ aimSpeed = v; }];
 
-    // Distance Slider
-    UILabel *distLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ey, eW - 60, 14)];
-    distLbl.text = @"Aim Distance"; distLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    distLbl.font = [UIFont systemFontOfSize:10]; [extraTabContainer addSubview:distLbl];
-    UILabel *distVal = [[UILabel alloc] initWithFrame:CGRectMake(eW - 45, ey, 40, 14)];
-    distVal.text = [NSString stringWithFormat:@"%.0f", aimDistance];
-    distVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    distVal.font = [UIFont systemFontOfSize:10]; distVal.textAlignment = NSTextAlignmentRight;
-    [extraTabContainer addSubview:distVal]; ey += 16;
-    HUDSlider *distSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 36)];
-    distSlider.minimumValue = 10; distSlider.maximumValue = 500; distSlider.value = aimDistance;
-    distSlider.minimumTrackTintColor = [UIColor colorWithRed:0.4 green:0.6 blue:1.0 alpha:1.0];
-    distSlider.thumbTintColor = [UIColor whiteColor]; distSlider.tag = 301;
-    UILabel * __unsafe_unretained dvRef = distVal;
-    distSlider.onValueChanged = ^(float v){ aimDistance = v; dvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
-    [extraTabContainer addSubview:distSlider]; ey += 44;
-
-    // Speed Slider
-    UILabel *spdLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ey, eW - 60, 14)];
-    spdLbl.text = @"Aim Speed"; spdLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    spdLbl.font = [UIFont systemFontOfSize:10]; [extraTabContainer addSubview:spdLbl];
-    UILabel *spdVal = [[UILabel alloc] initWithFrame:CGRectMake(eW - 45, ey, 40, 14)];
-    spdVal.text = [NSString stringWithFormat:@"%.2f", aimSpeed];
-    spdVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    spdVal.font = [UIFont systemFontOfSize:10]; spdVal.textAlignment = NSTextAlignmentRight;
-    [extraTabContainer addSubview:spdVal]; ey += 16;
-    HUDSlider *spdSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 36)];
-    spdSlider.minimumValue = 0.05; spdSlider.maximumValue = 1.0; spdSlider.value = aimSpeed;
-    spdSlider.minimumTrackTintColor = [UIColor colorWithRed:0.5 green:1.0 blue:0.5 alpha:1.0];
-    spdSlider.thumbTintColor = [UIColor whiteColor]; spdSlider.tag = 302;
-    UILabel * __unsafe_unretained svRef = spdVal;
-    spdSlider.onValueChanged = ^(float v){ aimSpeed = v; svRef.text = [NSString stringWithFormat:@"%.2f", v]; };
-    [extraTabContainer addSubview:spdSlider];
-
-
-    // --- SETTING TAB ---
-    settingTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
-    settingTabContainer.backgroundColor = [UIColor blackColor];
-    settingTabContainer.layer.borderColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0].CGColor;
-    settingTabContainer.layer.borderWidth = 1;
-    settingTabContainer.layer.cornerRadius = 10;
+    // ══ CONFIG TAB ════════════════════════════════════════════════════
+    settingTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
+    settingTabContainer.backgroundColor = COL_BG1;
     settingTabContainer.hidden = YES;
     [menuContainer addSubview:settingTabContainer];
 
-    UILabel *stSectionTitle = [[UILabel alloc] initWithFrame:CGRectMake(15, 12, tabW - 30, 18)];
-    stSectionTitle.text = @"SETTINGS";
-    stSectionTitle.textColor = [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0];
-    stSectionTitle.font = [UIFont boldSystemFontOfSize:11];
-    [settingTabContainer addSubview:stSectionTitle];
+    CGFloat cW = tabW;
+    CGFloat cy = 0;
 
-    UIView *stSep = [[UIView alloc] initWithFrame:CGRectMake(15, 33, tabW - 30, 1)];
-    stSep.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
-    [settingTabContainer addSubview:stSep];
+    UIView *cHdr = [[UIView alloc] initWithFrame:CGRectMake(0, cy, cW, 28)];
+    cHdr.backgroundColor = COL_BG1;
+    UILabel *cHdrTtl = [[UILabel alloc] initWithFrame:CGRectMake(10, 7, 80, 14)];
+    cHdrTtl.text = @"CONFIG";
+    cHdrTtl.textColor = COL_ACC;
+    cHdrTtl.font = [UIFont fontWithName:@"Courier-Bold" size:9.5];
+    [cHdr addSubview:cHdrTtl];
+    UILabel *cHdrDesc = [[UILabel alloc] initWithFrame:CGRectMake(50, 9, cW - 60, 12)];
+    cHdrDesc.text = @"— System";
+    cHdrDesc.textColor = COL_DIM;
+    cHdrDesc.font = [UIFont fontWithName:@"Courier" size:8];
+    [cHdr addSubview:cHdrDesc];
+    UIView *cHdrLine = [[UIView alloc] initWithFrame:CGRectMake(0, 27, cW, 1)];
+    cHdrLine.backgroundColor = COL_LINE;
+    [cHdr addSubview:cHdrLine];
+    [settingTabContainer addSubview:cHdr];
+    cy += 32;
 
-    [self addFeatureToView:settingTabContainer withTitle:@"Stream Proof" atY:40 initialValue:isStreamerMode andAction:@selector(toggleStreamerMode:)];
+    // PATCHES
+    UIView *cSec1 = [self makeSectionHeaderWithTitle:@"PATCHES" atY:cy width:cW];
+    [settingTabContainer addSubview:cSec1]; cy += 18;
 
-    UILabel *stDesc = [[UILabel alloc] initWithFrame:CGRectMake(15, 80, tabW - 30, 32)];
-    stDesc.text = @"Hides the overlay from screen recordings & screenshots.";
-    stDesc.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    stDesc.font = [UIFont systemFontOfSize:10];
-    stDesc.numberOfLines = 2;
-    [settingTabContainer addSubview:stDesc];
+    UIColor *loopColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
+    UIColor *scanColor = [UIColor colorWithRed:0.18 green:0.78 blue:0.71 alpha:1.0];
+    UIView *nrRow = [self makeCheckRowWithTitle:@"No Recoil" badge:@"LOOP" badgeColor:loopColor atY:cy width:cW initialValue:NO action:@selector(toggleNoRecoil:)];
+    [settingTabContainer addSubview:nrRow]; cy += 28;
+    UIView *spRow = [self makeCheckRowWithTitle:@"Speed" badge:@"SCAN" badgeColor:scanColor atY:cy width:cW initialValue:NO action:@selector(toggleSpeed:)];
+    [settingTabContainer addSubview:spRow]; cy += 28;
 
-    CGFloat stY = 120;
+    cy += 4;
+    // PRIVACY
+    UIView *cSec2 = [self makeSectionHeaderWithTitle:@"PRIVACY" atY:cy width:cW];
+    [settingTabContainer addSubview:cSec2]; cy += 18;
+    UIView *spfRow = [self makeCheckRowWithTitle:@"Stream Proof" badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleStreamerMode:)];
+    [settingTabContainer addSubview:spfRow]; cy += 26;
 
-    // ── NO RECOIL ─────────────────────────────────────────────────────
-    UIView *nrSep = [[UIView alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 1)];
-    nrSep.backgroundColor = [UIColor colorWithRed:0.12 green:0.13 blue:0.18 alpha:1.0];
-    [settingTabContainer addSubview:nrSep]; stY += 8;
+    UILabel *spfDesc = [[UILabel alloc] initWithFrame:CGRectMake(30, cy, cW - 40, 22)];
+    spfDesc.text = @"Hides overlay from recordings & screenshots";
+    spfDesc.textColor = COL_DIM;
+    spfDesc.font = [UIFont fontWithName:@"Courier" size:8];
+    spfDesc.numberOfLines = 2;
+    [settingTabContainer addSubview:spfDesc]; cy += 26;
 
-    UILabel *nrHdr = [self makeSectionLabel:@"NO RECOIL" atY:stY width:tabW];
-    [settingTabContainer addSubview:nrHdr]; stY += 18;
+    // INFO
+    UIView *cSec3 = [self makeSectionHeaderWithTitle:@"INFO" atY:cy width:cW];
+    [settingTabContainer addSubview:cSec3]; cy += 18;
 
-    [self addFeatureToView:settingTabContainer withTitle:@"No Recoil (scan & patch)" atY:stY initialValue:isNoRecoil andAction:@selector(toggleNoRecoil:)]; stY += 32;
+    NSDictionary *infos = @{@"Version": @"1.0.0", @"Game": @"Free Fire", @"Author": @"Fryzz 🧊"};
+    NSArray *infoKeys = @[@"Version", @"Game", @"Author"];
+    for (NSString *key in infoKeys) {
+        UIView *infoLine = [[UIView alloc] initWithFrame:CGRectMake(10, cy, cW - 20, 1)];
+        infoLine.backgroundColor = COL_LINE;
+        [settingTabContainer addSubview:infoLine]; cy += 2;
 
-    UILabel *nrDesc = [[UILabel alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 24)];
-    nrDesc.text = @"Scans memory for recoil value and patches it once.";
-    nrDesc.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
-    nrDesc.font = [UIFont systemFontOfSize:9]; nrDesc.numberOfLines = 2;
-    [settingTabContainer addSubview:nrDesc]; stY += 28;
+        UILabel *kLbl = [[UILabel alloc] initWithFrame:CGRectMake(12, cy, 60, 16)];
+        kLbl.text = key; kLbl.textColor = COL_DIM;
+        kLbl.font = [UIFont fontWithName:@"Courier" size:9];
+        [settingTabContainer addSubview:kLbl];
 
-    // ── SPEED ─────────────────────────────────────────────────────────
-    UIView *spSep = [[UIView alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 1)];
-    spSep.backgroundColor = [UIColor colorWithRed:0.12 green:0.13 blue:0.18 alpha:1.0];
-    [settingTabContainer addSubview:spSep]; stY += 8;
+        UILabel *vLbl = [[UILabel alloc] initWithFrame:CGRectMake(cW - 90, cy, 82, 16)];
+        vLbl.text = infos[key];
+        vLbl.textColor = [key isEqualToString:@"Author"] ? COL_ACC : COL_TEXT;
+        vLbl.font = [UIFont fontWithName:@"Courier" size:9];
+        vLbl.textAlignment = NSTextAlignmentRight;
+        [settingTabContainer addSubview:vLbl]; cy += 18;
+    }
 
-    UILabel *spHdr = [self makeSectionLabel:@"SPEED" atY:stY width:tabW];
-    [settingTabContainer addSubview:spHdr]; stY += 18;
-
-    [self addFeatureToView:settingTabContainer withTitle:@"Speed (scan & patch)" atY:stY initialValue:isSpeedActive andAction:@selector(toggleSpeed:)]; stY += 32;
-
-    UILabel *spDesc = [[UILabel alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 24)];
-    spDesc.text = @"Scans and patches speed value. Toggle off to reset.";
-    spDesc.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
-    spDesc.font = [UIFont systemFontOfSize:9]; spDesc.numberOfLines = 2;
-    [settingTabContainer addSubview:spDesc];
-
-    // Поднять sidebar поверх всех табов
+    // Sidebar поверх всего
     [menuContainer bringSubviewToFront:sidebar];
+}
 
 }
 
@@ -1041,19 +1133,22 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 103) {
             sub.backgroundColor = [UIColor clearColor];
             sub.layer.borderColor = [UIColor clearColor].CGColor;
-            // Иконка + текст — inactive
-            for (UILabel *lbl in sub.subviews) {
-                if ([lbl isKindOfClass:[UILabel class]])
-                    lbl.textColor = [UIColor colorWithRed:0.35 green:0.35 blue:0.45 alpha:1.0];
+            for (UIView *child in sub.subviews) {
+                if ([child isKindOfClass:[UILabel class]])
+                    ((UILabel *)child).textColor = [UIColor colorWithRed:0.31 green:0.32 blue:0.42 alpha:1.0];
+                if ([child isKindOfClass:[UIImageView class]])
+                    ((UIImageView *)child).tintColor = [UIColor colorWithRed:0.31 green:0.32 blue:0.42 alpha:1.0];
             }
         }
     }
     UIView *activeBtn = [_sidebar viewWithTag:100 + tabIndex];
-    activeBtn.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.1];
-    activeBtn.layer.borderColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.35].CGColor;
-    for (UILabel *lbl in activeBtn.subviews) {
-        if ([lbl isKindOfClass:[UILabel class]])
-            lbl.textColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
+    activeBtn.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.08];
+    activeBtn.layer.borderColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.28].CGColor;
+    for (UIView *child in activeBtn.subviews) {
+        if ([child isKindOfClass:[UILabel class]])
+            ((UILabel *)child).textColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
+        if ([child isKindOfClass:[UIImageView class]])
+            ((UIImageView *)child).tintColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
     }
 
     // AIM таб больше обычного — увеличиваем menuContainer и таб под контент
