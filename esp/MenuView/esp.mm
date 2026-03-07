@@ -24,8 +24,7 @@ static void espLog(NSString *msg) {
 // Player fields
 #define OFF_ROTATION        ENCRYPTOFFSET("0x53C")
 #define OFF_FIRING          ENCRYPTOFFSET("0x750")
-// RVA метода get_IsDieing — вызов через function pointer (точнее field read)
-#define RVA_IS_DIEING       0x5133838ULL
+
 #define OFF_IPRIDATAPOOL    ENCRYPTOFFSET("0x68")
 #define OFF_PLAYERID        ENCRYPTOFFSET("0x338")
 #define OFF_CAMERA_TRANSFORM ENCRYPTOFFSET("0x318")
@@ -1196,9 +1195,18 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)SetUpBase {
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        Moudule_Base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
+    // Запускаем поиск асинхронно — не блокируем main thread
+    // Повторяем каждые 3 секунды пока не найдём процесс
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+        while (Moudule_Base == (uint64_t)-1 || Moudule_Base == 0) {
+            uint64_t base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
+            if (base != 0) {
+                Moudule_Base = base;
+                break;
+            }
+            // Игра не запущена — ждём
+            [NSThread sleepForTimeInterval:3.0];
+        }
     });
 }
 
@@ -1241,32 +1249,22 @@ bool get_IsFiring(uint64_t player) {
     return ReadAddr<bool>(player + OFF_FIRING);
 }
 
-// IL2CPP method call: bool get_IsDieing(instance)
-// RVA: 0x5133838 — offset от начала бинаря freefireth
-// typedef нужен чтобы компилятор знал ABI вызова (arm64 C calling convention)
-typedef bool (*fn_IsDieing_t)(uint64_t instance);
-static fn_IsDieing_t _fn_IsDieing = nullptr;
-
-// Инициализируем указатель один раз после того как Moudule_Base известен
-static void init_IsDieing_fn() {
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        if (Moudule_Base && Moudule_Base != (uint64_t)-1) {
-            _fn_IsDieing = (fn_IsDieing_t)(Moudule_Base + RVA_IS_DIEING);
-        }
-    });
-}
-
+// get_IsDieing — читаем backing field из памяти игры (external, не вызов метода)
+// RVA даёт нам понять что поле лежит рядом — ищем bool field около offset 0x750-0x760
+// Типичный backing field для bool property в IL2CPP = имя поля без "get_"
+// Для get_IsDieing() поле обычно называется <IsDieing>k__BackingField
+// offset нужно найти реверсом — пока используем varID=2 из data pool как fallback
 bool get_IsDieing(uint64_t player) {
     if (!isVaildPtr(player)) return false;
-    init_IsDieing_fn();
-    if (!_fn_IsDieing) return false;
-    // IL2CPP instance method — первый аргумент это this (указатель на объект)
-    @try {
-        return _fn_IsDieing(player);
-    } @catch (...) {
-        return false;
-    }
+    // varID=2 из IPRIDataPool — knocked state в Free Fire
+    // 0 = жив, 1 = нокнут
+    uint64_t IPRIDataPool = ReadAddr<uint64_t>(player + OFF_IPRIDATAPOOL);
+    if (!isVaildPtr(IPRIDataPool)) return false;
+    uint64_t list = ReadAddr<uint64_t>(IPRIDataPool + 0x10);
+    if (!isVaildPtr(list)) return false;
+    uint64_t item = ReadAddr<uint64_t>(list + 0x8 * 2 + 0x20);
+    if (!isVaildPtr(item)) return false;
+    return ReadAddr<int>(item + 0x18) == 1;
 }
 
 // Pool текстовых слоёв — берёт существующий или создаёт новый
