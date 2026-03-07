@@ -7,7 +7,6 @@
 #define GL_GAMEFACADE_ST    ENCRYPTOFFSET("0xB8")
 // Match/game
 #define GL_MATCH            ENCRYPTOFFSET("0x90")
-// Match.m_LocalPlayer = 0xB0 (из обфусцированного IL2CPP дампа, Player FJPEHEGICBO)
 #define GL_LOCALPLAYER      ENCRYPTOFFSET("0xB0")
 #define GL_CAMERA_MGR       ENCRYPTOFFSET("0xD8")
 #define GL_CAMERA_MGR2      ENCRYPTOFFSET("0x18")
@@ -38,20 +37,7 @@
 uint64_t getMatchGame(uint64_t Moudule_Base) {
     uint64_t GameFacade_TypeInfo = ReadAddr<uint64_t>(Moudule_Base + GL_GAMEFACADE_TI);
     uint64_t GameFacade_Static   = ReadAddr<uint64_t>(GameFacade_TypeInfo + GL_GAMEFACADE_ST);
-    // По IL2CPP дампу: GameFacade.CurrentMatchGame = 0x8 (не 0x0 который = CurrentGame/BaseGame)
-    return ReadAddr<uint64_t>(GameFacade_Static + 0x8);
-}
-
-// Читает GameFacade.IsMatchStarted — надёжный флаг из дампа (offset 0x1D9)
-bool getIsMatchStarted(uint64_t Moudule_Base) {
-    uint64_t GameFacade_TypeInfo = ReadAddr<uint64_t>(Moudule_Base + GL_GAMEFACADE_TI);
-    uint64_t GameFacade_Static   = ReadAddr<uint64_t>(GameFacade_TypeInfo + GL_GAMEFACADE_ST);
-    return ReadAddr<bool>(GameFacade_Static + 0x1D9);
-}
-
-// Читает Match.Count — количество живых игроков в матче (offset 0x430)
-uint32_t getMatchPlayerCount(uint64_t match) {
-    return ReadAddr<uint32_t>(match + 0x430);
+    return ReadAddr<uint64_t>(GameFacade_Static + 0x0);
 }
 
 uint64_t getMatch(uint64_t matchgame) {
@@ -145,11 +131,4 @@ int get_CurHP(uint64_t Player) {
 
 int get_MaxHP(uint64_t Player) {
     return GetDataUInt16(Player, 1);
-}
-
-// varID=2 — knocked/down state в Free Fire
-// 0 = жив, 1 = нокнут (лежит ждёт ревайва)
-// MaxHP у нокнутого остаётся 172 — HP не меняется, меняется этот флаг
-int get_IsKnockedState(uint64_t Player) {
-    return GetDataUInt16(Player, 2);
 }
