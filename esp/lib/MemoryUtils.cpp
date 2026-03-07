@@ -2,7 +2,6 @@
 
 // Глобальный task port игрового процесса (инициализируется в GetGameModule_Base)
 mach_port_t get_task = MACH_PORT_NULL;
-pid_t Processpid     = 0;
 
 // Получить PID по имени процесса через sysctl
 pid_t GetGameProcesspid(char* GameProcessName) {
