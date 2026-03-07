@@ -1145,106 +1145,58 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 // ── Value scan helper ────────────────────────────────────────────────
-// Сканирует диапазон памяти чужого процесса, ищет паттерн, возвращает адреса.
-// Аналог h5gg.searchNumber + h5gg.editAll, но через vm_read_overwrite.
-- (NSMutableArray<NSNumber*> *)scanMemory:(uint64_t)rangeStart
-                                      end:(uint64_t)rangeEnd
-                                  pattern:(const void*)pattern
-                                  patSize:(size_t)patSize {
-    extern mach_port_t get_task;
-    NSMutableArray<NSNumber*> *results = [NSMutableArray array];
-    if (get_task == MACH_PORT_NULL) return results;
-
-    const size_t CHUNK = 0x100000; // 1MB за раз
-    uint8_t *buf = (uint8_t *)malloc(CHUNK);
-    if (!buf) return results;
-
-    for (uint64_t addr = rangeStart; addr < rangeEnd; addr += CHUNK) {
-        vm_size_t actualRead = 0;
-        kern_return_t kr = vm_read_overwrite(get_task,
-                                             (vm_address_t)addr,
-                                             (vm_size_t)CHUNK,
-                                             (vm_address_t)buf,
-                                             &actualRead);
-        if (kr != KERN_SUCCESS || actualRead < patSize) continue;
-
-        for (vm_size_t i = 0; i + patSize <= actualRead; i += patSize) {
-            if (memcmp(buf + i, pattern, patSize) == 0) {
-                [results addObject:@(addr + i)];
-            }
-        }
-    }
-    free(buf);
-    return results;
-}
-
 // ── No Recoil ─────────────────────────────────────────────────────────
 // h5gg: searchNumber('1016018816','I32','0x100000000','0x160000000') → editAll('180','I32')
-// При выключении восстанавливаем оригинальное значение (1016018816)
 - (void)toggleNoRecoil:(CustomSwitch *)sender {
     isNoRecoil = sender.isOn;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        const int MAX = 4096;
+        int32_t searchVal = 1016018816;
+        int32_t patchVal  = 180;
         if (isNoRecoil) {
-            // Ищем: I32 = 1016018816 (float 0.125 — минимальный recoil factor)
-            int32_t searchVal = 1016018816;
-            int32_t patchVal  = 180;
-            NSMutableArray<NSNumber*> *addrs = [self scanMemory:0x100000000
-                                                            end:0x160000000
-                                                        pattern:&searchVal
-                                                        patSize:sizeof(searchVal)];
-            if (addrs.count == 0) {
-                NSLog(@"[NoRecoil] pattern not found");
-                return;
+            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
+            int count = scanForValue(0x100000000, 0x160000000,
+                                     &searchVal, sizeof(searchVal), addrs, MAX);
+            if (count == 0) { NSLog(@"[NoRecoil] not found"); free(addrs); return; }
+            noRecoilAddrs = [NSMutableArray arrayWithCapacity:count];
+            for (int i = 0; i < count; i++) {
+                [noRecoilAddrs addObject:@(addrs[i])];
+                WriteAddr<int32_t>((long)addrs[i], patchVal);
             }
-            noRecoilAddrs = addrs;
-            for (NSNumber *a in addrs) {
-                WriteAddr<int32_t>((long)a.unsignedLongLongValue, patchVal);
-            }
-            NSLog(@"[NoRecoil] patched %lu addresses", (unsigned long)addrs.count);
+            free(addrs);
+            NSLog(@"[NoRecoil] patched %d addrs", count);
         } else {
-            // Восстанавливаем оригинал
-            int32_t origVal = 1016018816;
-            for (NSNumber *a in noRecoilAddrs) {
-                WriteAddr<int32_t>((long)a.unsignedLongLongValue, origVal);
-            }
+            for (NSNumber *a in noRecoilAddrs)
+                WriteAddr<int32_t>((long)a.unsignedLongLongValue, searchVal);
             noRecoilAddrs = nil;
             NSLog(@"[NoRecoil] restored");
         }
     });
 }
 
-
 // ── Speed ─────────────────────────────────────────────────────────────
-// h5gg: searchNumber('4397530849764387586','I64','0x100000000','0x200000000')
-//       activateSpeed: editAll('4366458311853765201','I64')
-//       resetSpeed:    editAll('4397530849764387586','I64')
+// h5gg: searchNumber('4397530849764387586','I64') → editAll('4366458311853765201','I64')
 - (void)toggleSpeed:(CustomSwitch *)sender {
     isSpeedActive = sender.isOn;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // Оригинальный I64 паттерн (normal speed)
+        const int MAX = 4096;
         int64_t origI64  = 4397530849764387586LL;
-        // Patched I64 (fast speed)
         int64_t speedI64 = 4366458311853765201LL;
-
         if (isSpeedActive) {
-            NSMutableArray<NSNumber*> *addrs = [self scanMemory:0x100000000
-                                                            end:0x200000000
-                                                        pattern:&origI64
-                                                        patSize:sizeof(origI64)];
-            if (addrs.count == 0) {
-                NSLog(@"[Speed] pattern not found");
-                return;
+            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
+            int count = scanForValue(0x100000000, 0x200000000,
+                                     &origI64, sizeof(origI64), addrs, MAX);
+            if (count == 0) { NSLog(@"[Speed] not found"); free(addrs); return; }
+            speedAddrs = [NSMutableArray arrayWithCapacity:count];
+            for (int i = 0; i < count; i++) {
+                [speedAddrs addObject:@(addrs[i])];
+                WriteAddr<int64_t>((long)addrs[i], speedI64);
             }
-            speedAddrs = addrs;
-            for (NSNumber *a in addrs) {
-                WriteAddr<int64_t>((long)a.unsignedLongLongValue, speedI64);
-            }
-            NSLog(@"[Speed] patched %lu addresses", (unsigned long)addrs.count);
+            free(addrs);
+            NSLog(@"[Speed] patched %d addrs", count);
         } else {
-            // Восстанавливаем оригинал
-            for (NSNumber *a in speedAddrs) {
+            for (NSNumber *a in speedAddrs)
                 WriteAddr<int64_t>((long)a.unsignedLongLongValue, origI64);
-            }
             speedAddrs = nil;
             NSLog(@"[Speed] restored");
         }
