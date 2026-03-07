@@ -1149,30 +1149,32 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             ((UIImageView *)child).tintColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
     }
 
-    // AIM таб больше обычного — увеличиваем menuContainer и таб под контент
-    CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
-    CGFloat baseH = MIN(370, screenH * 0.55);
-    CGFloat tabW  = aimTabContainer.frame.size.width;
+    // Берём размер из mainTabContainer — он всегда правильный (задан в setupMenuUI)
+    CGFloat tabX = mainTabContainer.frame.origin.x;
+    CGFloat tabY = mainTabContainer.frame.origin.y;
+    CGFloat tabW = mainTabContainer.frame.size.width;
+    CGFloat tabH = mainTabContainer.frame.size.height;
 
-    if (tabIndex == 1) {
-        NSNumber *aimHNum = objc_getAssociatedObject(aimTabContainer, "aimH");
-        CGFloat aimH = aimHNum ? aimHNum.floatValue : baseH - 55;
-        CGFloat newMenuH = MIN(aimH + 55 + 10, screenH * 0.88);
-        CGFloat newTabH  = newMenuH - 55;
-        CGRect mf = menuContainer.frame;
-        mf.size.height = newMenuH;
-        menuContainer.frame = mf;
-        aimTabContainer.frame = CGRectMake(15, 50, tabW, newTabH);
-        aimTabContainer.hidden = NO; aimTabContainer.userInteractionEnabled = YES;
-    } else {
-        // Возвращаем стандартную высоту
-        CGRect mf = menuContainer.frame;
-        mf.size.height = baseH;
-        menuContainer.frame = mf;
-        aimTabContainer.frame = CGRectMake(15, 50, tabW, baseH - 55);
-        if (tabIndex == 0) { mainTabContainer.hidden = NO; mainTabContainer.userInteractionEnabled = YES; }
-        if (tabIndex == 2) { extraTabContainer.hidden = NO; extraTabContainer.userInteractionEnabled = YES; }
-        if (tabIndex == 3) { settingTabContainer.hidden = NO; settingTabContainer.userInteractionEnabled = YES; }
+    switch (tabIndex) {
+        case 0:
+            mainTabContainer.hidden = NO;
+            mainTabContainer.userInteractionEnabled = YES;
+            break;
+        case 1:
+            aimTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
+            aimTabContainer.hidden = NO;
+            aimTabContainer.userInteractionEnabled = YES;
+            break;
+        case 2:
+            extraTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
+            extraTabContainer.hidden = NO;
+            extraTabContainer.userInteractionEnabled = YES;
+            break;
+        case 3:
+            settingTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
+            settingTabContainer.hidden = NO;
+            settingTabContainer.userInteractionEnabled = YES;
+            break;
     }
 }
 
@@ -1474,11 +1476,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
         CGFloat halfW = viewToMove.bounds.size.width  / 2.0;
         CGFloat halfH = viewToMove.bounds.size.height / 2.0;
-        CGFloat margin = 8.0;
+        CGFloat minShow = 44.0; // минимум 44pt должно быть видно
 
-        // Ограничиваем — минимум margin пикселей внутри экрана
-        newX = MAX(halfW * 0.3 + margin, MIN(newX, screenW - halfW * 0.3 - margin));
-        newY = MAX(halfH * 0.3 + margin, MIN(newY, screenH - halfH * 0.3 - margin));
+        // Не даём уйти так чтобы ничего не было видно на экране
+        newX = MAX(minShow - halfW, MIN(newX, screenW - minShow + halfW));
+        newY = MAX(minShow - halfH, MIN(newY, screenH - minShow + halfH));
 
         viewToMove.center = CGPointMake(newX, newY);
     }
@@ -1489,14 +1491,14 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
         CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
         CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
-        CGFloat minVisX = viewToMove.bounds.size.width  * 0.3;
-        CGFloat minVisY = viewToMove.bounds.size.height * 0.3;
-        CGFloat margin  = 8.0;
+        CGFloat halfW   = viewToMove.bounds.size.width  / 2.0;
+        CGFloat halfH   = viewToMove.bounds.size.height / 2.0;
+        CGFloat minShow = 44.0;
 
         CGFloat cx = viewToMove.center.x;
         CGFloat cy = viewToMove.center.y;
-        cx = MAX(minVisX + margin, MIN(cx, screenW - minVisX - margin));
-        cy = MAX(minVisY + margin, MIN(cy, screenH - minVisY - margin));
+        cx = MAX(minShow - halfW, MIN(cx, screenW - minShow + halfW));
+        cy = MAX(minShow - halfH, MIN(cy, screenH - minShow + halfH));
 
         if (!CGPointEqualToPoint(viewToMove.center, CGPointMake(cx, cy))) {
             [UIView animateWithDuration:0.25
