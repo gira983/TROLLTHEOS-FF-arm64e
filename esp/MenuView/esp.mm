@@ -23,10 +23,9 @@ static void espLog(NSString *msg) {
 // --- Obfuscated offsets (compile-time encrypted, runtime decrypted) ---
 // Player fields
 #define OFF_ROTATION        ENCRYPTOFFSET("0x53C")    // m_AimRotation (камера)
-// SetAimRotation RVA из дампа — официальный метод игры
-// void SetAimRotation(Quaternion rot, bool flag=true)
-// typedef: (uint64_t instance, Quaternion rot, bool flag, void* method)
-#define RVA_SET_AIM_ROTATION 0x51468F0ULL
+// Silent aim: пишем в оба поля rotation одновременно
+// m_AimRotation (камера)         @ 0x53C  = OFF_ROTATION
+// m_CurrentAimRotation (пуля)    @ 0x172C
 #define OFF_FIRING          ENCRYPTOFFSET("0x750")
 
 // Knocked state через PropertyData pool @ player+0x68 (varID=2)
@@ -110,6 +109,14 @@ static int  aimTrigger = 1;        // 0 = Always, 1 = Only Shooting, 2 = Only Ai
 static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
 static float aimSpeed = 1.0f;      // Aim smoothing 0.05 - 1.0
 static bool isStreamerMode = NO;   // Stream Proof
+// ── No Recoil ─────────────────────────────────────────────────────────
+static bool isNoRecoil = NO;
+static float noRecoilStrength = 1.0f;  // 1.0 = полное обнуление, 0.5 = частичное
+// ── Anti-Knocked ─────────────────────────────────────────────────────
+static bool isAntiKnocked = NO;
+// ── Speed Hack ───────────────────────────────────────────────────────
+static bool isSpeedHack  = NO;
+static float speedValue  = 10.0f;  // множитель скорости врагов
 
 @interface CustomSwitch : UIControl
 @property (nonatomic, assign, getter=isOn) BOOL on;
@@ -385,6 +392,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     CAShapeLayer *_boxLayer;
     CAShapeLayer *_lineLayer;
     CAShapeLayer *_fovLayer;
+    // No Recoil — сохранённый rotation перед выстрелом
+    Quaternion _preFireRotation;
+    bool       _wasFireLastFrame;
     CAShapeLayer *_hpBgLayer;
     CAShapeLayer *_hpFillGreen;   // ratio > 0.6
     CAShapeLayer *_hpFillYellow;  // 0.3-0.6
@@ -457,6 +467,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         // FOV круг
         _fovLayer = makeShape([UIColor colorWithWhite:1.0 alpha:0.4], 1.0f, NO);
         _fovLayer.hidden = YES;
+
+        // No Recoil — инициализация state
+        _preFireRotation = Quaternion{0,0,0,1};
+        _wasFireLastFrame = false;
 
         [self SetUpBase];
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
@@ -933,6 +947,88 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     stDesc.numberOfLines = 2;
     [settingTabContainer addSubview:stDesc];
 
+    CGFloat stY = 120;
+
+    // ── NO RECOIL ─────────────────────────────────────────────────────
+    UIView *nrSep = [[UIView alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 1)];
+    nrSep.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1.0];
+    [settingTabContainer addSubview:nrSep]; stY += 8;
+
+    UILabel *nrHdr = [self makeSectionLabel:@"NO RECOIL" atY:stY width:tabW];
+    [settingTabContainer addSubview:nrHdr]; stY += 18;
+
+    [self addFeatureToView:settingTabContainer withTitle:@"Enable No Recoil" atY:stY initialValue:isNoRecoil andAction:@selector(toggleNoRecoil:)]; stY += 32;
+
+    UILabel *nrStrLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, stY, tabW-60, 13)];
+    nrStrLbl.text = @"Strength"; nrStrLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    nrStrLbl.font = [UIFont systemFontOfSize:10]; [settingTabContainer addSubview:nrStrLbl];
+    UILabel *nrStrVal = [[UILabel alloc] initWithFrame:CGRectMake(tabW-50, stY, 40, 13)];
+    nrStrVal.text = [NSString stringWithFormat:@"%.0f%%", noRecoilStrength*100];
+    nrStrVal.textColor = [UIColor colorWithRed:1.0 green:0.8 blue:0.2 alpha:1.0];
+    nrStrVal.font = [UIFont systemFontOfSize:10]; nrStrVal.textAlignment = NSTextAlignmentRight;
+    [settingTabContainer addSubview:nrStrVal]; stY += 14;
+    HUDSlider *nrStrSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, stY, tabW-20, 32)];
+    nrStrSlider.minimumValue=0.1f; nrStrSlider.maximumValue=1.0f; nrStrSlider.value=noRecoilStrength;
+    nrStrSlider.minimumTrackTintColor = [UIColor colorWithRed:1.0 green:0.8 blue:0.2 alpha:1.0];
+    nrStrSlider.thumbTintColor = [UIColor whiteColor];
+    UILabel * __unsafe_unretained _nrsRef = nrStrVal;
+    nrStrSlider.onValueChanged = ^(float v){ noRecoilStrength=v; _nrsRef.text=[NSString stringWithFormat:@"%.0f%%",v*100]; };
+    [settingTabContainer addSubview:nrStrSlider]; stY += 40;
+
+    UILabel *nrDesc = [[UILabel alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 24)];
+    nrDesc.text = @"Locks aim rotation on first shot. 100% = full, 50% = partial.";
+    nrDesc.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    nrDesc.font = [UIFont systemFontOfSize:9]; nrDesc.numberOfLines = 2;
+    [settingTabContainer addSubview:nrDesc]; stY += 28;
+
+    // ── ANTI-KNOCKED ──────────────────────────────────────────────────
+    UIView *akSep = [[UIView alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 1)];
+    akSep.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1.0];
+    [settingTabContainer addSubview:akSep]; stY += 8;
+
+    UILabel *akHdr = [self makeSectionLabel:@"ANTI-KNOCKED" atY:stY width:tabW];
+    [settingTabContainer addSubview:akHdr]; stY += 18;
+
+    [self addFeatureToView:settingTabContainer withTitle:@"Anti-Knocked (self)" atY:stY initialValue:isAntiKnocked andAction:@selector(toggleAntiKnocked:)]; stY += 32;
+
+    UILabel *akDesc = [[UILabel alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 24)];
+    akDesc.text = @"Resets your knocked state every frame.";
+    akDesc.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    akDesc.font = [UIFont systemFontOfSize:9]; akDesc.numberOfLines = 2;
+    [settingTabContainer addSubview:akDesc]; stY += 28;
+
+    // ── SPEED HACK ────────────────────────────────────────────────────
+    UIView *spSep = [[UIView alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 1)];
+    spSep.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1.0];
+    [settingTabContainer addSubview:spSep]; stY += 8;
+
+    UILabel *spHdr = [self makeSectionLabel:@"SPEED HACK" atY:stY width:tabW];
+    [settingTabContainer addSubview:spHdr]; stY += 18;
+
+    [self addFeatureToView:settingTabContainer withTitle:@"Enemy Speed Override" atY:stY initialValue:isSpeedHack andAction:@selector(toggleSpeedHack:)]; stY += 32;
+
+    UILabel *spLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, stY, tabW-60, 13)];
+    spLbl.text = @"Speed Value"; spLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    spLbl.font = [UIFont systemFontOfSize:10]; [settingTabContainer addSubview:spLbl];
+    UILabel *spVal = [[UILabel alloc] initWithFrame:CGRectMake(tabW-50, stY, 40, 13)];
+    spVal.text = [NSString stringWithFormat:@"%.1f", speedValue];
+    spVal.textColor = [UIColor colorWithRed:1.0 green:0.5 blue:0.2 alpha:1.0];
+    spVal.font = [UIFont systemFontOfSize:10]; spVal.textAlignment = NSTextAlignmentRight;
+    [settingTabContainer addSubview:spVal]; stY += 14;
+    HUDSlider *spSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, stY, tabW-20, 32)];
+    spSlider.minimumValue = 0; spSlider.maximumValue = 50; spSlider.value = speedValue;
+    spSlider.minimumTrackTintColor = [UIColor colorWithRed:1.0 green:0.5 blue:0.2 alpha:1.0];
+    spSlider.thumbTintColor = [UIColor whiteColor];
+    UILabel * __unsafe_unretained _spvRef = spVal;
+    spSlider.onValueChanged = ^(float v){ speedValue=v; _spvRef.text=[NSString stringWithFormat:@"%.1f",v]; };
+    [settingTabContainer addSubview:spSlider]; stY += 40;
+
+    UILabel *spDesc = [[UILabel alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 24)];
+    spDesc.text = @"0 = freeze, 5.5 = normal, 50 = very fast.";
+    spDesc.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    spDesc.font = [UIFont systemFontOfSize:9]; spDesc.numberOfLines = 2;
+    [settingTabContainer addSubview:spDesc];
+
     // Поднять sidebar поверх всех табов
     [menuContainer bringSubviewToFront:sidebar];
 
@@ -1175,6 +1271,28 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     __applyHideCapture(self, isStreamerMode);
 }
 
+- (void)toggleNoRecoil:(CustomSwitch *)sender { isNoRecoil = sender.isOn; if (!sender.isOn) _wasFireLastFrame = false; }
+- (void)toggleAntiKnocked:(CustomSwitch *)sender { isAntiKnocked = sender.isOn; }
+- (void)toggleSpeedHack:(CustomSwitch *)sender {
+    isSpeedHack = sender.isOn;
+    if (!sender.isOn && Moudule_Base && Moudule_Base != (uint64_t)-1) {
+        // При выключении восстанавливаем нормальную скорость врагам
+        uint64_t matchGame = getMatchGame(Moudule_Base);
+        uint64_t match     = getMatch(matchGame);
+        if (!isVaildPtr(match)) return;
+        uint64_t myP        = getLocalPlayer(match);
+        uint64_t playerList = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
+        uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
+        int totalCount      = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
+        if (totalCount <= 0 || totalCount > 64) totalCount = 64;
+        for (int i = 0; i < totalCount; i++) {
+            uint64_t P = ReadAddr<uint64_t>(tValue + OFF_PLAYERLIST_ITEM + 8*i);
+            if (!isVaildPtr(P)) continue;
+            WriteAddr<float>(P + (uint64_t)0x488, 5.5f);
+        }
+    }
+}
+
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
     void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, &kSegHandlerKey);
     if (handler) handler(t);
@@ -1359,27 +1477,6 @@ bool get_IsFiring(uint64_t player) {
     return ReadAddr<bool>(player + OFF_FIRING);
 }
 
-// SetAimRotation — официальный IL2CPP метод (RVA: 0x51468F0)
-// Сигнатура: void SetAimRotation(Quaternion rot, bool flag, MethodInfo*)
-// Используется для silent aim: устанавливаем rotation на цель → пуля летит туда
-typedef void (*fn_SetAimRot_t)(uint64_t instance, Quaternion rot, bool flag, void* method);
-static fn_SetAimRot_t _fn_SetAimRot = nullptr;
-
-static void try_init_SetAimRot() {
-    if (_fn_SetAimRot) return;
-    uint64_t base = Moudule_Base;
-    if (base && base != (uint64_t)-1)
-        _fn_SetAimRot = (fn_SetAimRot_t)(base + RVA_SET_AIM_ROTATION);
-}
-
-// Вызов SetAimRotation — только когда адрес функции валидный
-static bool call_SetAimRotation(uint64_t player, Quaternion rot) {
-    try_init_SetAimRot();
-    if (!_fn_SetAimRot) return false;
-    if (!isVaildPtr((uint64_t)_fn_SetAimRot)) return false;
-    _fn_SetAimRot(player, rot, true, nullptr);
-    return true;
-}
 
 // knocked detection — inline в renderESP loop (ReadAddr<bool> @ 0xA0, 0x1110)
 
@@ -1685,21 +1782,82 @@ static bool call_SetAimRotation(uint64_t player, Quaternion rot) {
         set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
     }
     // ── Silent Aim apply ─────────────────────────────────────────────
-    // Принцип: SetAimRotation(target) → пуля летит в цель
-    //          SetAimRotation(original) → камера возвращается мгновенно
-    // Результат: прицел визуально стоит на месте, пуля попадает в цель
+    // External процесс — вызов функций игры невозможен (EXC_BAD_ACCESS).
+    // Пишем напрямую в оба rotation поля через WriteAddr:
+    //   OFF_ROTATION (0x53C)  — m_AimRotation: определяет направление пули
+    //   0x172C                — m_CurrentAimRotation: дополнительный rotation
+    // Камера не двигается — сразу записываем origRot обратно в OFF_ROTATION.
     if (isSilentAim && isVaildPtr(bestTarget)) {
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
         else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
         else                   ap = getPositionExt(getHip(bestTarget));
-        // Сохраняем оригинальный rotation камеры
-        Quaternion origRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
-        // Устанавливаем rotation на цель через официальный метод
-        Quaternion targetRot = GetRotationToLocation(ap, 0.1f, myLoc);
-        call_SetAimRotation(myPawnObject, targetRot);
-        // Сразу восстанавливаем — камера не двигается визуально
-        call_SetAimRotation(myPawnObject, origRot);
+        Quaternion origRot    = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+        Quaternion targetRot  = GetRotationToLocation(ap, 0.1f, myLoc);
+        // Пишем target в оба поля — пуля полетит в цель
+        WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION,        targetRot);
+        WriteAddr<Quaternion>(myPawnObject + (uint64_t)0x172C,    targetRot);
+        // Немедленно восстанавливаем камеру
+        WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION,        origRot);
+    }
+
+    // ── Anti-Knocked: каждый кадр сбрасываем knocked-флаги у себя ────
+    if (isAntiKnocked && isVaildPtr(myPawnObject)) {
+        WriteAddr<bool>(myPawnObject + (uint64_t)0xA0,   false); // IsFrozenKnockDown
+        WriteAddr<bool>(myPawnObject + (uint64_t)0x1110, false); // IsKnockedDownBleed
+    }
+
+    // ── Speed Hack: замедляем врагов (записываем 0 в Speed @ 0x488) ──
+    // При выключении восстанавливаем дефолтную скорость (5.5f)
+    if (isSpeedHack) {
+        for (int i = 0; i < totalCount; i++) {
+            uint64_t P = ReadAddr<uint64_t>(tValue + OFF_PLAYERLIST_ITEM + 8 * i);
+            if (!isVaildPtr(P)) continue;
+            if (isLocalTeamMate(myPawnObject, P)) continue;
+            int hp = get_CurHP(P);
+            if (hp <= 0) continue;
+            WriteAddr<float>(P + (uint64_t)0x488, speedValue);
+        }
+    }
+
+    // ── No Recoil ─────────────────────────────────────────────────────
+    // Логика: запоминаем rotation ДО начала стрельбы.
+    // Пока isFire == true — восстанавливаем его каждый кадр (с силой noRecoilStrength).
+    // Lerp по strength: 1.0 = полное обнуление отдачи, 0.5 = частичное.
+    if (isNoRecoil && isVaildPtr(myPawnObject)) {
+        Quaternion curRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+        if (isFire) {
+            if (!_wasFireLastFrame) {
+                // Первый кадр стрельбы — сохраняем текущий rotation
+                _preFireRotation  = curRot;
+                _wasFireLastFrame = true;
+            } else {
+                // Продолжаем стрелять — восстанавливаем сохранённый rotation
+                if (noRecoilStrength >= 0.99f) {
+                    // Полное обнуление
+                    WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, _preFireRotation);
+                } else {
+                    // Частичное (slerp)
+                    float t = noRecoilStrength;
+                    Quaternion lerped;
+                    lerped.x = curRot.x + t * (_preFireRotation.x - curRot.x);
+                    lerped.y = curRot.y + t * (_preFireRotation.y - curRot.y);
+                    lerped.z = curRot.z + t * (_preFireRotation.z - curRot.z);
+                    lerped.w = curRot.w + t * (_preFireRotation.w - curRot.w);
+                    // Нормализуем
+                    float len = sqrtf(lerped.x*lerped.x + lerped.y*lerped.y +
+                                      lerped.z*lerped.z + lerped.w*lerped.w);
+                    if (len > 0.0001f) {
+                        lerped.x/=len; lerped.y/=len; lerped.z/=len; lerped.w/=len;
+                    }
+                    WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, lerped);
+                }
+            }
+        } else {
+            _wasFireLastFrame = false;
+            // Между очередями — обновляем pre-fire rotation на текущий
+            _preFireRotation = curRot;
+        }
     }
 
     // ── Передаём на main thread ──────────────────────────────────────
@@ -1765,6 +1923,8 @@ static bool call_SetAimRotation(uint64_t player, Quaternion rot) {
         CGPathRelease(hpBgPath);
         CGPathRelease(hpFillGreenPath); CGPathRelease(hpFillYellowPath);
         CGPathRelease(hpFillRedPath);
+
+        // No Recoil работает на background queue — main thread ничего не рендерит
     });
 }
 
