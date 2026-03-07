@@ -94,6 +94,7 @@ static int  lineOrigin = 1;    // 0 = Top, 1 = Center, 2 = Bottom
 // --- Aimbot Config ---
 // ── Обычный Aimbot ──────────────────────────────────────────────────
 static bool  isAimbot      = NO;
+static bool  isInMatch     = NO;  // авто: YES в матче, NO в лобби/главный экран
 static float aimFov        = 150.0f;
 static float aimDistance   = 200.0f;
 
@@ -1609,8 +1610,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (_espBusy) return;
     _espBusy = YES;
 
-    // FOV круг — белый для aimbot
-    if (isAimbot) {
+    // FOV круг — только в матче (авто-рубильник)
+    if (isAimbot && isInMatch) {
         float cx = self.bounds.size.width / 2;
         float cy = self.bounds.size.height / 2;
         float radius = aimFov;
@@ -1689,6 +1690,38 @@ bool get_IsFiring(uint64_t player) {
 
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
+
+    // ── Авто-детекция матча ──────────────────────────────────────────
+    // Читаем IsMatchStarted из GameFacade_Static+0x1D9
+    uint64_t _gfTI = ReadAddr<uint64_t>(Moudule_Base + ENCRYPTOFFSET("0xA4D2968"));
+    uint64_t _gfST = ReadAddr<uint64_t>(_gfTI + ENCRYPTOFFSET("0xB8"));
+    bool nowInMatch = ReadAddr<bool>(_gfST + 0x1D9);
+    // Fallback: если флаг false но playerList валиден — туториал/спецрежим
+    if (!nowInMatch) {
+        uint64_t _plist = ReadAddr<uint64_t>(match + ENCRYPTOFFSET("0x120"));
+        uint64_t _parr  = ReadAddr<uint64_t>(_plist + ENCRYPTOFFSET("0x28"));
+        int      _pcnt  = ReadAddr<int>(_parr + ENCRYPTOFFSET("0x18"));
+        if (_pcnt > 0 && _pcnt <= 64) {
+            uint64_t _first = ReadAddr<uint64_t>(_parr + ENCRYPTOFFSET("0x20"));
+            if (isVaildPtr(_first)) nowInMatch = true;
+        }
+    }
+    isInMatch = nowInMatch;
+    // Вне матча — очищаем ESP и выходим
+    if (!isInMatch) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [CATransaction begin]; [CATransaction setDisableActions:YES];
+            for (CAShapeLayer *sl in @[self->_boneNear,self->_boneMid,self->_boneFar,self->_boneKnocked,
+                self->_boxNear,self->_boxMid,self->_boxFar,self->_boxKnocked,
+                self->_lineNear,self->_lineMid,self->_lineFar,
+                self->_hpBgLayer,self->_hpFillGreen,self->_hpFillYellow,self->_hpFillRed]) {
+                sl.path = nil;
+            }
+            for (CATextLayer *t in self->_textPool) t.hidden = YES;
+            [CATransaction commit];
+        });
+        return;
+    }
 
     uint64_t playerList = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
     uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
