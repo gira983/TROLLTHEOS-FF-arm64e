@@ -1695,13 +1695,11 @@ bool get_IsFiring(uint64_t player) {
 
 - (void)renderESP {
     if (Moudule_Base == -1) return;
+    static int _cameraLostFrames = 0;  // один static — нет UB
 
     uint64_t matchGame = getMatchGame(Moudule_Base);
     uint64_t camera    = CameraMain(matchGame);
     if (!isVaildPtr(camera)) {
-        // Не сбрасываем paths мгновенно — даём несколько кадров буфера
-        // чтобы избежать мигания при кратковременной потере камеры
-        static int _cameraLostFrames = 0;
         _cameraLostFrames++;
         if (_cameraLostFrames > 10) {
             _cameraLostFrames = 0;
@@ -1719,8 +1717,7 @@ bool get_IsFiring(uint64_t player) {
         }
         return;
     }
-    // Сбрасываем счётчик при успешной камере
-    { static int _cameraLostFrames = 0; _cameraLostFrames = 0; }
+    _cameraLostFrames = 0;
 
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
@@ -1735,14 +1732,20 @@ bool get_IsFiring(uint64_t player) {
     uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
     int      totalCount = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
 
-    // ── Детекция матча через GameFacade.IsMatchStarted (0x1D9) ──
-    // Inline — не зависит от линковки GameLogic
+    // ── Детекция матча ──────────────────────────────────────────────
+    // Сначала IsMatchStarted, fallback — есть валидные игроки в списке
     bool nowInMatch = false;
     {
         uint64_t _gf_ti = ReadAddr<uint64_t>(Moudule_Base + OFF_GAMEFACADE_TI);
         uint64_t _gf_st = ReadAddr<uint64_t>(_gf_ti + OFF_GAMEFACADE_ST);
         if (isVaildPtr(_gf_st))
             nowInMatch = ReadAddr<bool>(_gf_st + 0x1D9);
+        // Fallback: туториал и некоторые режимы не ставят IsMatchStarted
+        // Если есть хоть один валидный pawn — считаем что в матче
+        if (!nowInMatch && totalCount > 0 && totalCount <= 64) {
+            uint64_t firstPawn = ReadAddr<uint64_t>(tValue + OFF_PLAYERLIST_ITEM);
+            if (isVaildPtr(firstPawn)) nowInMatch = true;
+        }
     }
     if (isInMatch != nowInMatch) {
         isInMatch = nowInMatch;
@@ -2013,40 +2016,35 @@ bool get_IsFiring(uint64_t player) {
     // ── Aimbot apply ────────────────────────────────────────────────
     // Trigger: Always(0) — всегда, Shooting(1) — только при стрельбе
     bool shouldAim = (aimTrigger == 0) || (aimTrigger == 1 && isFire);
+    // Аимбот работает всегда когда есть цель — не зависит от isInMatch
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
-        // Цель — читаем свежие координаты прямо перед записью
-        Vector3 targetPos;
-        uint64_t headNode = getHead(bestTarget);
-        if (!isVaildPtr(headNode)) goto skip_aim;
-        Vector3 freshHead = getPositionExt(headNode);
-
-        if (aimTarget == 0) {
-            targetPos = freshHead; // Head — точно в центр
-        } else if (aimTarget == 1) {
-            targetPos = freshHead + Vector3(0, -0.18f, 0); // Neck
-        } else {
-            uint64_t hipNode = getHip(bestTarget);
-            targetPos = isVaildPtr(hipNode)
-                ? getPositionExt(hipNode)
-                : freshHead + Vector3(0, -0.5f, 0); // Hip fallback
-        }
-
-        Quaternion targetRot = GetRotationToLocation(targetPos, 0.0f, myLoc);
-
-        if (aimSpeed >= 0.99f) {
-            // Мгновенный снэп — пишем напрямую
-            WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, targetRot);
-            WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), targetRot);
-        } else {
-            // Плавное наведение через Slerp
-            Quaternion cur = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
-            float t = fmaxf(0.05f, fminf(0.98f, aimSpeed));
-            Quaternion smooth = SlerpAim(cur, targetRot, t);
-            WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, smooth);
-            WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), smooth);
+        uint64_t aimHeadNode = getHead(bestTarget);
+        if (isVaildPtr(aimHeadNode)) {
+            Vector3 freshHead = getPositionExt(aimHeadNode);
+            Vector3 targetPos;
+            if (aimTarget == 0) {
+                targetPos = freshHead;
+            } else if (aimTarget == 1) {
+                targetPos = freshHead + Vector3(0, -0.18f, 0);
+            } else {
+                uint64_t hipNode = getHip(bestTarget);
+                targetPos = isVaildPtr(hipNode)
+                    ? getPositionExt(hipNode)
+                    : freshHead + Vector3(0, -0.5f, 0);
+            }
+            Quaternion targetRot = GetRotationToLocation(targetPos, 0.0f, myLoc);
+            if (aimSpeed >= 0.99f) {
+                WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, targetRot);
+                WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), targetRot);
+            } else {
+                Quaternion cur = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+                float slerp_t = fmaxf(0.05f, fminf(0.98f, aimSpeed));
+                Quaternion smoothed = SlerpAim(cur, targetRot, slerp_t);
+                WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, smoothed);
+                WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), smoothed);
+            }
         }
     }
-    skip_aim:;
 
 
     // No Recoil и Speed — работают через value-scan (разовые патчи), не renderESP
