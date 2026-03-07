@@ -356,12 +356,28 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     float previewScale;
 
     // ESP рендер — CAShapeLayer + текстовый пул
+    // Bone/Box/Line разделены по 3 цветовым зонам дистанции
+    CAShapeLayer *_boneNear;    // <40м красный
+    CAShapeLayer *_boneMid;     // <100м жёлтый
+    CAShapeLayer *_boneFar;     // >=100м белый/голубой
+    CAShapeLayer *_boneKnocked; // нокнут фиолетовый
+    CAShapeLayer *_boxNear;
+    CAShapeLayer *_boxMid;
+    CAShapeLayer *_boxFar;
+    CAShapeLayer *_boxKnocked;
+    CAShapeLayer *_lineNear;
+    CAShapeLayer *_lineMid;
+    CAShapeLayer *_lineFar;
+    // Старые алиасы (используются в коде применения)
     CAShapeLayer *_boneLayer;
     CAShapeLayer *_boxLayer;
     CAShapeLayer *_lineLayer;
     CAShapeLayer *_fovLayer;
     CAShapeLayer *_hpBgLayer;
-    CAShapeLayer *_hpFillLayer;
+    CAShapeLayer *_hpFillGreen;   // ratio > 0.6
+    CAShapeLayer *_hpFillYellow;  // 0.3-0.6
+    CAShapeLayer *_hpFillRed;     // < 0.3
+    CAShapeLayer *_hpFillLayer;   // алиас для совместимости
     NSMutableArray<CATextLayer *> *_textPool;
     NSInteger _textPoolIndex;
 
@@ -383,49 +399,52 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         dispatch_set_target_queue(_espQueue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
         _espBusy = NO;
 
-        // === Инициализация ESP слоёв — один раз на весь lifecycle ===
-        // Кости: белые линии 1pt
-        _boneLayer = [CAShapeLayer layer];
-        _boneLayer.fillColor   = nil;
-        _boneLayer.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.8].CGColor;
-        _boneLayer.lineWidth   = 1.0f;
-        _boneLayer.lineCap     = kCALineCapRound;
-        [self.layer addSublayer:_boneLayer];
+        // === ESP слои — создаются один раз ===
+        // Хелпер создания шейп-слоя
+        auto makeShape = [self](UIColor *stroke, CGFloat lw, BOOL round) -> CAShapeLayer * {
+            CAShapeLayer *sl = [CAShapeLayer layer];
+            sl.fillColor   = nil;
+            sl.strokeColor = stroke.CGColor;
+            sl.lineWidth   = lw;
+            sl.lineCap     = round ? kCALineCapRound : kCALineCapSquare;
+            [self.layer addSublayer:sl];
+            return sl;
+        };
 
-        // Боксы: только stroke, без fill
-        _boxLayer = [CAShapeLayer layer];
-        _boxLayer.fillColor   = nil;
-        _boxLayer.strokeColor = [UIColor colorWithRed:1.0 green:1.0 blue:1.0 alpha:0.9].CGColor;
-        _boxLayer.lineWidth   = 1.5f;
-        _boxLayer.lineCap     = kCALineCapSquare;
-        [self.layer addSublayer:_boxLayer];
+        // Кости по зонам
+        _boneNear    = makeShape([UIColor colorWithRed:1.f green:0.2f blue:0.2f alpha:0.9f], 1.2f, YES);
+        _boneMid     = makeShape([UIColor colorWithRed:1.f green:0.85f blue:0.f alpha:0.9f], 1.1f, YES);
+        _boneFar     = makeShape([UIColor colorWithWhite:1.f alpha:0.75f],                    1.0f, YES);
+        _boneKnocked = makeShape([UIColor colorWithRed:0.6f green:0.4f blue:1.f alpha:0.7f], 0.9f, YES);
+        _boneLayer   = _boneFar; // алиас для совместимости
 
-        // HP полоски фон (тёмный)
-        _hpBgLayer = [CAShapeLayer layer];
-        _hpBgLayer.fillColor   = [UIColor colorWithWhite:0.1 alpha:0.6].CGColor;
-        _hpBgLayer.strokeColor = nil;
-        [self.layer addSublayer:_hpBgLayer];
+        // Боксы по зонам
+        _boxNear    = makeShape([UIColor colorWithRed:1.f green:0.2f blue:0.2f alpha:0.95f], 1.6f, NO);
+        _boxMid     = makeShape([UIColor colorWithRed:1.f green:0.85f blue:0.f alpha:0.95f], 1.5f, NO);
+        _boxFar     = makeShape([UIColor colorWithWhite:1.f alpha:0.9f],                     1.4f, NO);
+        _boxKnocked = makeShape([UIColor colorWithRed:0.6f green:0.4f blue:1.f alpha:0.75f],1.2f, NO);
+        _boxLayer   = _boxFar; // алиас
 
-        // HP полоски fill (цветные — но один цвет за кадр, зелёный по умолчанию)
-        _hpFillLayer = [CAShapeLayer layer];
-        _hpFillLayer.fillColor   = [UIColor colorWithRed:0.15 green:0.9 blue:0.35 alpha:1.0].CGColor;
-        _hpFillLayer.strokeColor = nil;
-        [self.layer addSublayer:_hpFillLayer];
+        // Линии ESP по зонам
+        _lineNear = makeShape([UIColor colorWithRed:1.f green:0.2f blue:0.2f alpha:0.55f], 0.9f, NO);
+        _lineMid  = makeShape([UIColor colorWithRed:1.f green:0.85f blue:0.f alpha:0.5f],  0.8f, NO);
+        _lineFar  = makeShape([UIColor colorWithWhite:0.8f alpha:0.4f],                    0.7f, NO);
+        _lineLayer = _lineFar; // алиас
 
-        // Линии ESP
-        _lineLayer = [CAShapeLayer layer];
-        _lineLayer.fillColor   = nil;
-        _lineLayer.strokeColor = [UIColor colorWithRed:1.0 green:0.85 blue:0.0 alpha:0.5].CGColor;
-        _lineLayer.lineWidth   = 0.8f;
-        [self.layer addSublayer:_lineLayer];
+        // HP полоски
+        _hpBgLayer = makeShape(nil, 0, NO);
+        _hpBgLayer.fillColor = [UIColor colorWithWhite:0.1 alpha:0.6].CGColor;
+        _hpFillGreen = makeShape(nil, 0, NO);
+        _hpFillGreen.fillColor  = [UIColor colorWithRed:0.15 green:0.9 blue:0.35 alpha:1.0].CGColor;
+        _hpFillYellow = makeShape(nil, 0, NO);
+        _hpFillYellow.fillColor = [UIColor colorWithRed:1.0  green:0.75 blue:0.0  alpha:1.0].CGColor;
+        _hpFillRed = makeShape(nil, 0, NO);
+        _hpFillRed.fillColor    = [UIColor colorWithRed:1.0  green:0.2  blue:0.2  alpha:1.0].CGColor;
+        _hpFillLayer = _hpFillGreen; // алиас
 
         // FOV круг
-        _fovLayer = [CAShapeLayer layer];
-        _fovLayer.fillColor   = nil;
-        _fovLayer.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
-        _fovLayer.lineWidth   = 1.0f;
-        _fovLayer.hidden      = YES;
-        [self.layer addSublayer:_fovLayer];
+        _fovLayer = makeShape([UIColor colorWithWhite:1.0 alpha:0.4], 1.0f, NO);
+        _fovLayer.hidden = YES;
 
         [self SetUpBase];
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
@@ -1269,12 +1288,28 @@ bool get_IsFiring(uint64_t player) {
     float vH = self.bounds.size.height;
     CGPoint center = CGPointMake(vW * 0.5f, vH * 0.5f);
 
-    // Paths — создаём один раз, пишем всех врагов
-    CGMutablePathRef bonePath   = CGPathCreateMutable();
-    CGMutablePathRef boxPath    = CGPathCreateMutable();
-    CGMutablePathRef hpBgPath   = CGPathCreateMutable();
-    CGMutablePathRef hpFillPath = CGPathCreateMutable();
-    CGMutablePathRef linePath   = CGPathCreateMutable();
+    // Paths по цветовым зонам: Near(<40м) Mid(<100м) Far(>=100м) Knocked
+    CGMutablePathRef boneNearPath    = CGPathCreateMutable();
+    CGMutablePathRef boneMidPath     = CGPathCreateMutable();
+    CGMutablePathRef boneFarPath     = CGPathCreateMutable();
+    CGMutablePathRef boneKnockedPath = CGPathCreateMutable();
+    CGMutablePathRef boxNearPath     = CGPathCreateMutable();
+    CGMutablePathRef boxMidPath      = CGPathCreateMutable();
+    CGMutablePathRef boxFarPath      = CGPathCreateMutable();
+    CGMutablePathRef boxKnockedPath  = CGPathCreateMutable();
+    CGMutablePathRef lineNearPath    = CGPathCreateMutable();
+    CGMutablePathRef lineMidPath     = CGPathCreateMutable();
+    CGMutablePathRef lineFarPath     = CGPathCreateMutable();
+    CGMutablePathRef hpBgPath         = CGPathCreateMutable();
+    CGMutablePathRef hpFillGreenPath  = CGPathCreateMutable(); // ratio > 0.6
+    CGMutablePathRef hpFillYellowPath = CGPathCreateMutable(); // 0.3..0.6
+    CGMutablePathRef hpFillRedPath    = CGPathCreateMutable(); // < 0.3
+    CGMutablePathRef hpFillPath       = hpFillGreenPath;       // алиас
+
+    // Выбор нужного bucket'а по дистанции/состоянию
+    #define BONE_PATH  (isKnocked ? boneKnockedPath : (dis<40.f ? boneNearPath : (dis<100.f ? boneMidPath : boneFarPath)))
+    #define BOX_PATH   (isKnocked ? boxKnockedPath  : (dis<40.f ? boxNearPath  : (dis<100.f ? boxMidPath  : boxFarPath)))
+    #define LINE_PATH  (isKnocked ? lineFarPath     : (dis<40.f ? lineNearPath : (dis<100.f ? lineMidPath : lineFarPath)))
 
     // Текстовые записи
     ESPTextEntry textEntries[kMaxESPText];
@@ -1298,7 +1333,11 @@ bool get_IsFiring(uint64_t player) {
         if (isLocalTeamMate(myPawnObject, PawnObject)) continue;
 
         int CurHP = get_CurHP(PawnObject);
-        if (CurHP <= 0) continue;
+        int MaxHP = get_MaxHP(PawnObject);
+        // Нокнутые (HP==0 но игрок ещё в матче) тоже показываем — с пометкой
+        bool isKnocked = (CurHP <= 0);
+        // Полностью мёртвых и неинициализированных пропускаем
+        if (MaxHP <= 0) continue;
 
         // Читаем голову — для дистанции и aimbot
         uint64_t headNode = getHead(PawnObject);
@@ -1310,7 +1349,7 @@ bool get_IsFiring(uint64_t player) {
         if (dis > 600.0f) continue;
 
         // ── AIMBOT ──────────────────────────────────────────────────
-        if (isAimbot && dis <= aimDistance) {
+        if (isAimbot && !isKnocked && dis <= aimDistance) {
             Vector3 ap = HeadPos;
             if (aimTarget == 1) ap = HeadPos + Vector3(0,-0.15f,0);
             else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
@@ -1344,11 +1383,15 @@ bool get_IsFiring(uint64_t player) {
         float by   = s_HeadTop.y;
 
         // ── Цвет по дистанции ────────────────────────────────────────
-        // Красный=близко(<40), Жёлтый=средне(<100), Голубой=далеко
+        // <40м красный → <100м жёлтый → белый
+        // Нокнутый всегда серо-фиолетовый
         float acR, acG, acB;
-        if      (dis < 40.f)  { acR=1.f; acG=0.25f; acB=0.25f; }
-        else if (dis < 100.f) { acR=1.f; acG=0.85f; acB=0.f;   }
-        else                  { acR=0.3f;acG=0.9f;  acB=1.f;   }
+        if (isKnocked) { acR=0.6f; acG=0.4f; acB=1.f; }       // фиолетовый = нокнут
+        else if (dis < 40.f)  { acR=1.f; acG=0.2f; acB=0.2f; }  // красный
+        else if (dis < 100.f) { acR=1.f; acG=0.85f; acB=0.f;  }  // жёлтый
+        else if (dis < 250.f) { acR=1.f; acG=1.f;  acB=1.f;  }   // белый
+        else                  { acR=0.5f;acG=0.8f; acB=1.f;  }   // голубой = далеко
+        float acA = isKnocked ? 0.65f : 0.92f; // нокнутые чуть прозрачнее
 
         // ── SKELETON (только ≤ 150м — дальше незаметно, но жрёт ресурсы) ──
         if (isBone && dis <= 150.f) {
@@ -1366,45 +1409,47 @@ bool get_IsFiring(uint64_t player) {
             Vector3 s_RA = WorldToScreen(getPositionExt(getRightAnkle(PawnObject)),    matrix, vW, vH);
 
             // Голова→таз
-            CGPathMoveToPoint(bonePath,nil,s_Head.x,s_Head.y);
-            CGPathAddLineToPoint(bonePath,nil,s_Hip.x,s_Hip.y);
+            CGMutablePathRef bp = BONE_PATH;
+            CGPathMoveToPoint(bp,nil,s_Head.x,s_Head.y);
+            CGPathAddLineToPoint(bp,nil,s_Hip.x,s_Hip.y);
             // Плечи
-            CGPathMoveToPoint(bonePath,nil,s_LS.x,s_LS.y);
-            CGPathAddLineToPoint(bonePath,nil,s_RS.x,s_RS.y);
+            CGPathMoveToPoint(bp,nil,s_LS.x,s_LS.y);
+            CGPathAddLineToPoint(bp,nil,s_RS.x,s_RS.y);
             // Левая рука
-            CGPathMoveToPoint(bonePath,nil,s_LS.x,s_LS.y);
-            CGPathAddLineToPoint(bonePath,nil,s_LE.x,s_LE.y);
-            CGPathAddLineToPoint(bonePath,nil,s_LH.x,s_LH.y);
+            CGPathMoveToPoint(bp,nil,s_LS.x,s_LS.y);
+            CGPathAddLineToPoint(bp,nil,s_LE.x,s_LE.y);
+            CGPathAddLineToPoint(bp,nil,s_LH.x,s_LH.y);
             // Правая рука
-            CGPathMoveToPoint(bonePath,nil,s_RS.x,s_RS.y);
-            CGPathAddLineToPoint(bonePath,nil,s_RE.x,s_RE.y);
-            CGPathAddLineToPoint(bonePath,nil,s_RH.x,s_RH.y);
+            CGPathMoveToPoint(bp,nil,s_RS.x,s_RS.y);
+            CGPathAddLineToPoint(bp,nil,s_RE.x,s_RE.y);
+            CGPathAddLineToPoint(bp,nil,s_RH.x,s_RH.y);
             // Ноги
-            CGPathMoveToPoint(bonePath,nil,s_Hip.x,s_Hip.y);
-            CGPathAddLineToPoint(bonePath,nil,s_LA.x,s_LA.y);
-            CGPathMoveToPoint(bonePath,nil,s_Hip.x,s_Hip.y);
-            CGPathAddLineToPoint(bonePath,nil,s_RA.x,s_RA.y);
+            CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
+            CGPathAddLineToPoint(bp,nil,s_LA.x,s_LA.y);
+            CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
+            CGPathAddLineToPoint(bp,nil,s_RA.x,s_RA.y);
         }
 
         // ── BOX: corner brackets ─────────────────────────────────────
         if (isBox) {
             float cL = MIN(boxW, boxH) * 0.22f;
+            CGMutablePathRef xp = BOX_PATH;
             // TL
-            CGPathMoveToPoint(boxPath,nil,bx,by+cL);
-            CGPathAddLineToPoint(boxPath,nil,bx,by);
-            CGPathAddLineToPoint(boxPath,nil,bx+cL,by);
+            CGPathMoveToPoint(xp,nil,bx,by+cL);
+            CGPathAddLineToPoint(xp,nil,bx,by);
+            CGPathAddLineToPoint(xp,nil,bx+cL,by);
             // TR
-            CGPathMoveToPoint(boxPath,nil,bx+boxW-cL,by);
-            CGPathAddLineToPoint(boxPath,nil,bx+boxW,by);
-            CGPathAddLineToPoint(boxPath,nil,bx+boxW,by+cL);
+            CGPathMoveToPoint(xp,nil,bx+boxW-cL,by);
+            CGPathAddLineToPoint(xp,nil,bx+boxW,by);
+            CGPathAddLineToPoint(xp,nil,bx+boxW,by+cL);
             // BL
-            CGPathMoveToPoint(boxPath,nil,bx,by+boxH-cL);
-            CGPathAddLineToPoint(boxPath,nil,bx,by+boxH);
-            CGPathAddLineToPoint(boxPath,nil,bx+cL,by+boxH);
+            CGPathMoveToPoint(xp,nil,bx,by+boxH-cL);
+            CGPathAddLineToPoint(xp,nil,bx,by+boxH);
+            CGPathAddLineToPoint(xp,nil,bx+cL,by+boxH);
             // BR
-            CGPathMoveToPoint(boxPath,nil,bx+boxW-cL,by+boxH);
-            CGPathAddLineToPoint(boxPath,nil,bx+boxW,by+boxH);
-            CGPathAddLineToPoint(boxPath,nil,bx+boxW,by+boxH-cL);
+            CGPathMoveToPoint(xp,nil,bx+boxW-cL,by+boxH);
+            CGPathAddLineToPoint(xp,nil,bx+boxW,by+boxH);
+            CGPathAddLineToPoint(xp,nil,bx+boxW,by+boxH-cL);
         }
 
         // ── HP BAR ───────────────────────────────────────────────────
@@ -1417,12 +1462,18 @@ bool get_IsFiring(uint64_t player) {
                 float hpBY   = by;
                 CGPathAddRect(hpBgPath,   nil, CGRectMake(hpBX, hpBY, hpBW, boxH));
                 float fillH = boxH * ratio;
-                CGPathAddRect(hpFillPath, nil, CGRectMake(hpBX, hpBY+boxH-fillH, hpBW, fillH));
+                CGMutablePathRef fillPath = (ratio > 0.6f) ? hpFillGreenPath
+                                          : (ratio > 0.3f) ? hpFillYellowPath : hpFillRedPath;
+                // Нокнутый — пустая полоска, только фон
+                if (!isKnocked)
+                    CGPathAddRect(fillPath, nil, CGRectMake(hpBX, hpBY+boxH-fillH, hpBW, fillH));
 
-                // HP текст
-                char hpBuf[24]; snprintf(hpBuf,sizeof(hpBuf),"%d/%d",CurHP,MaxHP);
+                // HP текст — цвет совпадает с полоской
                 float hr=(ratio>0.6f)?0.15f:1.f, hg=(ratio>0.6f)?0.9f:(ratio>0.3f?0.75f:0.2f), hb=(ratio>0.6f)?0.35f:(ratio>0.3f?0.f:0.2f);
-                addText(hpBuf, hpBX, hpBY-9.f, 42.f, 9.f, 7.f, hr,hg,hb,1.f, 0.f, 0);
+                char hpBuf[32];
+                if (isKnocked) snprintf(hpBuf,sizeof(hpBuf),"KO");
+                else           snprintf(hpBuf,sizeof(hpBuf),"%d/%d",CurHP,MaxHP);
+                addText(hpBuf, hpBX-2.f, hpBY-9.f, 48.f, 9.f, 7.f, hr,hg,hb,1.f, 0.f, 0);
             }
         }
 
@@ -1438,8 +1489,13 @@ bool get_IsFiring(uint64_t player) {
 
         // ── DISTANCE ─────────────────────────────────────────────────
         if (isDis) {
-            char db[16]; snprintf(db,sizeof(db),"%.0fm",dis);
-            addText(db, bx, by+boxH+2.f, boxW, 10.f, 8.f, acR,acG,acB,0.9f, 0.f, 1);
+            char db[24];
+            if (isKnocked) snprintf(db,sizeof(db),"KO %.0fm",dis);
+            else           snprintf(db,sizeof(db),"%.0fm",dis);
+            // Ширина — минимум 50pt чтобы текст не обрезался
+            float distW = MAX(boxW, 50.f);
+            float distX = bx + (boxW - distW) * 0.5f; // центрируем относительно бокса
+            addText(db, distX, by+boxH+2.f, distW, 11.f, 8.5f, acR,acG,acB,acA, 0.f, 1);
         }
 
         // ── ESP LINE ─────────────────────────────────────────────────
@@ -1449,8 +1505,9 @@ bool get_IsFiring(uint64_t player) {
                                            : CGPointMake(vW*.5f,vH);
             CGPoint to   = (lineOrigin==2) ? CGPointMake(bx+boxW*.5f,by+boxH)
                                            : CGPointMake(bx+boxW*.5f,by);
-            CGPathMoveToPoint(linePath,nil,from.x,from.y);
-            CGPathAddLineToPoint(linePath,nil,to.x,to.y);
+            CGMutablePathRef lp = LINE_PATH;
+            CGPathMoveToPoint(lp,nil,from.x,from.y);
+            CGPathAddLineToPoint(lp,nil,to.x,to.y);
         }
     } // end player loop
 
@@ -1478,39 +1535,55 @@ bool get_IsFiring(uint64_t player) {
         [CATransaction setDisableActions:YES];
         [CATransaction setAnimationDuration:0];
 
-        _boneLayer.path   = b_bone ? bonePath   : nil;
-        _boxLayer.path    = b_box  ? boxPath    : nil;
-        _hpBgLayer.path   = b_hp   ? hpBgPath   : nil;
-        _hpFillLayer.path = b_hp   ? hpFillPath : nil;
-        _lineLayer.path   = b_line ? linePath   : nil;
+        // Кости по зонам
+        _boneNear.path    = b_bone ? boneNearPath    : nil;
+        _boneMid.path     = b_bone ? boneMidPath     : nil;
+        _boneFar.path     = b_bone ? boneFarPath     : nil;
+        _boneKnocked.path = b_bone ? boneKnockedPath : nil;
+        // Боксы по зонам
+        _boxNear.path    = b_box ? boxNearPath    : nil;
+        _boxMid.path     = b_box ? boxMidPath     : nil;
+        _boxFar.path     = b_box ? boxFarPath     : nil;
+        _boxKnocked.path = b_box ? boxKnockedPath : nil;
+        // Линии по зонам
+        _lineNear.path = b_line ? lineNearPath : nil;
+        _lineMid.path  = b_line ? lineMidPath  : nil;
+        _lineFar.path  = b_line ? lineFarPath  : nil;
+        // HP
+        _hpBgLayer.path      = b_hp ? hpBgPath         : nil;
+        _hpFillGreen.path    = b_hp ? hpFillGreenPath   : nil;
+        _hpFillYellow.path   = b_hp ? hpFillYellowPath  : nil;
+        _hpFillRed.path      = b_hp ? hpFillRedPath     : nil;
 
-        // Обновляем box stroke color по первому врагу (упрощение — один цвет на кадр)
-        // Для per-player цвета нужен отдельный ShapeLayer на каждого — нецелесообразно
-        _boxLayer.strokeColor  = [UIColor colorWithRed:0.9 green:0.9 blue:0.9 alpha:0.9].CGColor;
-        _boneLayer.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.75].CGColor;
-
+        // Текст
         for (CATextLayer *t in _textPool) t.hidden = YES;
         _textPoolIndex = 0;
         for (int ti = 0; ti < tCount; ti++) {
             const ESPTextEntry &e = tCopy[ti];
             CATextLayer *tl = [self textLayer];
-            tl.string = [NSString stringWithUTF8String:e.text];
-            tl.fontSize = e.fontSize;
-            tl.frame = CGRectMake(e.x, e.y, e.w, e.h);
+            tl.string          = [NSString stringWithUTF8String:e.text];
+            tl.fontSize        = e.fontSize;
+            tl.frame           = CGRectMake(e.x, e.y, e.w, e.h);
             tl.foregroundColor = [UIColor colorWithRed:e.r green:e.g blue:e.b alpha:e.a].CGColor;
-            tl.backgroundColor = (e.bgAlpha>0.01f)
+            tl.backgroundColor = (e.bgAlpha > 0.01f)
                 ? [UIColor colorWithWhite:0.0 alpha:e.bgAlpha].CGColor : nil;
-            tl.alignmentMode = (e.align==1) ? kCAAlignmentCenter : kCAAlignmentLeft;
-            tl.cornerRadius  = (e.bgAlpha>0.01f) ? 2.0f : 0.0f;
+            tl.alignmentMode   = (e.align == 1) ? kCAAlignmentCenter : kCAAlignmentLeft;
+            tl.cornerRadius    = (e.bgAlpha > 0.01f) ? 2.0f : 0.0f;
         }
         if (tCopy) free(tCopy);
 
         [CATransaction commit];
-        CGPathRelease(bonePath);
-        CGPathRelease(boxPath);
+
+        // Освобождаем все paths
+        CGPathRelease(boneNearPath);    CGPathRelease(boneMidPath);
+        CGPathRelease(boneFarPath);     CGPathRelease(boneKnockedPath);
+        CGPathRelease(boxNearPath);     CGPathRelease(boxMidPath);
+        CGPathRelease(boxFarPath);      CGPathRelease(boxKnockedPath);
+        CGPathRelease(lineNearPath);    CGPathRelease(lineMidPath);
+        CGPathRelease(lineFarPath);
         CGPathRelease(hpBgPath);
-        CGPathRelease(hpFillPath);
-        CGPathRelease(linePath);
+        CGPathRelease(hpFillGreenPath); CGPathRelease(hpFillYellowPath);
+        CGPathRelease(hpFillRedPath);
     });
 }
 
