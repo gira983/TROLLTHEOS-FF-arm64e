@@ -344,7 +344,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     
     // Tab Views
     UIView *mainTabContainer;
-    UIScrollView *aimTabContainer;
+    UIView *aimTabContainer;
+    UIView *silentTabContainer;
     UIView *settingTabContainer;
     UIView *extraTabContainer;
     UIView *_sidebar;
@@ -700,7 +701,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     _sidebar = sidebar;
     [menuContainer addSubview:sidebar];
     
-    NSArray *tabs = @[@"Main", @"AIM", @"Extra", @"Setting"];
+    NSArray *tabs = @[@"Main", @"AIM", @"Extra", @"Setting", @"Silent"];
     for (int i = 0; i < tabs.count; i++) {
         UIView *btn = [[UIView alloc] initWithFrame:CGRectMake(3, 8 + (i * 50 * scale), sidebarW - 6, 35 * scale)];
         btn.backgroundColor = (i == 0) ? [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0] : [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
@@ -786,25 +787,20 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     // Size slider убран — не влияет на функционал
 
-    // --- AIM TAB (ScrollView) ---
-    aimTabContainer = [[UIScrollView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
+    // --- AIM TAB ---
+    // menuHeight увеличен для AIM таба через switchToTab
+    aimTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     aimTabContainer.backgroundColor = [UIColor blackColor];
     aimTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
     aimTabContainer.layer.borderWidth = 1;
     aimTabContainer.layer.cornerRadius = 10;
     aimTabContainer.hidden = YES;
-    aimTabContainer.showsVerticalScrollIndicator = NO;
     aimTabContainer.clipsToBounds = YES;
     [menuContainer addSubview:aimTabContainer];
 
-    // Внутренний контейнер для контента
-    UIView *aimContent = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tabW, 800)];
-    [aimTabContainer addSubview:aimContent];
-
+    UIView *aimContent = aimTabContainer; // алиас — всё добавляется прямо в контейнер
     CGFloat aW = tabW;
     CGFloat ay = 6;
-    // Макрос чтобы добавлять в aimContent, не в aimTabContainer
-    #define AIM_ADD(v) [aimContent addSubview:(v)]
 
     UILabel *aimTitle = [self makeSectionLabel:@"AIMBOT" atY:ay width:aW];
     [aimContent addSubview:aimTitle]; ay += 18;
@@ -830,56 +826,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addSegmentTo:aimContent atY:ay title:@"" options:aimTargetOpts selectedRef:&aimTarget tag:11]; ay += 32;
 
     NSArray *aimTriggerOpts = @[@"Always", @"Shooting"];
-    [self addSegmentTo:aimContent atY:ay title:@"" options:aimTriggerOpts selectedRef:&aimTrigger tag:12]; ay += 38;
+    [self addSegmentTo:aimContent atY:ay title:@"" options:aimTriggerOpts selectedRef:&aimTrigger tag:12]; ay += 10;
 
-    // ─ Silent Aim ─────────────────────────────────────────────────────
-    UIView *silSep = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
-    silSep.backgroundColor = aimSep1.backgroundColor;
-    [aimContent addSubview:silSep]; ay += 6;
-
-    UILabel *silTitle = [self makeSectionLabel:@"SILENT AIM" atY:ay width:aW];
-    [aimContent addSubview:silTitle]; ay += 16;
-
-    [self addFeatureToView:aimContent withTitle:@"Enable Silent Aim" atY:ay initialValue:isSilentAim andAction:@selector(toggleSilentAim:)]; ay += 30;
-
-    // Silent FOV slider
-    UILabel *sfovLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ay, aW - 60, 14)];
-    sfovLbl.text = @"Silent FOV"; sfovLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    sfovLbl.font = [UIFont systemFontOfSize:10]; [aimContent addSubview:sfovLbl];
-    UILabel *sfovVal = [[UILabel alloc] initWithFrame:CGRectMake(aW - 45, ay, 40, 14)];
-    sfovVal.text = [NSString stringWithFormat:@"%.0f", silentFov];
-    sfovVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    sfovVal.font = [UIFont systemFontOfSize:10]; sfovVal.textAlignment = NSTextAlignmentRight;
-    [aimContent addSubview:sfovVal]; ay += 16;
-    HUDSlider *sfovSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 36)];
-    sfovSlider.minimumValue = 10; sfovSlider.maximumValue = 500; sfovSlider.value = silentFov;
-    sfovSlider.minimumTrackTintColor = [UIColor colorWithRed:0.8 green:0.4 blue:1.0 alpha:1.0];
-    sfovSlider.thumbTintColor = [UIColor whiteColor];
-    UILabel * __unsafe_unretained sfvRef = sfovVal;
-    sfovSlider.onValueChanged = ^(float v){ silentFov = v; sfvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
-    [aimContent addSubview:sfovSlider]; ay += 44;
-
-    // Silent Distance slider
-    UILabel *sdistLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ay, aW - 60, 14)];
-    sdistLbl.text = @"Silent Distance"; sdistLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    sdistLbl.font = [UIFont systemFontOfSize:10]; [aimContent addSubview:sdistLbl];
-    UILabel *sdistVal = [[UILabel alloc] initWithFrame:CGRectMake(aW - 45, ay, 40, 14)];
-    sdistVal.text = [NSString stringWithFormat:@"%.0f", silentDistance];
-    sdistVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
-    sdistVal.font = [UIFont systemFontOfSize:10]; sdistVal.textAlignment = NSTextAlignmentRight;
-    [aimContent addSubview:sdistVal]; ay += 16;
-    HUDSlider *sdistSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 36)];
-    sdistSlider.minimumValue = 10; sdistSlider.maximumValue = 600; sdistSlider.value = silentDistance;
-    sdistSlider.minimumTrackTintColor = [UIColor colorWithRed:0.4 green:0.8 blue:1.0 alpha:1.0];
-    sdistSlider.thumbTintColor = [UIColor whiteColor];
-    UILabel * __unsafe_unretained sdvRef = sdistVal;
-    sdistSlider.onValueChanged = ^(float v){ silentDistance = v; sdvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
-    [aimContent addSubview:sdistSlider]; ay += 60;
-
-    // Устанавливаем реальный contentSize по итоговому ay
-    aimContent.frame = CGRectMake(0, 0, tabW, ay);
-    aimTabContainer.contentSize = CGSizeMake(tabW, ay);
-    #undef AIM_ADD
+    CGFloat aimContentHeight = ay + 10;
+    objc_setAssociatedObject(aimTabContainer, "aimH", @(aimContentHeight), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
 
     // --- EXTRA TAB: слайдеры ---
@@ -982,6 +932,71 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     // Поднять sidebar поверх всех табов
     [menuContainer bringSubviewToFront:sidebar];
+
+    // --- SILENT AIM TAB ---
+    silentTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
+    silentTabContainer.backgroundColor = [UIColor blackColor];
+    silentTabContainer.layer.borderColor = [UIColor colorWithRed:0.5 green:0.2 blue:0.8 alpha:1.0].CGColor;
+    silentTabContainer.layer.borderWidth = 1;
+    silentTabContainer.layer.cornerRadius = 10;
+    silentTabContainer.hidden = YES;
+    silentTabContainer.clipsToBounds = YES;
+    [menuContainer addSubview:silentTabContainer];
+    [menuContainer bringSubviewToFront:sidebar];
+
+    CGFloat sW = tabW;
+    CGFloat sy = 8;
+
+    UILabel *silHdr = [self makeSectionLabel:@"SILENT AIM" atY:sy width:sW];
+    [silentTabContainer addSubview:silHdr]; sy += 18;
+    UIView *silLine = [[UIView alloc] initWithFrame:CGRectMake(10, sy, sW - 20, 1)];
+    silLine.backgroundColor = [UIColor colorWithRed:0.5 green:0.2 blue:0.8 alpha:0.8];
+    [silentTabContainer addSubview:silLine]; sy += 8;
+
+    [self addFeatureToView:silentTabContainer withTitle:@"Enable Silent Aim" atY:sy initialValue:isSilentAim andAction:@selector(toggleSilentAim:)]; sy += 32;
+
+    // FOV
+    UILabel *sfovLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, sy, sW - 60, 14)];
+    sfovLbl.text = @"FOV Radius"; sfovLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    sfovLbl.font = [UIFont systemFontOfSize:10]; [silentTabContainer addSubview:sfovLbl];
+    UILabel *sfovVal = [[UILabel alloc] initWithFrame:CGRectMake(sW - 45, sy, 40, 14)];
+    sfovVal.text = [NSString stringWithFormat:@"%.0f", silentFov];
+    sfovVal.textColor = [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0];
+    sfovVal.font = [UIFont systemFontOfSize:10]; sfovVal.textAlignment = NSTextAlignmentRight;
+    [silentTabContainer addSubview:sfovVal]; sy += 16;
+    HUDSlider *sfovSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, sy, sW - 20, 36)];
+    sfovSlider.minimumValue = 10; sfovSlider.maximumValue = 500; sfovSlider.value = silentFov;
+    sfovSlider.minimumTrackTintColor = [UIColor colorWithRed:0.7 green:0.3 blue:1.0 alpha:1.0];
+    sfovSlider.thumbTintColor = [UIColor whiteColor];
+    UILabel * __unsafe_unretained sfvRef = sfovVal;
+    sfovSlider.onValueChanged = ^(float v){ silentFov = v; sfvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
+    [silentTabContainer addSubview:sfovSlider]; sy += 44;
+
+    // Distance
+    UILabel *sdLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, sy, sW - 60, 14)];
+    sdLbl.text = @"Distance"; sdLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
+    sdLbl.font = [UIFont systemFontOfSize:10]; [silentTabContainer addSubview:sdLbl];
+    UILabel *sdVal = [[UILabel alloc] initWithFrame:CGRectMake(sW - 45, sy, 40, 14)];
+    sdVal.text = [NSString stringWithFormat:@"%.0f", silentDistance];
+    sdVal.textColor = [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0];
+    sdVal.font = [UIFont systemFontOfSize:10]; sdVal.textAlignment = NSTextAlignmentRight;
+    [silentTabContainer addSubview:sdVal]; sy += 16;
+    HUDSlider *sdSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, sy, sW - 20, 36)];
+    sdSlider.minimumValue = 10; sdSlider.maximumValue = 600; sdSlider.value = silentDistance;
+    sdSlider.minimumTrackTintColor = [UIColor colorWithRed:0.4 green:0.7 blue:1.0 alpha:1.0];
+    sdSlider.thumbTintColor = [UIColor whiteColor];
+    UILabel * __unsafe_unretained sdvRef = sdVal;
+    sdSlider.onValueChanged = ^(float v){ silentDistance = v; sdvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
+    [silentTabContainer addSubview:sdSlider]; sy += 44;
+
+    // Target
+    UIView *silLine2 = [[UIView alloc] initWithFrame:CGRectMake(10, sy, sW - 20, 1)];
+    silLine2.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1.0];
+    [silentTabContainer addSubview:silLine2]; sy += 8;
+    UILabel *silTargHdr = [self makeSectionLabel:@"TARGET" atY:sy width:sW];
+    [silentTabContainer addSubview:silTargHdr]; sy += 16;
+    NSArray *silTargOpts = @[@"Head", @"Neck", @"Hip"];
+    [self addSegmentTo:silentTabContainer atY:sy title:@"" options:silTargOpts selectedRef:&aimTarget tag:20]; sy += 32;
 }
 
 - (void)switchToTab:(NSInteger)tabIndex {
@@ -989,23 +1004,49 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     aimTabContainer.hidden = YES;
     extraTabContainer.hidden = YES;
     settingTabContainer.hidden = YES;
+    silentTabContainer.hidden = YES;
     mainTabContainer.userInteractionEnabled = NO;
     aimTabContainer.userInteractionEnabled = NO;
     extraTabContainer.userInteractionEnabled = NO;
     settingTabContainer.userInteractionEnabled = NO;
+    silentTabContainer.userInteractionEnabled = NO;
     
     for (UIView *sub in _sidebar.subviews) {
-        if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 103) {
+        if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 104) {
             sub.backgroundColor = [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
         }
     }
     UIView *activeBtn = [_sidebar viewWithTag:100 + tabIndex];
     activeBtn.backgroundColor = [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0];
-    
-    if (tabIndex == 0) { mainTabContainer.hidden = NO; mainTabContainer.userInteractionEnabled = YES; }
-    if (tabIndex == 1) { aimTabContainer.hidden = NO; aimTabContainer.userInteractionEnabled = YES; }
-    if (tabIndex == 2) { extraTabContainer.hidden = NO; extraTabContainer.userInteractionEnabled = YES; }
-    if (tabIndex == 3) { settingTabContainer.hidden = NO; settingTabContainer.userInteractionEnabled = YES; }
+
+    // AIM таб больше обычного — увеличиваем menuContainer и таб под контент
+    CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
+    CGFloat baseH = MIN(370, screenH * 0.55);
+    CGFloat tabW  = aimTabContainer.frame.size.width;
+
+    if (tabIndex == 1) {
+        NSNumber *aimHNum = objc_getAssociatedObject(aimTabContainer, "aimH");
+        CGFloat aimH = aimHNum ? aimHNum.floatValue : baseH - 55;
+        CGFloat newMenuH = MIN(aimH + 55 + 10, screenH * 0.88);
+        CGFloat newTabH  = newMenuH - 55;
+        CGRect mf = menuContainer.frame;
+        mf.size.height = newMenuH;
+        menuContainer.frame = mf;
+        aimTabContainer.frame = CGRectMake(15, 50, tabW, newTabH);
+        aimTabContainer.hidden = NO; aimTabContainer.userInteractionEnabled = YES;
+    } else {
+        // Возвращаем стандартную высоту
+        CGRect mf = menuContainer.frame;
+        mf.size.height = baseH;
+        menuContainer.frame = mf;
+        aimTabContainer.frame = CGRectMake(15, 50, tabW, baseH - 55);
+        if (tabIndex == 0) { mainTabContainer.hidden = NO; mainTabContainer.userInteractionEnabled = YES; }
+        if (tabIndex == 2) { extraTabContainer.hidden = NO; extraTabContainer.userInteractionEnabled = YES; }
+        if (tabIndex == 3) { settingTabContainer.hidden = NO; settingTabContainer.userInteractionEnabled = YES; }
+        if (tabIndex == 4) { silentTabContainer.hidden = NO; silentTabContainer.userInteractionEnabled = YES; }
+    }
+    silentTabContainer.hidden = (tabIndex != 4);
+    silentTabContainer.userInteractionEnabled = (tabIndex == 4);
 }
 
 - (void)drawPreviewElements {
@@ -1225,7 +1266,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 // Это надёжно работает со всей иерархией UIScrollView/PassThroughScrollView
 - (void)handleTabTap:(UITapGestureRecognizer *)gr {
     NSInteger tag = gr.view.tag;
-    if (tag >= 100 && tag <= 103) {
+    if (tag >= 100 && tag <= 104) {
 #ifdef DEBUG
         espLog([NSString stringWithFormat:@"[TAP] sidebar btn tag=%ld", (long)tag]);
 #endif
