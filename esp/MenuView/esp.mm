@@ -94,7 +94,6 @@ static int  lineOrigin = 1;    // 0 = Top, 1 = Center, 2 = Bottom
 // --- Aimbot Config ---
 // ── Обычный Aimbot ──────────────────────────────────────────────────
 static bool  isAimbot      = NO;
-static bool  isInMatch     = NO;  // авто: YES в матче, NO в лобби/главный экран
 static float aimFov        = 150.0f;
 static float aimDistance   = 200.0f;
 
@@ -141,8 +140,11 @@ static bool isSpeedActive = NO;
 }
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     CGPoint pt = [touches.anyObject locationInView:self];
-    if (pt.x < -10 || pt.x > self.bounds.size.width + 10 ||
-        pt.y < -10 || pt.y > self.bounds.size.height + 10) {
+    // bounds проверяем с запасом — для HUD overlay view
+    CGFloat bW = self.bounds.size.width  > 10 ? self.bounds.size.width  : self.superview.bounds.size.width;
+    CGFloat bH = self.bounds.size.height > 10 ? self.bounds.size.height : self.superview.bounds.size.height;
+    if (pt.x < -10 || pt.x > bW + 10 ||
+        pt.y < -10 || pt.y > bH + 10) {
         _touchActive = NO;
     }
 }
@@ -498,15 +500,18 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)didMoveToWindow {
     [super didMoveToWindow];
     if (self.window) {
-        // Теперь bounds точно известны — центрируем меню и кнопку
-        CGFloat W = self.bounds.size.width;
-        CGFloat H = self.bounds.size.height;
-        if (W > 10 && H > 10) {
-            menuContainer.center = CGPointMake(W / 2.0, H / 2.0);
-            // Кнопка — левый верхний + небольшой отступ
-            CGFloat btnSz = floatingButton.bounds.size.width;
-            floatingButton.center = CGPointMake(btnSz / 2.0 + 20, btnSz / 2.0 + 60);
-        }
+        // Откладываем на следующий runloop — гарантируем что layout уже прошёл
+        dispatch_async(dispatch_get_main_queue(), ^{
+            CGFloat W = self.bounds.size.width;
+            CGFloat H = self.bounds.size.height;
+            if (W < 10 || H < 10) {
+                W = [UIScreen mainScreen].bounds.size.width;
+                H = [UIScreen mainScreen].bounds.size.height;
+            }
+            self->menuContainer.center = CGPointMake(W / 2.0, H / 2.0);
+            CGFloat btnSz = self->floatingButton.bounds.size.width;
+            self->floatingButton.center = CGPointMake(btnSz / 2.0 + 20, btnSz / 2.0 + 60);
+        });
     }
 }
 
@@ -554,9 +559,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     iconLabel.userInteractionEnabled = NO;
     [floatingButton addSubview:iconLabel];
 
-    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(33, 33, 5, 5)];
-    dot.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
-    dot.layer.cornerRadius = 2.5;
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(33, 33, 8, 8)];
+    dot.tag = 77; // индикатор матча: жёлтый = лобби, зелёный = матч
+    dot.backgroundColor = [UIColor colorWithRed:1.0 green:0.8 blue:0.0 alpha:1.0]; // жёлтый по умолчанию
+    dot.layer.cornerRadius = 4;
     [floatingButton addSubview:dot];
 
     UIPanGestureRecognizer *iconPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
@@ -1610,10 +1616,13 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (_espBusy) return;
     _espBusy = YES;
 
-    // FOV круг — только в матче (авто-рубильник)
-    if (isAimbot && isInMatch) {
-        float cx = self.bounds.size.width / 2;
-        float cy = self.bounds.size.height / 2;
+    // FOV круг — используем superview.bounds как и для ESP
+    if (isAimbot) {
+        float vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
+        float vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
+        if (vW < 10 || vH < 10) { vW = self.bounds.size.width; vH = self.bounds.size.height; }
+        float cx = vW / 2.0f;
+        float cy = vH / 2.0f;
         float radius = aimFov;
         _fovLayer.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
         _fovLayer.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy)
@@ -1691,38 +1700,6 @@ bool get_IsFiring(uint64_t player) {
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
 
-    // ── Авто-детекция матча ──────────────────────────────────────────
-    // Читаем IsMatchStarted из GameFacade_Static+0x1D9
-    uint64_t _gfTI = ReadAddr<uint64_t>(Moudule_Base + ENCRYPTOFFSET("0xA4D2968"));
-    uint64_t _gfST = ReadAddr<uint64_t>(_gfTI + ENCRYPTOFFSET("0xB8"));
-    bool nowInMatch = ReadAddr<bool>(_gfST + 0x1D9);
-    // Fallback: если флаг false но playerList валиден — туториал/спецрежим
-    if (!nowInMatch) {
-        uint64_t _plist = ReadAddr<uint64_t>(match + ENCRYPTOFFSET("0x120"));
-        uint64_t _parr  = ReadAddr<uint64_t>(_plist + ENCRYPTOFFSET("0x28"));
-        int      _pcnt  = ReadAddr<int>(_parr + ENCRYPTOFFSET("0x18"));
-        if (_pcnt > 0 && _pcnt <= 64) {
-            uint64_t _first = ReadAddr<uint64_t>(_parr + ENCRYPTOFFSET("0x20"));
-            if (isVaildPtr(_first)) nowInMatch = true;
-        }
-    }
-    isInMatch = nowInMatch;
-    // Вне матча — очищаем ESP и выходим
-    if (!isInMatch) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [CATransaction begin]; [CATransaction setDisableActions:YES];
-            for (CAShapeLayer *sl in @[self->_boneNear,self->_boneMid,self->_boneFar,self->_boneKnocked,
-                self->_boxNear,self->_boxMid,self->_boxFar,self->_boxKnocked,
-                self->_lineNear,self->_lineMid,self->_lineFar,
-                self->_hpBgLayer,self->_hpFillGreen,self->_hpFillYellow,self->_hpFillRed]) {
-                sl.path = nil;
-            }
-            for (CATextLayer *t in self->_textPool) t.hidden = YES;
-            [CATransaction commit];
-        });
-        return;
-    }
-
     uint64_t playerList = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
     uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
     int      totalCount = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
@@ -1730,8 +1707,14 @@ bool get_IsFiring(uint64_t player) {
     if (totalCount <= 0 || totalCount > 64) totalCount = 64;
 
     float *matrix = GetViewMatrix(camera);
-    float vW = self.bounds.size.width;
-    float vH = self.bounds.size.height;
+    // Берём РЕАЛЬНЫЙ размер отображения — self.bounds меняется с поворотом
+    // superview (_blurView) имеет autoresizingMask и правильный bounds после поворота
+    float vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
+    float vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
+    if (vW < 10 || vH < 10) {
+        vW = (float)self.bounds.size.width;
+        vH = (float)self.bounds.size.height;
+    }
     CGPoint center = CGPointMake(vW * 0.5f, vH * 0.5f);
 
     // Paths по цветовым зонам: Near(<40м) Mid(<100м) Far(>=100м) Knocked
@@ -1798,12 +1781,13 @@ bool get_IsFiring(uint64_t player) {
 
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
-            Vector3 ap = HeadPos;
-            if (aimTarget == 1) ap = HeadPos + Vector3(0,-0.15f,0);
-            else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
+            Vector3 ap;
+            if      (aimTarget == 0) ap = HeadPos + Vector3(0, -0.05f, 0);
+            else if (aimTarget == 1) ap = HeadPos + Vector3(0, -0.22f, 0);
+            else                     ap = getPositionExt(getHip(PawnObject));
             Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
             float dx = ws.x - center.x, dy = ws.y - center.y;
-            float d2 = sqrtf(dx*dx+dy*dy);
+            float d2 = sqrtf(dx*dx + dy*dy);
             if (d2 <= aimFov) {
                 float sc = (aimMode == 0) ? dis : d2;
                 if (sc < bestScore) { bestScore = sc; bestTarget = PawnObject; }
@@ -1960,14 +1944,30 @@ bool get_IsFiring(uint64_t player) {
         }
     } // end player loop
 
-    // ── Обычный Aimbot apply ─────────────────────────────────────────
+    // ── Aimbot apply — точный прицел + smoothing ────────────────────
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
-    if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
+    if (isAimbot && isInMatch && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
-        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
-        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
-        else                   ap = getPositionExt(getHip(bestTarget));
-        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
+        if (aimTarget == 0) {
+            // HEAD: чуть ниже центра головы = лоб, точная зона
+            ap = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.05f, 0);
+        } else if (aimTarget == 1) {
+            // NECK: между головой и плечами
+            ap = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.22f, 0);
+        } else {
+            // HIP: центр тела
+            ap = getPositionExt(getHip(bestTarget));
+        }
+        Quaternion targetRot = GetRotationToLocation(ap, 0.0f, myLoc);
+
+        // Smoothing через SLERP — aimSpeed=1.0 мгновенно, 0.05 плавно
+        Quaternion currentRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+        float smooth = fmaxf(0.05f, fminf(1.0f, aimSpeed));
+        Quaternion finalRot = SlerpAim(currentRot, targetRot, smooth);
+
+        // Пишем в камеру (0x53C) и направление пули (0x172C)
+        WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, finalRot);
+        WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), finalRot);
     }
 
 
