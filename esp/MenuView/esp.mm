@@ -200,7 +200,7 @@ static bool isSpeedActive = NO;
 @end
 
 
-@interface MenuView ()
+@interface MenuView () <UIGestureRecognizerDelegate>
 @property (nonatomic, strong) CADisplayLink *displayLink;
 @property (nonatomic, strong) NSMutableArray<CALayer *> *drawingLayers;
 - (void)renderESP;
@@ -780,7 +780,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     menuContainer.layer.cornerRadius = 10;
     menuContainer.layer.borderColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.14].CGColor;
     menuContainer.layer.borderWidth = 1;
-    menuContainer.clipsToBounds = YES;
+    menuContainer.clipsToBounds = NO; // кнопка закрытия выглядывает за край
     menuContainer.hidden = YES;
     [self addSubview:menuContainer];
 
@@ -819,20 +819,24 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     subLbl.font = [UIFont fontWithName:@"Courier" size:8];
     [hdr addSubview:subLbl];
 
-    // Кнопка закрыть (красный круг с крестиком)
-    UIView *closeBtn = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - 20, 11, 14, 14)];
+    // Кнопка закрыть — поверх menuContainer, правый верхний угол (как на скрине)
+    CGFloat closeSz = 28.0;
+    UIView *closeBtn = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - closeSz/2, -closeSz/2, closeSz, closeSz)];
     closeBtn.backgroundColor = COL_RED;
-    closeBtn.layer.cornerRadius = 7;
+    closeBtn.layer.cornerRadius = closeSz / 2;
+    closeBtn.layer.borderWidth = 2;
+    closeBtn.layer.borderColor = [UIColor colorWithRed:0.04 green:0.045 blue:0.062 alpha:1.0].CGColor;
     closeBtn.tag = 200;
     UILabel *closeLbl = [[UILabel alloc] initWithFrame:closeBtn.bounds];
     closeLbl.text = @"✕";
-    closeLbl.textColor = [UIColor colorWithWhite:1.0 alpha:0.85];
-    closeLbl.font = [UIFont boldSystemFontOfSize:8];
+    closeLbl.textColor = [UIColor whiteColor];
+    closeLbl.font = [UIFont boldSystemFontOfSize:12];
     closeLbl.textAlignment = NSTextAlignmentCenter;
     [closeBtn addSubview:closeLbl];
     UITapGestureRecognizer *closeTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleCloseTap:)];
     [closeBtn addGestureRecognizer:closeTap];
-    [hdr addSubview:closeBtn];
+    // Добавляем в menuContainer ПОСЛЕ всего — поверх всех вью
+    // (добавится позже через bringSubviewToFront)
 
     UIPanGestureRecognizer *menuPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
     [hdr addGestureRecognizer:menuPan];
@@ -1121,6 +1125,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     // Sidebar поверх всего
     [menuContainer bringSubviewToFront:sidebar];
+
+    // Кнопка закрыть — поверх всего включая sidebar
+    [menuContainer addSubview:closeBtn];
+    [menuContainer bringSubviewToFront:closeBtn];
+    // clipsToBounds = NO чтобы кнопка выглядывала за край
+    menuContainer.clipsToBounds = NO;
 }
 
 - (void)switchToTab:(NSInteger)tabIndex {
@@ -1475,6 +1485,21 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
+
+// Delegate — containerPan не перехватывает слайдеры
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr shouldReceiveTouch:(UITouch *)touch {
+    UIView *v = touch.view;
+    while (v && v != menuContainer) {
+        if ([v isKindOfClass:[HUDSlider class]]) return NO;
+        if ([v isKindOfClass:[CustomSwitch class]]) return NO;
+        v = v.superview;
+    }
+    return YES;
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
+    return NO;
+}
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
     UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
