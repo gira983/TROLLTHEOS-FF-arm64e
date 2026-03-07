@@ -293,32 +293,45 @@ static bool isSpeedActive = NO;
     _thumb.frame = CGRectMake(thumbX, thumbY, thumbSize, thumbSize);
 }
 
+// Запрещаем родительским gesture recognizer-ам перехватывать наши touches
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gr {
+    return NO; // слайдер сам обрабатывает touches, pan меню не нужен
+}
+
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = touches.anyObject;
-    // locationInView конвертирует глобальные координаты в локальные автоматически
     CGPoint loc = [touch locationInView:self];
     _dragStartX = loc.x;
     _dragStartValue = _value;
+    // Отменяем все родительские gesture recognizers чтобы меню не двигалось
+    for (UIGestureRecognizer *gr in self.superview.superview.gestureRecognizers) {
+        [gr requireGestureRecognizerToFail:gr]; // сброс
+    }
+    [self setNeedsLayout];
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     UITouch *touch = touches.anyObject;
     CGPoint loc = [touch locationInView:self];
-    
+
     CGFloat trackW = _track.bounds.size.width;
     CGFloat trackX = _track.frame.origin.x;
     CGFloat relX = loc.x - trackX;
-    CGFloat pct = MAX(0, MIN(1, relX / trackW));
-    
+    CGFloat pct = MAX(0.0f, MIN(1.0f, relX / trackW));
+
     float newVal = _minimumValue + pct * (_maximumValue - _minimumValue);
     _value = newVal;
+    // Обновляем позицию плавно — без анимации чтобы следовал за пальцем
     [self updateThumbPosition];
-    
     if (_onValueChanged) _onValueChanged(_value);
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     [self touchesMoved:touches withEvent:event];
+}
+
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    // Ничего не делаем — значение остаётся последним
 }
 
 @end
@@ -819,23 +832,44 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     subLbl.font = [UIFont fontWithName:@"Courier" size:8];
     [hdr addSubview:subLbl];
 
-    // Кнопка закрыть — поверх menuContainer, правый верхний угол (как на скрине)
-    CGFloat closeSz = 28.0;
-    UIView *closeBtn = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - closeSz/2, -closeSz/2, closeSz, closeSz)];
-    closeBtn.backgroundColor = COL_RED;
-    closeBtn.layer.cornerRadius = closeSz / 2;
-    closeBtn.layer.borderWidth = 2;
-    closeBtn.layer.borderColor = [UIColor colorWithRed:0.04 green:0.045 blue:0.062 alpha:1.0].CGColor;
+    // Кнопка-дуга в правом верхнем углу menuContainer
+    CGFloat arcSz = 44.0; // размер квадрата под дугу
+    UIView *closeBtn = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - arcSz, -arcSz, arcSz, arcSz)];
+    closeBtn.backgroundColor = [UIColor clearColor];
     closeBtn.tag = 200;
-    UILabel *closeLbl = [[UILabel alloc] initWithFrame:closeBtn.bounds];
+    closeBtn.userInteractionEnabled = YES;
+
+    // Рисуем дугу через CAShapeLayer
+    CAShapeLayer *arcLayer = [CAShapeLayer layer];
+    arcLayer.frame = closeBtn.bounds;
+    // Дуга — четверть круга в нижнем левом направлении (угол меню)
+    CGFloat r = arcSz;
+    UIBezierPath *arcPath = [UIBezierPath bezierPath];
+    // Начало: нижний левый угол кнопки (совпадает с углом меню)
+    [arcPath moveToPoint:CGPointMake(0, arcSz)];
+    // Дуга от нижнего края до правого края кнопки
+    [arcPath addArcWithCenter:CGPointMake(0, 0) radius:r startAngle:M_PI_2 endAngle:0 clockwise:NO];
+    [arcPath addLineToPoint:CGPointMake(arcSz, 0)];
+    [arcPath addLineToPoint:CGPointMake(arcSz, arcSz * 0.4)];
+    // Внутренняя дуга (толщина ~arcSz*0.4)
+    CGFloat rInner = r * 0.55;
+    [arcPath addArcWithCenter:CGPointMake(0, 0) radius:rInner startAngle:0 endAngle:M_PI_2 clockwise:YES];
+    [arcPath closePath];
+    arcLayer.path = arcPath.CGPath;
+    arcLayer.fillColor = [UIColor colorWithRed:0.88 green:0.22 blue:0.22 alpha:1.0].CGColor;
+    [closeBtn.layer addSublayer:arcLayer];
+
+    // Крестик — позиционируем в центре дуги
+    UILabel *closeLbl = [[UILabel alloc] initWithFrame:CGRectMake(arcSz * 0.52, -arcSz * 0.05, arcSz * 0.5, arcSz * 0.5)];
     closeLbl.text = @"✕";
     closeLbl.textColor = [UIColor whiteColor];
-    closeLbl.font = [UIFont boldSystemFontOfSize:12];
+    closeLbl.font = [UIFont boldSystemFontOfSize:13];
     closeLbl.textAlignment = NSTextAlignmentCenter;
+    closeLbl.userInteractionEnabled = NO;
     [closeBtn addSubview:closeLbl];
+
     UITapGestureRecognizer *closeTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleCloseTap:)];
     [closeBtn addGestureRecognizer:closeTap];
-    // Добавляем в menuContainer ПОСЛЕ всего — поверх всех вью
     // (добавится позже через bringSubviewToFront)
 
     UIPanGestureRecognizer *menuPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
@@ -1488,10 +1522,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
 // Delegate — containerPan не перехватывает слайдеры
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr shouldReceiveTouch:(UITouch *)touch {
+    // Отклоняем pan если touch на слайдере или любом его subview
     UIView *v = touch.view;
-    while (v && v != menuContainer) {
+    while (v != nil) {
         if ([v isKindOfClass:[HUDSlider class]]) return NO;
         if ([v isKindOfClass:[CustomSwitch class]]) return NO;
+        if (v == menuContainer) break;
         v = v.superview;
     }
     return YES;
