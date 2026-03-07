@@ -1,5 +1,9 @@
 #import "MemoryUtils.h"
 
+// Глобальный task port игрового процесса (инициализируется в GetGameModule_Base)
+mach_port_t get_task = MACH_PORT_NULL;
+pid_t Processpid     = 0;
+
 // Получить PID по имени процесса через sysctl
 pid_t GetGameProcesspid(char* GameProcessName) {
     size_t length = 0;
@@ -128,4 +132,39 @@ bool _write(long addr, const void *buffer, int len)
         return false;
     }
     return true;
+}
+
+
+// Сканирование памяти чужого процесса по значению — аналог h5gg.searchNumber
+// Читает память кусками по 1MB, ищет паттерн с шагом patSize (выравненный поиск)
+int scanForValue(uint64_t rangeStart, uint64_t rangeEnd,
+                 const void *pattern, size_t patSize,
+                 uint64_t *outAddrs, int maxResults) {
+    if (get_task == MACH_PORT_NULL || patSize == 0 || !outAddrs || maxResults <= 0)
+        return 0;
+
+    const size_t CHUNK = 0x100000; // 1MB
+    uint8_t *buf = (uint8_t *)malloc(CHUNK);
+    if (!buf) return 0;
+
+    int found = 0;
+    for (uint64_t addr = rangeStart; addr < rangeEnd && found < maxResults; addr += CHUNK) {
+        vm_size_t actualRead = 0;
+        kern_return_t kr = vm_read_overwrite(get_task,
+                                             (vm_address_t)addr,
+                                             (vm_size_t)CHUNK,
+                                             (vm_address_t)buf,
+                                             &actualRead);
+        if (kr != KERN_SUCCESS || actualRead < patSize) continue;
+
+        // Выравненный поиск по patSize (как h5gg I32/I64 search)
+        for (vm_size_t i = 0; i + patSize <= actualRead; i += patSize) {
+            if (memcmp(buf + i, pattern, patSize) == 0) {
+                outAddrs[found++] = addr + i;
+                if (found >= maxResults) break;
+            }
+        }
+    }
+    free(buf);
+    return found;
 }
