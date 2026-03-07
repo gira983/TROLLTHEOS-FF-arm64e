@@ -1735,8 +1735,15 @@ bool get_IsFiring(uint64_t player) {
     uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
     int      totalCount = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
 
-    // ── Детекция матча через GameFacade.IsMatchStarted (IL2CPP дамп, offset 0x1D9) ──
-    bool nowInMatch = getIsMatchStarted(Moudule_Base);
+    // ── Детекция матча через GameFacade.IsMatchStarted (0x1D9) ──
+    // Inline — не зависит от линковки GameLogic
+    bool nowInMatch = false;
+    {
+        uint64_t _gf_ti = ReadAddr<uint64_t>(Moudule_Base + OFF_GAMEFACADE_TI);
+        uint64_t _gf_st = ReadAddr<uint64_t>(_gf_ti + OFF_GAMEFACADE_ST);
+        if (isVaildPtr(_gf_st))
+            nowInMatch = ReadAddr<bool>(_gf_st + 0x1D9);
+    }
     if (isInMatch != nowInMatch) {
         isInMatch = nowInMatch;
         dispatch_async(dispatch_get_main_queue(), ^{
