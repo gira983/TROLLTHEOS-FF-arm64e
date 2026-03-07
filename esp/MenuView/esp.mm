@@ -96,10 +96,7 @@ static int  lineOrigin = 1;    // 0 = Top, 1 = Center, 2 = Bottom
 static bool  isAimbot      = NO;
 static float aimFov        = 150.0f;
 static float aimDistance   = 200.0f;
-// ── Silent Aim ───────────────────────────────────────────────────────
-static bool  isSilentAim     = NO;
-static float silentFov       = 150.0f;
-static float silentDistance  = 200.0f;
+
 
 // --- Advanced Aimbot Config ---
 
@@ -109,8 +106,7 @@ static int  aimTrigger = 1;        // 0 = Always, 1 = Only Shooting, 2 = Only Ai
 static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
 static float aimSpeed = 1.0f;      // Aim smoothing 0.05 - 1.0
 static bool isStreamerMode = NO;   // Stream Proof
-// ── Anti-Knocked ─────────────────────────────────────────────────────
-static bool isAntiKnocked = NO;
+
 // ── No Recoil (value scan) ────────────────────────────────────────────
 static bool isNoRecoil = NO;
 static NSMutableArray<NSNumber*> *noRecoilAddrs = nil; // найденные адреса
@@ -355,7 +351,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     // Tab Views
     UIView *mainTabContainer;
     UIView *aimTabContainer;
-    UIView *silentTabContainer;
     UIView *settingTabContainer;
     UIView *extraTabContainer;
     UIView *_sidebar;
@@ -714,7 +709,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     _sidebar = sidebar;
     [menuContainer addSubview:sidebar];
     
-    NSArray *tabs = @[@"Main", @"AIM", @"Extra", @"Setting", @"Silent"];
+    NSArray *tabs = @[@"Main", @"AIM", @"Extra", @"Setting"];
     for (int i = 0; i < tabs.count; i++) {
         UIView *btn = [[UIView alloc] initWithFrame:CGRectMake(3, 8 + (i * 50 * scale), sidebarW - 6, 35 * scale)];
         btn.backgroundColor = (i == 0) ? [UIColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0] : [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
@@ -961,22 +956,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     nrDesc.font = [UIFont systemFontOfSize:9]; nrDesc.numberOfLines = 2;
     [settingTabContainer addSubview:nrDesc]; stY += 28;
 
-    // ── ANTI-KNOCKED ──────────────────────────────────────────────────
-    UIView *akSep = [[UIView alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 1)];
-    akSep.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1.0];
-    [settingTabContainer addSubview:akSep]; stY += 8;
-
-    UILabel *akHdr = [self makeSectionLabel:@"ANTI-KNOCKED" atY:stY width:tabW];
-    [settingTabContainer addSubview:akHdr]; stY += 18;
-
-    [self addFeatureToView:settingTabContainer withTitle:@"Anti-Knocked (self)" atY:stY initialValue:isAntiKnocked andAction:@selector(toggleAntiKnocked:)]; stY += 32;
-
-    UILabel *akDesc = [[UILabel alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 24)];
-    akDesc.text = @"Resets your knocked state every frame.";
-    akDesc.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
-    akDesc.font = [UIFont systemFontOfSize:9]; akDesc.numberOfLines = 2;
-    [settingTabContainer addSubview:akDesc]; stY += 28;
-
     // ── SPEED ─────────────────────────────────────────────────────────
     UIView *spSep = [[UIView alloc] initWithFrame:CGRectMake(15, stY, tabW-30, 1)];
     spSep.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1.0];
@@ -996,70 +975,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     // Поднять sidebar поверх всех табов
     [menuContainer bringSubviewToFront:sidebar];
 
-    // --- SILENT AIM TAB ---
-    silentTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
-    silentTabContainer.backgroundColor = [UIColor blackColor];
-    silentTabContainer.layer.borderColor = [UIColor colorWithRed:0.5 green:0.2 blue:0.8 alpha:1.0].CGColor;
-    silentTabContainer.layer.borderWidth = 1;
-    silentTabContainer.layer.cornerRadius = 10;
-    silentTabContainer.hidden = YES;
-    silentTabContainer.clipsToBounds = YES;
-    [menuContainer addSubview:silentTabContainer];
-    [menuContainer bringSubviewToFront:sidebar];
-
-    CGFloat sW = tabW;
-    CGFloat sy = 8;
-
-    UILabel *silHdr = [self makeSectionLabel:@"SILENT AIM" atY:sy width:sW];
-    [silentTabContainer addSubview:silHdr]; sy += 18;
-    UIView *silLine = [[UIView alloc] initWithFrame:CGRectMake(10, sy, sW - 20, 1)];
-    silLine.backgroundColor = [UIColor colorWithRed:0.5 green:0.2 blue:0.8 alpha:0.8];
-    [silentTabContainer addSubview:silLine]; sy += 8;
-
-    [self addFeatureToView:silentTabContainer withTitle:@"Enable Silent Aim" atY:sy initialValue:isSilentAim andAction:@selector(toggleSilentAim:)]; sy += 32;
-
-    // FOV
-    UILabel *sfovLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, sy, sW - 60, 14)];
-    sfovLbl.text = @"FOV Radius"; sfovLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    sfovLbl.font = [UIFont systemFontOfSize:10]; [silentTabContainer addSubview:sfovLbl];
-    UILabel *sfovVal = [[UILabel alloc] initWithFrame:CGRectMake(sW - 45, sy, 40, 14)];
-    sfovVal.text = [NSString stringWithFormat:@"%.0f", silentFov];
-    sfovVal.textColor = [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0];
-    sfovVal.font = [UIFont systemFontOfSize:10]; sfovVal.textAlignment = NSTextAlignmentRight;
-    [silentTabContainer addSubview:sfovVal]; sy += 16;
-    HUDSlider *sfovSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, sy, sW - 20, 36)];
-    sfovSlider.minimumValue = 10; sfovSlider.maximumValue = 500; sfovSlider.value = silentFov;
-    sfovSlider.minimumTrackTintColor = [UIColor colorWithRed:0.7 green:0.3 blue:1.0 alpha:1.0];
-    sfovSlider.thumbTintColor = [UIColor whiteColor];
-    UILabel * __unsafe_unretained sfvRef = sfovVal;
-    sfovSlider.onValueChanged = ^(float v){ silentFov = v; sfvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
-    [silentTabContainer addSubview:sfovSlider]; sy += 44;
-
-    // Distance
-    UILabel *sdLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, sy, sW - 60, 14)];
-    sdLbl.text = @"Distance"; sdLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    sdLbl.font = [UIFont systemFontOfSize:10]; [silentTabContainer addSubview:sdLbl];
-    UILabel *sdVal = [[UILabel alloc] initWithFrame:CGRectMake(sW - 45, sy, 40, 14)];
-    sdVal.text = [NSString stringWithFormat:@"%.0f", silentDistance];
-    sdVal.textColor = [UIColor colorWithRed:0.8 green:0.5 blue:1.0 alpha:1.0];
-    sdVal.font = [UIFont systemFontOfSize:10]; sdVal.textAlignment = NSTextAlignmentRight;
-    [silentTabContainer addSubview:sdVal]; sy += 16;
-    HUDSlider *sdSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, sy, sW - 20, 36)];
-    sdSlider.minimumValue = 10; sdSlider.maximumValue = 600; sdSlider.value = silentDistance;
-    sdSlider.minimumTrackTintColor = [UIColor colorWithRed:0.4 green:0.7 blue:1.0 alpha:1.0];
-    sdSlider.thumbTintColor = [UIColor whiteColor];
-    UILabel * __unsafe_unretained sdvRef = sdVal;
-    sdSlider.onValueChanged = ^(float v){ silentDistance = v; sdvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
-    [silentTabContainer addSubview:sdSlider]; sy += 44;
-
-    // Target
-    UIView *silLine2 = [[UIView alloc] initWithFrame:CGRectMake(10, sy, sW - 20, 1)];
-    silLine2.backgroundColor = [UIColor colorWithWhite:0.2 alpha:1.0];
-    [silentTabContainer addSubview:silLine2]; sy += 8;
-    UILabel *silTargHdr = [self makeSectionLabel:@"TARGET" atY:sy width:sW];
-    [silentTabContainer addSubview:silTargHdr]; sy += 16;
-    NSArray *silTargOpts = @[@"Head", @"Neck", @"Hip"];
-    [self addSegmentTo:silentTabContainer atY:sy title:@"" options:silTargOpts selectedRef:&aimTarget tag:20]; sy += 32;
 }
 
 - (void)switchToTab:(NSInteger)tabIndex {
@@ -1067,15 +982,13 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     aimTabContainer.hidden = YES;
     extraTabContainer.hidden = YES;
     settingTabContainer.hidden = YES;
-    silentTabContainer.hidden = YES;
     mainTabContainer.userInteractionEnabled = NO;
     aimTabContainer.userInteractionEnabled = NO;
     extraTabContainer.userInteractionEnabled = NO;
     settingTabContainer.userInteractionEnabled = NO;
-    silentTabContainer.userInteractionEnabled = NO;
     
     for (UIView *sub in _sidebar.subviews) {
-        if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 104) {
+        if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 103) {
             sub.backgroundColor = [UIColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0];
         }
     }
@@ -1106,10 +1019,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         if (tabIndex == 0) { mainTabContainer.hidden = NO; mainTabContainer.userInteractionEnabled = YES; }
         if (tabIndex == 2) { extraTabContainer.hidden = NO; extraTabContainer.userInteractionEnabled = YES; }
         if (tabIndex == 3) { settingTabContainer.hidden = NO; settingTabContainer.userInteractionEnabled = YES; }
-        if (tabIndex == 4) { silentTabContainer.hidden = NO; silentTabContainer.userInteractionEnabled = YES; }
     }
-    silentTabContainer.hidden = (tabIndex != 4);
-    silentTabContainer.userInteractionEnabled = (tabIndex == 4);
 }
 
 - (void)drawPreviewElements {
@@ -1217,7 +1127,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleDist:(CustomSwitch *)sender { isDis = sender.isOn; previewDistLabel.hidden = !isDis; }
 - (void)toggleLine:(CustomSwitch *)sender { isLine = sender.isOn; }
 - (void)toggleAimbot:(CustomSwitch *)sender    { isAimbot    = sender.isOn; }
-- (void)toggleSilentAim:(CustomSwitch *)sender { isSilentAim = sender.isOn; }
 
 
 - (void)toggleStreamerMode:(CustomSwitch *)sender {
@@ -1304,8 +1213,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     });
 }
 
-// ── Anti-Knocked ──────────────────────────────────────────────────────
-- (void)toggleAntiKnocked:(CustomSwitch *)sender { isAntiKnocked = sender.isOn; }
 
 // ── Speed ─────────────────────────────────────────────────────────────
 // h5gg: searchNumber('4397530849764387586','I64','0x100000000','0x200000000')
@@ -1438,7 +1345,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 // Это надёжно работает со всей иерархией UIScrollView/PassThroughScrollView
 - (void)handleTabTap:(UITapGestureRecognizer *)gr {
     NSInteger tag = gr.view.tag;
-    if (tag >= 100 && tag <= 104) {
+    if (tag >= 100 && tag <= 103) {
 #ifdef DEBUG
         espLog([NSString stringWithFormat:@"[TAP] sidebar btn tag=%ld", (long)tag]);
 #endif
@@ -1491,14 +1398,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (_espBusy) return;
     _espBusy = YES;
 
-    // FOV круг — белый для aimbot, фиолетовый для silent aim
-    if (isAimbot || isSilentAim) {
+    // FOV круг — белый для aimbot
+    if (isAimbot) {
         float cx = self.bounds.size.width / 2;
         float cy = self.bounds.size.height / 2;
-        float radius = isSilentAim ? silentFov : aimFov;
-        _fovLayer.strokeColor = isSilentAim
-            ? [UIColor colorWithRed:0.8 green:0.4 blue:1.0 alpha:0.6].CGColor
-            : [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
+        float radius = aimFov;
+        _fovLayer.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
         _fovLayer.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy)
             radius:radius startAngle:0 endAngle:M_PI*2 clockwise:YES].CGPath;
         _fovLayer.hidden = NO;
@@ -1633,8 +1538,6 @@ bool get_IsFiring(uint64_t player) {
         if (MaxHP <= 0) continue;
         if (CurHP <= 0) continue;  // трупы (HP=0) — не рендерить, не целиться
         // Нокнутый — прямые field reads из IL2CPP дампа:
-        // IsFrozenKnockDown  @ 0xA0   — не изменился между версиями
-        // IsKnockedDownBleed @ 0x1110 — основной флаг нокдауна (было 0x1040)
         bool isKnocked = ReadAddr<bool>(PawnObject + 0xA0)
                       || ReadAddr<bool>(PawnObject + 0x1110);
 
@@ -1656,19 +1559,6 @@ bool get_IsFiring(uint64_t player) {
             float dx = ws.x - center.x, dy = ws.y - center.y;
             float d2 = sqrtf(dx*dx+dy*dy);
             if (d2 <= aimFov) {
-                float sc = (aimMode == 0) ? dis : d2;
-                if (sc < bestScore) { bestScore = sc; bestTarget = PawnObject; }
-            }
-        }
-        // ── Silent Aim ───────────────────────────────────────────────
-        if (isSilentAim && dis <= silentDistance) {
-            Vector3 ap = HeadPos;
-            if (aimTarget == 1) ap = HeadPos + Vector3(0,-0.15f,0);
-            else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
-            Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
-            float dx = ws.x - center.x, dy = ws.y - center.y;
-            float d2 = sqrtf(dx*dx+dy*dy);
-            if (d2 <= silentFov) {
                 float sc = (aimMode == 0) ? dis : d2;
                 if (sc < bestScore) { bestScore = sc; bestTarget = PawnObject; }
             }
@@ -1832,31 +1722,7 @@ bool get_IsFiring(uint64_t player) {
         else                   ap = getPositionExt(getHip(bestTarget));
         set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
     }
-    // ── Silent Aim apply ─────────────────────────────────────────────
-    // External процесс — вызов функций игры невозможен (EXC_BAD_ACCESS).
-    // Пишем напрямую в оба rotation поля через WriteAddr:
-    //   OFF_ROTATION (0x53C)  — m_AimRotation: определяет направление пули
-    //   0x172C                — m_CurrentAimRotation: дополнительный rotation
-    // Камера не двигается — сразу записываем origRot обратно в OFF_ROTATION.
-    if (isSilentAim && isVaildPtr(bestTarget)) {
-        Vector3 ap;
-        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
-        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
-        else                   ap = getPositionExt(getHip(bestTarget));
-        Quaternion origRot    = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
-        Quaternion targetRot  = GetRotationToLocation(ap, 0.1f, myLoc);
-        // Пишем target в оба поля — пуля полетит в цель
-        WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION,        targetRot);
-        WriteAddr<Quaternion>(myPawnObject + (uint64_t)0x172C,    targetRot);
-        // Немедленно восстанавливаем камеру
-        WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION,        origRot);
-    }
 
-    // ── Anti-Knocked: каждый кадр сбрасываем knocked-флаги у себя ────
-    if (isAntiKnocked && isVaildPtr(myPawnObject)) {
-        WriteAddr<bool>(myPawnObject + (uint64_t)0xA0,   false); // IsFrozenKnockDown
-        WriteAddr<bool>(myPawnObject + (uint64_t)0x1110, false); // IsKnockedDownBleed
-    }
 
     // No Recoil и Speed — работают через value-scan (разовые патчи), не renderESP
 
