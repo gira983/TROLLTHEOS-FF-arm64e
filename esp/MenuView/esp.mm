@@ -22,7 +22,8 @@ static void espLog(NSString *msg) {
 
 // --- Obfuscated offsets (compile-time encrypted, runtime decrypted) ---
 // Player fields
-#define OFF_ROTATION        ENCRYPTOFFSET("0x53C")
+#define OFF_ROTATION        ENCRYPTOFFSET("0x53C")    // m_AimRotation (камера)
+#define OFF_SILENT_ROTATION ENCRYPTOFFSET("0x172C")   // m_CurrentAimRotation (пуля)
 #define OFF_FIRING          ENCRYPTOFFSET("0x750")
 
 // Knocked state через PropertyData pool @ player+0x68 (varID=2)
@@ -89,7 +90,8 @@ static bool isLine = NO;       // ESP Lines
 static int  lineOrigin = 1;    // 0 = Top, 1 = Center, 2 = Bottom
 
 // --- Aimbot Config ---
-static bool isAimbot = NO;
+static bool isAimbot    = NO;
+static bool isSilentAim = NO;  // silent aim — камера не двигается, пуля летит в цель
 static bool isIgnoreKnocked = YES; // не целиться в нокнутых
 static float aimFov = 150.0f; // Bán kính vòng tròn FOV
 static float aimDistance = 200.0f; // Khoảng cách aim mặc định
@@ -801,6 +803,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [aimTabContainer addSubview:aimSep1]; ay += 6;
 
     [self addFeatureToView:aimTabContainer withTitle:@"Enable Aimbot" atY:ay initialValue:isAimbot andAction:@selector(toggleAimbot:)]; ay += 30;
+    [self addFeatureToView:aimTabContainer withTitle:@"Silent Aim" atY:ay initialValue:isSilentAim andAction:@selector(toggleSilentAim:)]; ay += 30;
     [self addFeatureToView:aimTabContainer withTitle:@"Ignore Knocked" atY:ay initialValue:isIgnoreKnocked andAction:@selector(toggleIgnoreKnocked:)]; ay += 30;
 
     ay += 4;
@@ -1051,7 +1054,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleName:(CustomSwitch *)sender { isName = sender.isOn; previewNameLabel.hidden = !isName; }
 - (void)toggleDist:(CustomSwitch *)sender { isDis = sender.isOn; previewDistLabel.hidden = !isDis; }
 - (void)toggleLine:(CustomSwitch *)sender { isLine = sender.isOn; }
-- (void)toggleAimbot:(CustomSwitch *)sender { isAimbot = sender.isOn; }
+- (void)toggleAimbot:(CustomSwitch *)sender    { isAimbot    = sender.isOn; }
+- (void)toggleSilentAim:(CustomSwitch *)sender { isSilentAim = sender.isOn; }
 - (void)toggleIgnoreKnocked:(CustomSwitch *)sender { isIgnoreKnocked = sender.isOn; }
 
 
@@ -1369,7 +1373,7 @@ bool get_IsFiring(uint64_t player) {
         if (dis > 600.0f) continue;
 
         // ── AIMBOT ──────────────────────────────────────────────────
-        if (isAimbot && !(isIgnoreKnocked && isKnocked) && dis <= aimDistance) {
+        if (isAimbot && dis <= aimDistance) {
             Vector3 ap = HeadPos;
             if (aimTarget == 1) ap = HeadPos + Vector3(0,-0.15f,0);
             else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
@@ -1538,7 +1542,16 @@ bool get_IsFiring(uint64_t player) {
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
         else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
         else                   ap = getPositionExt(getHip(bestTarget));
-        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
+        Quaternion targetRot = GetRotationToLocation(ap, 0.1f, myLoc);
+        if (isSilentAim) {
+            // Silent aim: сохраняем оригинальный, пишем в CurrentAimRotation (пуля),
+            // сразу возвращаем камеру — визуально прицел не двигается
+            Quaternion origRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+            WriteAddr<Quaternion>(myPawnObject + OFF_SILENT_ROTATION, targetRot);
+            WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, origRot);
+        } else {
+            set_aim(myPawnObject, targetRot);
+        }
     }
 
     // ── Передаём на main thread ──────────────────────────────────────
