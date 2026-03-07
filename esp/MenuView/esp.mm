@@ -2016,10 +2016,12 @@ bool get_IsFiring(uint64_t player) {
     // ── Aimbot apply ────────────────────────────────────────────────
     // Trigger: Always(0) — всегда, Shooting(1) — только при стрельбе
     bool shouldAim = (aimTrigger == 0) || (aimTrigger == 1 && isFire);
-    // Аимбот работает всегда когда есть цель — не зависит от isInMatch
+    // ── Aimbot apply ────────────────────────────────────────────────
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         uint64_t aimHeadNode = getHead(bestTarget);
         if (isVaildPtr(aimHeadNode)) {
+
+            // Позиция цели
             Vector3 freshHead = getPositionExt(aimHeadNode);
             Vector3 targetPos;
             if (aimTarget == 0) {
@@ -2032,15 +2034,29 @@ bool get_IsFiring(uint64_t player) {
                     ? getPositionExt(hipNode)
                     : freshHead + Vector3(0, -0.5f, 0);
             }
-            Quaternion targetRot = GetRotationToLocation(targetPos, 0.0f, myLoc);
+
+            // Позиция стрелка — берём hip (не камеру!) чтобы вектор был точным
+            uint64_t myHipNode = getHip(myPawnObject);
+            Vector3 shooterPos = isVaildPtr(myHipNode)
+                ? getPositionExt(myHipNode)
+                : myLoc;
+
+            // Целевой кватернион
+            Quaternion targetRot = GetRotationToLocation(targetPos, 0.0f, shooterPos);
+
+            // Пишем ТОЛЬКО в 0x172C (направление пули)
+            // НЕ пишем в OFF_ROTATION (0x53C) — это вызывает дёрганье камеры
+            // потому что игра сама управляет 0x53C через анимацию
             if (aimSpeed >= 0.99f) {
-                WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, targetRot);
+                // Снэп — сразу
                 WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), targetRot);
             } else {
-                Quaternion cur = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+                // Плавно — Slerp от targetRot прошлого кадра к новому targetRot
+                // НЕ от текущего cur (который игра уже изменила) — это устраняет осцилляцию
+                static Quaternion s_lastAimRot = Quaternion::Identity();
                 float slerp_t = fmaxf(0.05f, fminf(0.98f, aimSpeed));
-                Quaternion smoothed = SlerpAim(cur, targetRot, slerp_t);
-                WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, smoothed);
+                Quaternion smoothed = SlerpAim(s_lastAimRot, targetRot, slerp_t);
+                s_lastAimRot = smoothed;
                 WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), smoothed);
             }
         }
