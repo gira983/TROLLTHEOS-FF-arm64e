@@ -24,6 +24,8 @@ static void espLog(NSString *msg) {
 // Player fields
 #define OFF_ROTATION        ENCRYPTOFFSET("0x53C")
 #define OFF_FIRING          ENCRYPTOFFSET("0x750")
+// RVA метода get_IsDieing — вызов через function pointer (точнее field read)
+#define RVA_IS_DIEING       0x5133838ULL
 #define OFF_IPRIDATAPOOL    ENCRYPTOFFSET("0x68")
 #define OFF_PLAYERID        ENCRYPTOFFSET("0x338")
 #define OFF_CAMERA_TRANSFORM ENCRYPTOFFSET("0x318")
@@ -88,6 +90,7 @@ static int  lineOrigin = 1;    // 0 = Top, 1 = Center, 2 = Bottom
 
 // --- Aimbot Config ---
 static bool isAimbot = NO;
+static bool isIgnoreKnocked = YES; // не целиться в нокнутых
 static float aimFov = 150.0f; // Bán kính vòng tròn FOV
 static float aimDistance = 200.0f; // Khoảng cách aim mặc định
 
@@ -798,6 +801,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [aimTabContainer addSubview:aimSep1]; ay += 6;
 
     [self addFeatureToView:aimTabContainer withTitle:@"Enable Aimbot" atY:ay initialValue:isAimbot andAction:@selector(toggleAimbot:)]; ay += 30;
+    [self addFeatureToView:aimTabContainer withTitle:@"Ignore Knocked" atY:ay initialValue:isIgnoreKnocked andAction:@selector(toggleIgnoreKnocked:)]; ay += 30;
 
     ay += 4;
     UIView *aimSep2 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
@@ -1048,6 +1052,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleDist:(CustomSwitch *)sender { isDis = sender.isOn; previewDistLabel.hidden = !isDis; }
 - (void)toggleLine:(CustomSwitch *)sender { isLine = sender.isOn; }
 - (void)toggleAimbot:(CustomSwitch *)sender { isAimbot = sender.isOn; }
+- (void)toggleIgnoreKnocked:(CustomSwitch *)sender { isIgnoreKnocked = sender.isOn; }
 
 
 - (void)toggleStreamerMode:(CustomSwitch *)sender {
@@ -1236,6 +1241,34 @@ bool get_IsFiring(uint64_t player) {
     return ReadAddr<bool>(player + OFF_FIRING);
 }
 
+// IL2CPP method call: bool get_IsDieing(instance)
+// RVA: 0x5133838 — offset от начала бинаря freefireth
+// typedef нужен чтобы компилятор знал ABI вызова (arm64 C calling convention)
+typedef bool (*fn_IsDieing_t)(uint64_t instance);
+static fn_IsDieing_t _fn_IsDieing = nullptr;
+
+// Инициализируем указатель один раз после того как Moudule_Base известен
+static void init_IsDieing_fn() {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        if (Moudule_Base && Moudule_Base != (uint64_t)-1) {
+            _fn_IsDieing = (fn_IsDieing_t)(Moudule_Base + RVA_IS_DIEING);
+        }
+    });
+}
+
+bool get_IsDieing(uint64_t player) {
+    if (!isVaildPtr(player)) return false;
+    init_IsDieing_fn();
+    if (!_fn_IsDieing) return false;
+    // IL2CPP instance method — первый аргумент это this (указатель на объект)
+    @try {
+        return _fn_IsDieing(player);
+    } @catch (...) {
+        return false;
+    }
+}
+
 // Pool текстовых слоёв — берёт существующий или создаёт новый
 - (CATextLayer *)textLayer {
     if (_textPoolIndex < (NSInteger)_textPool.count) {
@@ -1332,12 +1365,13 @@ bool get_IsFiring(uint64_t player) {
         if (!isVaildPtr(PawnObject)) continue;
         if (isLocalTeamMate(myPawnObject, PawnObject)) continue;
 
-        int CurHP = get_CurHP(PawnObject);
-        int MaxHP = get_MaxHP(PawnObject);
-        // Нокнутые (HP==0 но игрок ещё в матче) тоже показываем — с пометкой
-        bool isKnocked = (CurHP <= 0);
+        int CurHP  = get_CurHP(PawnObject);
+        int MaxHP  = get_MaxHP(PawnObject);
         // Полностью мёртвых и неинициализированных пропускаем
         if (MaxHP <= 0) continue;
+        // Нокнутый = вызов IL2CPP метода get_IsDieing() напрямую
+        // Точнее field read — но это официальный геттер из дампа
+        bool isKnocked = get_IsDieing(PawnObject);
 
         // Читаем голову — для дистанции и aimbot
         uint64_t headNode = getHead(PawnObject);
@@ -1349,7 +1383,7 @@ bool get_IsFiring(uint64_t player) {
         if (dis > 600.0f) continue;
 
         // ── AIMBOT ──────────────────────────────────────────────────
-        if (isAimbot && !isKnocked && dis <= aimDistance) {
+        if (isAimbot && !(isIgnoreKnocked && isKnocked) && dis <= aimDistance) {
             Vector3 ap = HeadPos;
             if (aimTarget == 1) ap = HeadPos + Vector3(0,-0.15f,0);
             else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
