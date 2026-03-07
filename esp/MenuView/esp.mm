@@ -799,7 +799,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     // Внутренний контейнер для контента
     UIView *aimContent = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tabW, 800)];
-    [aimContent addSubview:aimContent];
+    [aimTabContainer addSubview:aimContent];
 
     CGFloat aW = tabW;
     CGFloat ay = 6;
