@@ -50,7 +50,8 @@ static void espLog(NSString *msg) {
 #define OFF_CAMERA_MGR2     ENCRYPTOFFSET("0x18")
 #define OFF_MATRIX_BASE     ENCRYPTOFFSET("0xD8")
 #define OFF_CAM_V1          ENCRYPTOFFSET("0x10")
-#define OFF_PLAYERLIST      ENCRYPTOFFSET("0x120")
+// Match.m_Players (Dict HOOCHDLKOOG) = 0x100 из обфусцированного дампа
+#define OFF_PLAYERLIST      ENCRYPTOFFSET("0x100")
 #define OFF_PLAYERLIST_ARR  ENCRYPTOFFSET("0x28")
 #define OFF_PLAYERLIST_CNT  ENCRYPTOFFSET("0x18")
 #define OFF_PLAYERLIST_ITEM ENCRYPTOFFSET("0x20")
@@ -102,9 +103,9 @@ static float aimDistance   = 200.0f;
 
 
 static int  aimMode = 1;           // 0 = Closest to Player, 1 = Closest to Crosshair
-static int  aimTrigger = 1;        // 0 = Always, 1 = Only Shooting, 2 = Only Aiming
+static int  aimTrigger = 0;        // 0 = Always, 1 = Only Shooting
 static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
-static float aimSpeed = 1.0f;      // Aim smoothing 0.05 - 1.0
+static float aimSpeed = 0.85f;     // Aim smoothing 0.05 - 1.0
 static bool isStreamerMode = NO;   // Stream Proof
 
 // ── No Recoil (value scan, loop) ─────────────────────────────────────
@@ -1733,6 +1734,32 @@ bool get_IsFiring(uint64_t player) {
     uint64_t playerList = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
     uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
     int      totalCount = ReadAddr<int>(tValue + OFF_PLAYERLIST_CNT);
+
+    // ── Детекция матча через GameFacade.IsMatchStarted (IL2CPP дамп, offset 0x1D9) ──
+    bool nowInMatch = getIsMatchStarted(Moudule_Base);
+    if (isInMatch != nowInMatch) {
+        isInMatch = nowInMatch;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIView *dot = [self->floatingButton viewWithTag:77];
+            if (dot) dot.backgroundColor = isInMatch
+                ? [UIColor colorWithRed:0.2 green:0.9 blue:0.3 alpha:1.0]
+                : [UIColor colorWithRed:1.0 green:0.8 blue:0.0 alpha:1.0];
+            if (!isInMatch) {
+                [CATransaction begin]; [CATransaction setDisableActions:YES];
+                for (CAShapeLayer *sl in @[self->_boneNear, self->_boneMid, self->_boneFar, self->_boneKnocked,
+                                           self->_boxNear, self->_boxMid, self->_boxFar, self->_boxKnocked,
+                                           self->_lineNear, self->_lineMid, self->_lineFar,
+                                           self->_hpBgLayer,self->_hpFillGreen,self->_hpFillYellow,self->_hpFillRed,
+                                           self->_fovLayer]) {
+                    sl.path = nil; sl.hidden = YES;
+                }
+                for (CATextLayer *t in self->_textPool) t.hidden = YES;
+                [CATransaction commit];
+            }
+        });
+    }
+    if (!isInMatch) return;  // в лобби — ничего не рендерим
+
     // Защита от мусорного значения
     if (totalCount <= 0 || totalCount > 64) totalCount = 64;
 
@@ -1976,31 +2003,43 @@ bool get_IsFiring(uint64_t player) {
         }
     } // end player loop
 
-    // ── Aimbot apply — точный прицел + smoothing ────────────────────
-    bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
-    if (isAimbot && isInMatch && isVaildPtr(bestTarget) && shouldAim) {
-        Vector3 ap;
+    // ── Aimbot apply ────────────────────────────────────────────────
+    // Trigger: Always(0) — всегда, Shooting(1) — только при стрельбе
+    bool shouldAim = (aimTrigger == 0) || (aimTrigger == 1 && isFire);
+    if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
+        // Цель — читаем свежие координаты прямо перед записью
+        Vector3 targetPos;
+        uint64_t headNode = getHead(bestTarget);
+        if (!isVaildPtr(headNode)) goto skip_aim;
+        Vector3 freshHead = getPositionExt(headNode);
+
         if (aimTarget == 0) {
-            // HEAD: чуть ниже центра головы = лоб, точная зона
-            ap = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.05f, 0);
+            targetPos = freshHead; // Head — точно в центр
         } else if (aimTarget == 1) {
-            // NECK: между головой и плечами
-            ap = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.22f, 0);
+            targetPos = freshHead + Vector3(0, -0.18f, 0); // Neck
         } else {
-            // HIP: центр тела
-            ap = getPositionExt(getHip(bestTarget));
+            uint64_t hipNode = getHip(bestTarget);
+            targetPos = isVaildPtr(hipNode)
+                ? getPositionExt(hipNode)
+                : freshHead + Vector3(0, -0.5f, 0); // Hip fallback
         }
-        Quaternion targetRot = GetRotationToLocation(ap, 0.0f, myLoc);
 
-        // Smoothing через SLERP — aimSpeed=1.0 мгновенно, 0.05 плавно
-        Quaternion currentRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
-        float smooth = fmaxf(0.05f, fminf(1.0f, aimSpeed));
-        Quaternion finalRot = SlerpAim(currentRot, targetRot, smooth);
+        Quaternion targetRot = GetRotationToLocation(targetPos, 0.0f, myLoc);
 
-        // Пишем в камеру (0x53C) и направление пули (0x172C)
-        WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, finalRot);
-        WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), finalRot);
+        if (aimSpeed >= 0.99f) {
+            // Мгновенный снэп — пишем напрямую
+            WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, targetRot);
+            WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), targetRot);
+        } else {
+            // Плавное наведение через Slerp
+            Quaternion cur = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+            float t = fmaxf(0.05f, fminf(0.98f, aimSpeed));
+            Quaternion smooth = SlerpAim(cur, targetRot, t);
+            WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, smooth);
+            WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), smooth);
+        }
     }
+    skip_aim:;
 
 
     // No Recoil и Speed — работают через value-scan (разовые патчи), не renderESP
