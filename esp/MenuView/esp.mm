@@ -344,7 +344,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     
     // Tab Views
     UIView *mainTabContainer;
-    UIView *aimTabContainer;
+    UIScrollView *aimTabContainer;
     UIView *settingTabContainer;
     UIView *extraTabContainer;
     UIView *_sidebar;
@@ -786,88 +786,100 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     // Size slider убран — не влияет на функционал
 
-    // --- AIM TAB ---
-    aimTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
+    // --- AIM TAB (ScrollView) ---
+    aimTabContainer = [[UIScrollView alloc] initWithFrame:CGRectMake(15, 50, tabW, tabH)];
     aimTabContainer.backgroundColor = [UIColor blackColor];
     aimTabContainer.layer.borderColor = [UIColor whiteColor].CGColor;
     aimTabContainer.layer.borderWidth = 1;
     aimTabContainer.layer.cornerRadius = 10;
     aimTabContainer.hidden = YES;
+    aimTabContainer.showsVerticalScrollIndicator = NO;
+    aimTabContainer.clipsToBounds = YES;
     [menuContainer addSubview:aimTabContainer];
 
-    // --- AIM TAB: toggles + сегменты, без ScrollView ---
-    CGFloat aW = aimTabContainer.bounds.size.width;
+    // Внутренний контейнер для контента
+    UIView *aimContent = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tabW, 800)];
+    [aimContent addSubview:aimContent];
+
+    CGFloat aW = tabW;
     CGFloat ay = 6;
+    // Макрос чтобы добавлять в aimContent, не в aimTabContainer
+    #define AIM_ADD(v) [aimContent addSubview:(v)]
 
     UILabel *aimTitle = [self makeSectionLabel:@"AIMBOT" atY:ay width:aW];
-    [aimTabContainer addSubview:aimTitle]; ay += 18;
+    [aimContent addSubview:aimTitle]; ay += 18;
     UIView *aimSep1 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
     aimSep1.backgroundColor = [UIColor colorWithRed:0.18 green:0.18 blue:0.25 alpha:1.0];
-    [aimTabContainer addSubview:aimSep1]; ay += 6;
+    [aimContent addSubview:aimSep1]; ay += 6;
 
     // ─ Aimbot ─────────────────────────────────────────────────────────
-    [self addFeatureToView:aimTabContainer withTitle:@"Enable Aimbot" atY:ay initialValue:isAimbot andAction:@selector(toggleAimbot:)]; ay += 30;
+    [self addFeatureToView:aimContent withTitle:@"Enable Aimbot" atY:ay initialValue:isAimbot andAction:@selector(toggleAimbot:)]; ay += 30;
 
     ay += 4;
     UIView *aimSep2 = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
     aimSep2.backgroundColor = aimSep1.backgroundColor;
-    [aimTabContainer addSubview:aimSep2]; ay += 6;
+    [aimContent addSubview:aimSep2]; ay += 6;
 
     UILabel *aimModeTitle = [self makeSectionLabel:@"AIM MODE" atY:ay width:aW];
-    [aimTabContainer addSubview:aimModeTitle]; ay += 16;
+    [aimContent addSubview:aimModeTitle]; ay += 16;
 
     NSArray *aimModeOpts = @[@"Closest Player", @"Crosshair"];
-    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimModeOpts selectedRef:&aimMode tag:10]; ay += 32;
+    [self addSegmentTo:aimContent atY:ay title:@"" options:aimModeOpts selectedRef:&aimMode tag:10]; ay += 32;
 
     NSArray *aimTargetOpts = @[@"Head", @"Neck", @"Hip"];
-    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTargetOpts selectedRef:&aimTarget tag:11]; ay += 32;
+    [self addSegmentTo:aimContent atY:ay title:@"" options:aimTargetOpts selectedRef:&aimTarget tag:11]; ay += 32;
 
     NSArray *aimTriggerOpts = @[@"Always", @"Shooting"];
-    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:aimTriggerOpts selectedRef:&aimTrigger tag:12]; ay += 38;
+    [self addSegmentTo:aimContent atY:ay title:@"" options:aimTriggerOpts selectedRef:&aimTrigger tag:12]; ay += 38;
 
     // ─ Silent Aim ─────────────────────────────────────────────────────
     UIView *silSep = [[UIView alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 1)];
     silSep.backgroundColor = aimSep1.backgroundColor;
-    [aimTabContainer addSubview:silSep]; ay += 6;
+    [aimContent addSubview:silSep]; ay += 6;
 
     UILabel *silTitle = [self makeSectionLabel:@"SILENT AIM" atY:ay width:aW];
-    [aimTabContainer addSubview:silTitle]; ay += 16;
+    [aimContent addSubview:silTitle]; ay += 16;
 
-    [self addFeatureToView:aimTabContainer withTitle:@"Enable Silent Aim" atY:ay initialValue:isSilentAim andAction:@selector(toggleSilentAim:)]; ay += 30;
+    [self addFeatureToView:aimContent withTitle:@"Enable Silent Aim" atY:ay initialValue:isSilentAim andAction:@selector(toggleSilentAim:)]; ay += 30;
 
     // Silent FOV slider
     UILabel *sfovLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ay, aW - 60, 14)];
     sfovLbl.text = @"Silent FOV"; sfovLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    sfovLbl.font = [UIFont systemFontOfSize:10]; [aimTabContainer addSubview:sfovLbl];
+    sfovLbl.font = [UIFont systemFontOfSize:10]; [aimContent addSubview:sfovLbl];
     UILabel *sfovVal = [[UILabel alloc] initWithFrame:CGRectMake(aW - 45, ay, 40, 14)];
     sfovVal.text = [NSString stringWithFormat:@"%.0f", silentFov];
     sfovVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
     sfovVal.font = [UIFont systemFontOfSize:10]; sfovVal.textAlignment = NSTextAlignmentRight;
-    [aimTabContainer addSubview:sfovVal]; ay += 16;
+    [aimContent addSubview:sfovVal]; ay += 16;
     HUDSlider *sfovSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 36)];
     sfovSlider.minimumValue = 10; sfovSlider.maximumValue = 500; sfovSlider.value = silentFov;
     sfovSlider.minimumTrackTintColor = [UIColor colorWithRed:0.8 green:0.4 blue:1.0 alpha:1.0];
     sfovSlider.thumbTintColor = [UIColor whiteColor];
     UILabel * __unsafe_unretained sfvRef = sfovVal;
     sfovSlider.onValueChanged = ^(float v){ silentFov = v; sfvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
-    [aimTabContainer addSubview:sfovSlider]; ay += 44;
+    [aimContent addSubview:sfovSlider]; ay += 44;
 
     // Silent Distance slider
     UILabel *sdistLbl = [[UILabel alloc] initWithFrame:CGRectMake(15, ay, aW - 60, 14)];
     sdistLbl.text = @"Silent Distance"; sdistLbl.textColor = [UIColor colorWithWhite:0.6 alpha:1.0];
-    sdistLbl.font = [UIFont systemFontOfSize:10]; [aimTabContainer addSubview:sdistLbl];
+    sdistLbl.font = [UIFont systemFontOfSize:10]; [aimContent addSubview:sdistLbl];
     UILabel *sdistVal = [[UILabel alloc] initWithFrame:CGRectMake(aW - 45, ay, 40, 14)];
     sdistVal.text = [NSString stringWithFormat:@"%.0f", silentDistance];
     sdistVal.textColor = [UIColor colorWithWhite:0.5 alpha:1.0];
     sdistVal.font = [UIFont systemFontOfSize:10]; sdistVal.textAlignment = NSTextAlignmentRight;
-    [aimTabContainer addSubview:sdistVal]; ay += 16;
+    [aimContent addSubview:sdistVal]; ay += 16;
     HUDSlider *sdistSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ay, aW - 20, 36)];
     sdistSlider.minimumValue = 10; sdistSlider.maximumValue = 600; sdistSlider.value = silentDistance;
     sdistSlider.minimumTrackTintColor = [UIColor colorWithRed:0.4 green:0.8 blue:1.0 alpha:1.0];
     sdistSlider.thumbTintColor = [UIColor whiteColor];
     UILabel * __unsafe_unretained sdvRef = sdistVal;
     sdistSlider.onValueChanged = ^(float v){ silentDistance = v; sdvRef.text = [NSString stringWithFormat:@"%.0f", v]; };
-    [aimTabContainer addSubview:sdistSlider];
+    [aimContent addSubview:sdistSlider]; ay += 60;
+
+    // Устанавливаем реальный contentSize по итоговому ay
+    aimContent.frame = CGRectMake(0, 0, tabW, ay);
+    aimTabContainer.contentSize = CGSizeMake(tabW, ay);
+    #undef AIM_ADD
 
 
     // --- EXTRA TAB: слайдеры ---
@@ -1266,12 +1278,16 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (_espBusy) return;
     _espBusy = YES;
 
-    // FOV круг — быстро, на main thread
-    if (isAimbot) {
+    // FOV круг — белый для aimbot, фиолетовый для silent aim
+    if (isAimbot || isSilentAim) {
         float cx = self.bounds.size.width / 2;
         float cy = self.bounds.size.height / 2;
+        float radius = isSilentAim ? silentFov : aimFov;
+        _fovLayer.strokeColor = isSilentAim
+            ? [UIColor colorWithRed:0.8 green:0.4 blue:1.0 alpha:0.6].CGColor
+            : [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
         _fovLayer.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy)
-            radius:aimFov startAngle:0 endAngle:M_PI*2 clockwise:YES].CGPath;
+            radius:radius startAngle:0 endAngle:M_PI*2 clockwise:YES].CGPath;
         _fovLayer.hidden = NO;
     } else {
         _fovLayer.hidden = YES;
