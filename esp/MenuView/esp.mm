@@ -25,13 +25,8 @@ static void espLog(NSString *msg) {
 #define OFF_ROTATION        ENCRYPTOFFSET("0x53C")
 #define OFF_FIRING          ENCRYPTOFFSET("0x750")
 
-// Knocked detection — прямые field reads из нового IL2CPP дампа (новая версия FF)
-// IsFrozenKnockDown @ 0xA0  — не изменился
-// IsKnockedDownBleed @ 0x1110 — было 0x1040 в старом дампе
-// IsDieingOnParachute @ 0x1C58 — было 0x1A98 в старом дампе
-#define OFF_ISFROZENKOCKDOWN    ENCRYPTOFFSET("0xA0")
-#define OFF_ISKNOCKDOWNBLEED    ENCRYPTOFFSET("0x1110")
-#define OFF_ISDIEINGONPARACHUTE ENCRYPTOFFSET("0x1C58")
+// Knocked state через PropertyData pool @ player+0x68 (varID=2)
+// Тот же механизм что HP (varID=0,1) — работает стабильно
 #define OFF_PLAYERID        ENCRYPTOFFSET("0x338")
 #define OFF_CAMERA_TRANSFORM ENCRYPTOFFSET("0x318")
 #define OFF_HEAD_NODE       ENCRYPTOFFSET("0x5B8")
@@ -1255,19 +1250,18 @@ bool get_IsFiring(uint64_t player) {
     return ReadAddr<bool>(player + OFF_FIRING);
 }
 
-// get_IsDieing — прямые field reads из нового IL2CPP дампа
-// Три независимых bool поля — knocked если любое из них true:
-//   IsFrozenKnockDown  @ 0xA0   — игрок заморожен в нокдауне
-//   IsKnockedDownBleed @ 0x1110  — нокдаун с кровотечением (основной флаг)
-//   IsDieingOnParachute @ 0x1C58 — умирает на парашюте
-// НЕ вызов метода — только ReadAddr. Вызов function pointer в чужом
-// адресном пространстве (external читалка) = SIGSEGV.
+// get_IsDieing — через PropertyData pool (тот же путь что HP varID=0,1)
+// varID=2 = knocked state: 0=жив, 1=нокнут лежит ждёт ревайва
+// Если HP работает — этот механизм тоже работает (одна и та же цепочка чтений)
 bool get_IsDieing(uint64_t player) {
     if (!isVaildPtr(player)) return false;
-    bool frozen   = ReadAddr<bool>(player + OFF_ISFROZENKOCKDOWN);
-    bool bleeding = ReadAddr<bool>(player + OFF_ISKNOCKDOWNBLEED);
-    bool parachute = ReadAddr<bool>(player + OFF_ISDIEINGONPARACHUTE);
-    return frozen || bleeding || parachute;
+    uint64_t pool = ReadAddr<uint64_t>(player + 0x68);
+    if (!isVaildPtr(pool)) return false;
+    uint64_t list = ReadAddr<uint64_t>(pool + 0x10);
+    if (!isVaildPtr(list)) return false;
+    uint64_t item = ReadAddr<uint64_t>(list + 0x8 * 2 + 0x20);
+    if (!isVaildPtr(item)) return false;
+    return ReadAddr<int>(item + 0x18) == 1;
 }
 
 // Pool текстовых слоёв — берёт существующий или создаёт новый
