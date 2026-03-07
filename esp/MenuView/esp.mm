@@ -83,11 +83,11 @@ uint64_t Moudule_Base = -1;
 static const char kSegHandlerKey = 0;
 
 // --- ESP Config ---
-static bool isBox = YES;
-static bool isBone = YES;
-static bool isHealth = YES;
-static bool isName = YES;
-static bool isDis = YES;
+static bool isBox = NO;
+static bool isBone = NO;
+static bool isHealth = NO;
+static bool isName = NO;
+static bool isDis = NO;
 static bool isLine = NO;       // ESP Lines
 static int  lineOrigin = 1;    // 0 = Top, 1 = Center, 2 = Bottom
 
@@ -490,9 +490,23 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
         [self setupFloatingButton];
         [self setupMenuUI];
-        [self layoutSubviews];
     }
     return self;
+}
+
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    if (self.window) {
+        // Теперь bounds точно известны — центрируем меню и кнопку
+        CGFloat W = self.bounds.size.width;
+        CGFloat H = self.bounds.size.height;
+        if (W > 10 && H > 10) {
+            menuContainer.center = CGPointMake(W / 2.0, H / 2.0);
+            // Кнопка — левый верхний + небольшой отступ
+            CGFloat btnSz = floatingButton.bounds.size.width;
+            floatingButton.center = CGPointMake(btnSz / 2.0 + 20, btnSz / 2.0 + 60);
+        }
+    }
 }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
@@ -523,7 +537,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)setupFloatingButton {
-    floatingButton = [[UIView alloc] initWithFrame:CGRectMake(50, 150, 46, 46)];
+    floatingButton = [[UIView alloc] initWithFrame:CGRectMake(20, 60, 46, 46)];
     floatingButton.backgroundColor = [UIColor colorWithRed:0.04 green:0.05 blue:0.07 alpha:0.97];
     floatingButton.layer.cornerRadius = 12;
     floatingButton.layer.borderWidth = 1;
@@ -837,21 +851,19 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     // Кнопка закрытия — встроена в правый верхний угол menuContainer
     // Скруглён только нижний левый угол (внутренний), остальные = угол меню
-    CGFloat closeSz = 36.0;
+    CGFloat closeSz = 28.0;
     UIView *closeBtn = [[UIView alloc] initWithFrame:CGRectMake(menuWidth - closeSz, 0, closeSz, closeSz)];
     closeBtn.backgroundColor = COL_RED;
-    closeBtn.layer.cornerRadius = 12;
+    closeBtn.layer.cornerRadius = 9;
     if (@available(iOS 13.0, *)) {
         closeBtn.layer.cornerCurve = kCACornerCurveContinuous;
     }
-    // Скруглён только нижний левый угол — он "врезается" в меню
-    // Верхний правый = совпадает с углом menuContainer (уже скруглён им)
     closeBtn.layer.maskedCorners = kCALayerMinXMaxYCorner;
     closeBtn.tag = 200;
     UILabel *closeLbl = [[UILabel alloc] initWithFrame:closeBtn.bounds];
     closeLbl.text = @"✕";
     closeLbl.textColor = [UIColor whiteColor];
-    closeLbl.font = [UIFont boldSystemFontOfSize:14];
+    closeLbl.font = [UIFont boldSystemFontOfSize:12];
     closeLbl.textAlignment = NSTextAlignmentCenter;
     closeLbl.userInteractionEnabled = NO;
     [closeBtn addSubview:closeLbl];
