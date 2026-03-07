@@ -10,7 +10,7 @@
 #pragma mark - Get PID
 
 extern mach_port_t get_task;
-static pid_t Processpid;
+extern pid_t Processpid;
 
 extern "C" kern_return_t mach_vm_region_recurse(vm_map_t                 map,
                                                 mach_vm_address_t        *address,
