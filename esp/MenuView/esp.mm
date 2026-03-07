@@ -1615,10 +1615,13 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (_espBusy) return;
     _espBusy = YES;
 
-    // FOV круг — белый для aimbot
+    // FOV круг — используем superview.bounds как и для ESP
     if (isAimbot) {
-        float cx = self.bounds.size.width / 2;
-        float cy = self.bounds.size.height / 2;
+        float vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
+        float vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
+        if (vW < 10 || vH < 10) { vW = self.bounds.size.width; vH = self.bounds.size.height; }
+        float cx = vW / 2.0f;
+        float cy = vH / 2.0f;
         float radius = aimFov;
         _fovLayer.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
         _fovLayer.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy)
