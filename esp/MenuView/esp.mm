@@ -1146,11 +1146,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 // ── No Recoil ─────────────────────────────────────────────────────────
 // h5gg: searchNumber('1016018816','I32','0x100000000','0x160000000') → editAll('180','I32')
 // ── No Recoil — loop каждые 2 сек, ловит новые оружия ───────────────
-// scan: I32=1016018816 → patch: 180  (range 0x100000000..0x160000000)
+// scan: I32=1016018816 → patch: 180
+// Restore убран — запись по устаревшим адресам после смены оружия/выхода = краш
 - (void)toggleNoRecoil:(CustomSwitch *)sender {
     isNoRecoil = sender.isOn;
     if (isNoRecoil) {
-        // Запускаем фоновый loop
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             const int MAX   = 4096;
             int32_t search  = 1016018816;
@@ -1161,19 +1161,13 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
                                          &search, sizeof(search), addrs, MAX);
                 for (int i = 0; i < count; i++)
                     WriteAddr<int32_t>((long)addrs[i], patch);
-                // Ждём 2 секунды перед следующим сканом
-                [NSThread sleepForTimeInterval:2.0];
+                // Sleep прерываемый — проверяем флаг каждые 100мс
+                for (int s = 0; s < 20 && isNoRecoil; s++)
+                    [NSThread sleepForTimeInterval:0.1];
             }
-            // Восстанавливаем при выключении — один последний скан
-            int count = scanForValue(0x100000000, 0x160000000,
-                                     &patch, sizeof(patch), addrs, MAX);
-            for (int i = 0; i < count; i++)
-                WriteAddr<int32_t>((long)addrs[i], search);
             free(addrs);
-            NSLog(@"[NoRecoil] stopped & restored");
         });
     }
-    // isNoRecoil = NO уже установлен — loop сам остановится
 }
 
 // ── Speed — loop каждые 2 сек, ловит новые оружия/регионы ───────────
@@ -1182,24 +1176,19 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     isSpeedActive = sender.isOn;
     if (isSpeedActive) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            const int MAX    = 4096;
-            int64_t search   = 4397530849764387586LL;
-            int64_t patch    = 4366458311853765201LL;
-            uint64_t *addrs  = (uint64_t *)malloc(MAX * sizeof(uint64_t));
+            const int MAX   = 4096;
+            int64_t search  = 4397530849764387586LL;
+            int64_t patch   = 4366458311853765201LL;
+            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
             while (isSpeedActive) {
                 int count = scanForValue(0x100000000, 0x200000000,
                                          &search, sizeof(search), addrs, MAX);
                 for (int i = 0; i < count; i++)
                     WriteAddr<int64_t>((long)addrs[i], patch);
-                [NSThread sleepForTimeInterval:2.0];
+                for (int s = 0; s < 20 && isSpeedActive; s++)
+                    [NSThread sleepForTimeInterval:0.1];
             }
-            // Восстанавливаем
-            int count = scanForValue(0x100000000, 0x200000000,
-                                     &patch, sizeof(patch), addrs, MAX);
-            for (int i = 0; i < count; i++)
-                WriteAddr<int64_t>((long)addrs[i], search);
             free(addrs);
-            NSLog(@"[Speed] stopped & restored");
         });
     }
 }
