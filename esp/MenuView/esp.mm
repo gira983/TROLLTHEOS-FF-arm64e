@@ -770,9 +770,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)setupMenuUI {
     CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
     CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
-    CGFloat menuWidth  = MIN(520, screenW - 10);
-    CGFloat menuHeight = MIN(360, screenH * 0.52);
-    CGFloat scale = menuWidth / 520.0;
+    CGFloat menuWidth  = MIN(380, screenW - 20);
+    CGFloat menuHeight = MIN(320, screenH * 0.46);
+    CGFloat scale = menuWidth / 380.0;
 
     // ── КОНТЕЙНЕР ─────────────────────────────────────────────────────
     menuContainer = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth, menuHeight)];
@@ -902,9 +902,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [menuContainer addSubview:sidebar];
 
     // ── ОБЩИЕ РАЗМЕРЫ ДЛЯ ТАБОВ ──────────────────────────────────────
-    CGFloat tabX = sbW;
+    CGFloat tabX = sbW + 1; // +1 для border сайдбара
     CGFloat tabY = hdrH;
-    CGFloat tabW = menuWidth - sbW;
+    CGFloat tabW = menuWidth - sbW - 1;
     CGFloat tabH = menuHeight - hdrH;
 
     // ══ MAIN TAB ══════════════════════════════════════════════════════
@@ -1419,7 +1419,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     } completion:^(BOOL finished) {
         [self centerMenu];
     }];
-    [self updatePreviewVisibility];
 }
 
 - (void)hideMenu {
@@ -1463,14 +1462,49 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
     UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
     CGPoint translation = [gesture translationInView:self];
-    
+
     if (gesture.state == UIGestureRecognizerStateBegan ||
         gesture.state == UIGestureRecognizerStateChanged) {
-        viewToMove.center = CGPointMake(
-            viewToMove.center.x + translation.x,
-            viewToMove.center.y + translation.y
-        );
+
+        CGFloat newX = viewToMove.center.x + translation.x;
+        CGFloat newY = viewToMove.center.y + translation.y;
         [gesture setTranslation:CGPointZero inView:self];
+
+        CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
+        CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
+        CGFloat halfW = viewToMove.bounds.size.width  / 2.0;
+        CGFloat halfH = viewToMove.bounds.size.height / 2.0;
+        CGFloat margin = 8.0;
+
+        // Ограничиваем — минимум margin пикселей внутри экрана
+        newX = MAX(halfW * 0.3 + margin, MIN(newX, screenW - halfW * 0.3 - margin));
+        newY = MAX(halfH * 0.3 + margin, MIN(newY, screenH - halfH * 0.3 - margin));
+
+        viewToMove.center = CGPointMake(newX, newY);
+    }
+
+    // При завершении жеста — плавно вернуть если вышло за экран
+    if (gesture.state == UIGestureRecognizerStateEnded ||
+        gesture.state == UIGestureRecognizerStateCancelled) {
+
+        CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
+        CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
+        CGFloat minVisX = viewToMove.bounds.size.width  * 0.3;
+        CGFloat minVisY = viewToMove.bounds.size.height * 0.3;
+        CGFloat margin  = 8.0;
+
+        CGFloat cx = viewToMove.center.x;
+        CGFloat cy = viewToMove.center.y;
+        cx = MAX(minVisX + margin, MIN(cx, screenW - minVisX - margin));
+        cy = MAX(minVisY + margin, MIN(cy, screenH - minVisY - margin));
+
+        if (!CGPointEqualToPoint(viewToMove.center, CGPointMake(cx, cy))) {
+            [UIView animateWithDuration:0.25
+                           delay:0
+                         options:UIViewAnimationOptionCurveEaseOut
+                      animations:^{ viewToMove.center = CGPointMake(cx, cy); }
+                      completion:nil];
+        }
     }
 }
 
