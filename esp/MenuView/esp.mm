@@ -1387,27 +1387,36 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    if (self.superview) {
-        CGRect newFrame = self.superview.bounds;
-        // Меняем frame только если размер реально изменился (поворот экрана)
-        if (!CGSizeEqualToSize(self.frame.size, newFrame.size)) {
-            self.frame = newFrame;
-            CGRect screenBounds = self.bounds;
-            if (menuContainer && !menuContainer.hidden) {
-                menuContainer.center = CGPointMake(screenBounds.size.width / 2, screenBounds.size.height / 2);
-            }
+
+    CGFloat W = self.bounds.size.width;
+    CGFloat H = self.bounds.size.height;
+
+    // При повороте экрана — центрируем меню и возвращаем кнопку в безопасное место
+    static CGSize _lastSize;
+    if (!CGSizeEqualToSize(_lastSize, CGSizeMake(W, H))) {
+        _lastSize = CGSizeMake(W, H);
+
+        // Меню — по центру
+        if (menuContainer) {
+            [UIView animateWithDuration:0.3 animations:^{
+                self->menuContainer.center = CGPointMake(W / 2.0, H / 2.0);
+            }];
         }
-    }
-    if (floatingButton) {
-        CGRect sb = self.bounds;
-        CGPoint btnCenter = floatingButton.center;
-        CGFloat halfW = floatingButton.bounds.size.width / 2;
-        CGFloat halfH = floatingButton.bounds.size.height / 2;
-        if (btnCenter.x < halfW) btnCenter.x = halfW;
-        if (btnCenter.x > sb.size.width - halfW) btnCenter.x = sb.size.width - halfW;
-        if (btnCenter.y < halfH) btnCenter.y = halfH;
-        if (btnCenter.y > sb.size.height - halfH) btnCenter.y = sb.size.height - halfH;
-        floatingButton.center = btnCenter;
+
+        // Кнопка — прижимаем к левому верхнему углу с отступом
+        if (floatingButton) {
+            CGFloat btnW = floatingButton.bounds.size.width;
+            CGFloat btnH = floatingButton.bounds.size.height;
+            CGFloat margin = 20.0;
+            // Если кнопка вышла за новые границы — возвращаем, иначе оставляем на месте
+            CGFloat cx = floatingButton.center.x;
+            CGFloat cy = floatingButton.center.y;
+            cx = MAX(btnW / 2 + margin, MIN(cx, W - btnW / 2 - margin));
+            cy = MAX(btnH / 2 + margin, MIN(cy, H - btnH / 2 - margin));
+            [UIView animateWithDuration:0.3 animations:^{
+                self->floatingButton.center = CGPointMake(cx, cy);
+            }];
+        }
     }
 }
 
@@ -1434,12 +1443,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)centerMenu {
-    // Конвертируем window bounds в локальные координаты self (учитывает rotation transform)
-    CGRect localBounds = [UIScreen mainScreen].bounds;
-    if (self.window) {
-        localBounds = [self convertRect:self.window.bounds fromView:self.window];
-    }
-    menuContainer.center = CGPointMake(localBounds.size.width / 2, localBounds.size.height / 2);
+    CGFloat w = self.bounds.size.width;
+    CGFloat h = self.bounds.size.height;
+    menuContainer.center = CGPointMake(w / 2.0, h / 2.0);
 }
 // Обработчики tap — используем gesture recognizers вместо ручного touchesEnded
 // Это надёжно работает со всей иерархией UIScrollView/PassThroughScrollView
@@ -1480,12 +1486,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (gesture.state == UIGestureRecognizerStateEnded ||
         gesture.state == UIGestureRecognizerStateCancelled) {
 
-        // self может быть повёрнута трансформом (landscape) — берём реальные границы
-        // через конвертацию window.bounds в локальные координаты self
-        CGRect windowBounds = self.window ? self.window.bounds : [UIScreen mainScreen].bounds;
-        CGRect localBounds = [self convertRect:windowBounds fromView:self.window];
-        CGFloat containerW = localBounds.size.width;
-        CGFloat containerH = localBounds.size.height;
+        // self.bounds актуален — autoresizingMask растягивает MenuView при повороте
+        CGFloat containerW = self.bounds.size.width;
+        CGFloat containerH = self.bounds.size.height;
         CGFloat halfW = viewToMove.bounds.size.width  / 2.0;
         CGFloat halfH = viewToMove.bounds.size.height / 2.0;
         CGFloat margin = 4.0;
@@ -1494,8 +1497,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         CGFloat cy = viewToMove.center.y;
 
         // Хотя бы половина view должна быть видна
-        cx = MAX(halfW * 0.5 + margin, MIN(cx, containerW - halfW * 0.5 - margin));
-        cy = MAX(halfH * 0.5 + margin, MIN(cy, containerH - halfH * 0.5 - margin));
+        // Меню полностью внутри экрана при отпускании
+        cx = MAX(halfW + margin, MIN(cx, containerW - halfW - margin));
+        cy = MAX(halfH + margin, MIN(cy, containerH - halfH - margin));
 
         [UIView animateWithDuration:0.3
                                delay:0
