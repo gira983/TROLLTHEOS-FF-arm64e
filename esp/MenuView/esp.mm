@@ -1434,11 +1434,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)centerMenu {
-    CGRect bounds = self.bounds;
-    if (CGRectIsEmpty(bounds)) {
-        bounds = [UIScreen mainScreen].bounds;
+    // Конвертируем window bounds в локальные координаты self (учитывает rotation transform)
+    CGRect localBounds = [UIScreen mainScreen].bounds;
+    if (self.window) {
+        localBounds = [self convertRect:self.window.bounds fromView:self.window];
     }
-    menuContainer.center = CGPointMake(bounds.size.width / 2, bounds.size.height / 2);
+    menuContainer.center = CGPointMake(localBounds.size.width / 2, localBounds.size.height / 2);
 }
 // Обработчики tap — используем gesture recognizers вместо ручного touchesEnded
 // Это надёжно работает со всей иерархией UIScrollView/PassThroughScrollView
@@ -1467,46 +1468,42 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     if (gesture.state == UIGestureRecognizerStateBegan ||
         gesture.state == UIGestureRecognizerStateChanged) {
-
-        CGFloat newX = viewToMove.center.x + translation.x;
-        CGFloat newY = viewToMove.center.y + translation.y;
+        // Во время перетаскивания — полная свобода, никаких ограничений
+        viewToMove.center = CGPointMake(
+            viewToMove.center.x + translation.x,
+            viewToMove.center.y + translation.y
+        );
         [gesture setTranslation:CGPointZero inView:self];
-
-        CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
-        CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
-        CGFloat halfW = viewToMove.bounds.size.width  / 2.0;
-        CGFloat halfH = viewToMove.bounds.size.height / 2.0;
-        CGFloat minShow = 44.0; // минимум 44pt должно быть видно
-
-        // Не даём уйти так чтобы ничего не было видно на экране
-        newX = MAX(minShow - halfW, MIN(newX, screenW - minShow + halfW));
-        newY = MAX(minShow - halfH, MIN(newY, screenH - minShow + halfH));
-
-        viewToMove.center = CGPointMake(newX, newY);
     }
 
-    // При завершении жеста — плавно вернуть если вышло за экран
+    // При отпускании — плавно возвращаем в экран
     if (gesture.state == UIGestureRecognizerStateEnded ||
         gesture.state == UIGestureRecognizerStateCancelled) {
 
-        CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
-        CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
-        CGFloat halfW   = viewToMove.bounds.size.width  / 2.0;
-        CGFloat halfH   = viewToMove.bounds.size.height / 2.0;
-        CGFloat minShow = 44.0;
+        // self может быть повёрнута трансформом (landscape) — берём реальные границы
+        // через конвертацию window.bounds в локальные координаты self
+        CGRect windowBounds = self.window ? self.window.bounds : [UIScreen mainScreen].bounds;
+        CGRect localBounds = [self convertRect:windowBounds fromView:self.window];
+        CGFloat containerW = localBounds.size.width;
+        CGFloat containerH = localBounds.size.height;
+        CGFloat halfW = viewToMove.bounds.size.width  / 2.0;
+        CGFloat halfH = viewToMove.bounds.size.height / 2.0;
+        CGFloat margin = 4.0;
 
         CGFloat cx = viewToMove.center.x;
         CGFloat cy = viewToMove.center.y;
-        cx = MAX(minShow - halfW, MIN(cx, screenW - minShow + halfW));
-        cy = MAX(minShow - halfH, MIN(cy, screenH - minShow + halfH));
 
-        if (!CGPointEqualToPoint(viewToMove.center, CGPointMake(cx, cy))) {
-            [UIView animateWithDuration:0.25
-                           delay:0
-                         options:UIViewAnimationOptionCurveEaseOut
-                      animations:^{ viewToMove.center = CGPointMake(cx, cy); }
-                      completion:nil];
-        }
+        // Хотя бы половина view должна быть видна
+        cx = MAX(halfW * 0.5 + margin, MIN(cx, containerW - halfW * 0.5 - margin));
+        cy = MAX(halfH * 0.5 + margin, MIN(cy, containerH - halfH * 0.5 - margin));
+
+        [UIView animateWithDuration:0.3
+                               delay:0
+              usingSpringWithDamping:0.75
+               initialSpringVelocity:0.5
+                             options:UIViewAnimationOptionCurveEaseOut
+                          animations:^{ viewToMove.center = CGPointMake(cx, cy); }
+                          completion:nil];
     }
 }
 
