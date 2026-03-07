@@ -119,18 +119,28 @@ bool _read(long addr, void *buffer, int len)
 bool _write(long addr, const void *buffer, int len)
 {
     if (!isVaildPtr(addr)) return false;
+    if (get_task == MACH_PORT_NULL) return false;
 
-    kern_return_t kr = vm_write(
-        get_task,
-        (vm_address_t)addr,
-        (vm_offset_t)buffer,
-        (mach_msg_type_number_t)len
-    );
-
-    if (kr != KERN_SUCCESS) {
+    // Проверяем что регион существует и доступен для записи
+    // vm_protect временно делает страницу writable если нужно
+    vm_address_t region = (vm_address_t)addr;
+    vm_size_t    rsize  = 0;
+    vm_region_basic_info_data_64_t info;
+    mach_msg_type_number_t infoCnt = VM_REGION_BASIC_INFO_COUNT_64;
+    mach_port_t obj = MACH_PORT_NULL;
+    kern_return_t kr = vm_region_64(get_task, &region, &rsize,
+                                    VM_REGION_BASIC_INFO_64,
+                                    (vm_region_info_t)&info, &infoCnt, &obj);
+    if (kr != KERN_SUCCESS) return false;  // регион не существует — не пишем
+    // addr должен попасть в найденный регион
+    if ((vm_address_t)addr < region || (vm_address_t)addr + len > region + rsize)
         return false;
-    }
-    return true;
+
+    kr = vm_write(get_task,
+                  (vm_address_t)addr,
+                  (vm_offset_t)buffer,
+                  (mach_msg_type_number_t)len);
+    return kr == KERN_SUCCESS;
 }
 
 
