@@ -1250,19 +1250,7 @@ bool get_IsFiring(uint64_t player) {
     return ReadAddr<bool>(player + OFF_FIRING);
 }
 
-// get_IsDieing — через PropertyData pool (тот же путь что HP varID=0,1)
-// varID=2 = knocked state: 0=жив, 1=нокнут лежит ждёт ревайва
-// Если HP работает — этот механизм тоже работает (одна и та же цепочка чтений)
-bool get_IsDieing(uint64_t player) {
-    if (!isVaildPtr(player)) return false;
-    uint64_t pool = ReadAddr<uint64_t>(player + 0x68);
-    if (!isVaildPtr(pool)) return false;
-    uint64_t list = ReadAddr<uint64_t>(pool + 0x10);
-    if (!isVaildPtr(list)) return false;
-    uint64_t item = ReadAddr<uint64_t>(list + 0x8 * 2 + 0x20);
-    if (!isVaildPtr(item)) return false;
-    return ReadAddr<int>(item + 0x18) == 1;
-}
+// knocked detection — inline в renderESP loop (ReadAddr<bool> @ 0xA0, 0x1110)
 
 // Pool текстовых слоёв — берёт существующий или создаёт новый
 - (CATextLayer *)textLayer {
@@ -1362,11 +1350,14 @@ bool get_IsDieing(uint64_t player) {
 
         int CurHP  = get_CurHP(PawnObject);
         int MaxHP  = get_MaxHP(PawnObject);
-        // Полностью мёртвых и неинициализированных пропускаем
+        // Мёртвые и неинициализированные — пропускаем полностью (и ESP и aimbot)
         if (MaxHP <= 0) continue;
-        // Нокнутый = вызов IL2CPP метода get_IsDieing() напрямую
-        // Точнее field read — но это официальный геттер из дампа
-        bool isKnocked = get_IsDieing(PawnObject);
+        if (CurHP <= 0) continue;  // трупы (HP=0) — не рендерить, не целиться
+        // Нокнутый — прямые field reads из IL2CPP дампа:
+        // IsFrozenKnockDown  @ 0xA0   — не изменился между версиями
+        // IsKnockedDownBleed @ 0x1110 — основной флаг нокдауна (было 0x1040)
+        bool isKnocked = ReadAddr<bool>(PawnObject + 0xA0)
+                      || ReadAddr<bool>(PawnObject + 0x1110);
 
         // Читаем голову — для дистанции и aimbot
         uint64_t headNode = getHead(PawnObject);
