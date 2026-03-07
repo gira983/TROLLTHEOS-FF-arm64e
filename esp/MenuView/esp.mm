@@ -1398,6 +1398,8 @@ bool get_IsFiring(uint64_t player) {
     CATextLayer *t = [CATextLayer layer];
     t.contentsScale = [UIScreen mainScreen].scale;
     t.allowsFontSubpixelQuantization = YES;
+    // Используем bold системный шрифт для чёткости ESP текста
+    t.font = (__bridge CFTypeRef)[UIFont boldSystemFontOfSize:10].fontName;
     [self.layer addSublayer:t];
     [_textPool addObject:t];
     _textPoolIndex++;
@@ -1622,12 +1624,12 @@ bool get_IsFiring(uint64_t player) {
                 if (!isKnocked)
                     CGPathAddRect(fillPath, nil, CGRectMake(hpBX, hpBY+boxH-fillH, hpBW, fillH));
 
-                // HP текст — цвет совпадает с полоской
+                // HP текст — только текущее HP, без MaxHP
                 float hr=(ratio>0.6f)?0.15f:1.f, hg=(ratio>0.6f)?0.9f:(ratio>0.3f?0.75f:0.2f), hb=(ratio>0.6f)?0.35f:(ratio>0.3f?0.f:0.2f);
                 char hpBuf[32];
                 if (isKnocked) snprintf(hpBuf,sizeof(hpBuf),"KO");
-                else           snprintf(hpBuf,sizeof(hpBuf),"%d/%d",CurHP,MaxHP);
-                addText(hpBuf, hpBX-2.f, hpBY-9.f, 48.f, 9.f, 7.f, hr,hg,hb,1.f, 0.f, 0);
+                else           snprintf(hpBuf,sizeof(hpBuf),"%d",CurHP);
+                addText(hpBuf, hpBX-2.f, hpBY-10.f, 48.f, 10.f, 9.f, hr,hg,hb,1.f, 0.f, 1);
             }
         }
 
@@ -1638,7 +1640,7 @@ bool get_IsFiring(uint64_t player) {
             float nW = MAX(boxW, 60.f);
             float nY = by - 12.f - (isHealth ? 10.f : 0.f);
             char nb[48]; strncpy(nb, ns, 47); nb[47]=0;
-            addText(nb, bx+(boxW-nW)*0.5f, nY, nW, 11.f, 9.f, 0.95f,0.95f,0.95f,1.f, 0.45f, 1);
+            addText(nb, bx+(boxW-nW)*0.5f, nY, nW, 11.f, 10.f, 1.f,1.f,1.f,1.f, 0.5f, 1);
         }
 
         // ── DISTANCE ─────────────────────────────────────────────────
@@ -1649,7 +1651,7 @@ bool get_IsFiring(uint64_t player) {
             // Ширина — минимум 50pt чтобы текст не обрезался
             float distW = MAX(boxW, 50.f);
             float distX = bx + (boxW - distW) * 0.5f; // центрируем относительно бокса
-            addText(db, distX, by+boxH+2.f, distW, 11.f, 8.5f, acR,acG,acB,acA, 0.f, 1);
+            addText(db, distX, by+boxH+2.f, distW, 11.f, 9.f, acR,acG,acB,acA, 0.f, 1);
         }
 
         // ── ESP LINE ─────────────────────────────────────────────────
