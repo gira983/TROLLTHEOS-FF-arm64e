@@ -94,7 +94,8 @@ static int  lineOrigin = 1;    // 0 = Top, 1 = Center, 2 = Bottom
 // --- Aimbot Config ---
 // ── Обычный Aimbot ──────────────────────────────────────────────────
 static bool  isAimbot      = NO;
-static bool  isInMatch     = NO;  // авто: YES в матче, NO в лобби/главный экран
+static bool  isInMatch     = NO;
+static float espDistance   = 600.0f;  // дальность ESP (box/hp/name/line)
 static float aimFov        = 150.0f;
 static float aimDistance   = 200.0f;
 
@@ -141,8 +142,11 @@ static bool isSpeedActive = NO;
 }
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     CGPoint pt = [touches.anyObject locationInView:self];
-    if (pt.x < -10 || pt.x > self.bounds.size.width + 10 ||
-        pt.y < -10 || pt.y > self.bounds.size.height + 10) {
+    // bounds проверяем с запасом — для HUD overlay view
+    CGFloat bW = self.bounds.size.width  > 10 ? self.bounds.size.width  : self.superview.bounds.size.width;
+    CGFloat bH = self.bounds.size.height > 10 ? self.bounds.size.height : self.superview.bounds.size.height;
+    if (pt.x < -10 || pt.x > bW + 10 ||
+        pt.y < -10 || pt.y > bH + 10) {
         _touchActive = NO;
     }
 }
@@ -498,15 +502,18 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)didMoveToWindow {
     [super didMoveToWindow];
     if (self.window) {
-        // Теперь bounds точно известны — центрируем меню и кнопку
-        CGFloat W = self.bounds.size.width;
-        CGFloat H = self.bounds.size.height;
-        if (W > 10 && H > 10) {
-            menuContainer.center = CGPointMake(W / 2.0, H / 2.0);
-            // Кнопка — левый верхний + небольшой отступ
-            CGFloat btnSz = floatingButton.bounds.size.width;
-            floatingButton.center = CGPointMake(btnSz / 2.0 + 20, btnSz / 2.0 + 60);
-        }
+        // Откладываем на следующий runloop — гарантируем что layout уже прошёл
+        dispatch_async(dispatch_get_main_queue(), ^{
+            CGFloat W = self.bounds.size.width;
+            CGFloat H = self.bounds.size.height;
+            if (W < 10 || H < 10) {
+                W = [UIScreen mainScreen].bounds.size.width;
+                H = [UIScreen mainScreen].bounds.size.height;
+            }
+            self->menuContainer.center = CGPointMake(W / 2.0, H / 2.0);
+            CGFloat btnSz = self->floatingButton.bounds.size.width;
+            self->floatingButton.center = CGPointMake(btnSz / 2.0 + 20, btnSz / 2.0 + 60);
+        });
     }
 }
 
@@ -1079,7 +1086,61 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     [self addSliderTo:extraTabContainer label:@"FOV RADIUS" atY:ey width:eW minVal:10 maxVal:400 value:aimFov format:@"%.0f" onChanged:^(float v){ aimFov = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM DISTANCE" atY:ey width:eW minVal:10 maxVal:500 value:aimDistance format:@"%.0fm" onChanged:^(float v){ aimDistance = v; }]; ey += 54;
-    [self addSliderTo:extraTabContainer label:@"AIM SPEED" atY:ey width:eW minVal:0.05 maxVal:1.0 value:aimSpeed format:@"%.2f" onChanged:^(float v){ aimSpeed = v; }];
+    [self addSliderTo:extraTabContainer label:@"AIM SPEED" atY:ey width:eW minVal:0.05 maxVal:1.0 value:aimSpeed format:@"%.2f" onChanged:^(float v){ aimSpeed = v; }]; ey += 54;
+
+    // ── ESP DISTANCE слайдер с отметками ─────────────────────────────
+    {
+        UIView *espSec = [self makeSectionHeaderWithTitle:@"ESP DISTANCE" atY:ey width:eW];
+        [extraTabContainer addSubview:espSec];
+
+        // Значение справа от заголовка
+        UILabel *espValLbl = [[UILabel alloc] initWithFrame:CGRectMake(eW - 60, ey, 54, 14)];
+        espValLbl.text = [NSString stringWithFormat:@"%.0fm", espDistance];
+        espValLbl.textColor = COL_ACC;
+        espValLbl.font = [UIFont fontWithName:@"Courier" size:9];
+        espValLbl.textAlignment = NSTextAlignmentRight;
+        [extraTabContainer addSubview:espValLbl];
+        ey += 18;
+
+        // Слайдер
+        HUDSlider *espSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 32)];
+        espSlider.minimumValue = 50;
+        espSlider.maximumValue = 1000;
+        espSlider.value = espDistance;
+        espSlider.minimumTrackTintColor = COL_ACC;
+        espSlider.thumbTintColor = [UIColor colorWithRed:0.88 green:0.88 blue:0.95 alpha:1.0];
+        UILabel * __unsafe_unretained espRef = espValLbl;
+        espSlider.onValueChanged = ^(float v) {
+            espDistance = v;
+            espRef.text = [NSString stringWithFormat:@"%.0fm", v];
+        };
+        [extraTabContainer addSubview:espSlider];
+        ey += 36;
+
+        // Отметки: 50м / 200м / 400м / 600м / 800м / 1000м
+        NSArray *marks = @[@50, @200, @400, @600, @800, @1000];
+        float sliderW = eW - 20;
+        float sliderX = 10;
+        float range = 1000.0f - 50.0f;
+        for (NSNumber *m in marks) {
+            float val = m.floatValue;
+            float pct = (val - 50.0f) / range;
+            float mx  = sliderX + pct * sliderW;
+
+            // Вертикальная черта
+            UIView *tick = [[UIView alloc] initWithFrame:CGRectMake(mx - 0.5f, ey, 1, 5)];
+            tick.backgroundColor = COL_DIM;
+            [extraTabContainer addSubview:tick];
+
+            // Текст под чертой
+            UILabel *tl = [[UILabel alloc] initWithFrame:CGRectMake(mx - 18, ey + 6, 36, 10)];
+            tl.text = (val >= 1000) ? @"1km" : [NSString stringWithFormat:@"%.0f", val];
+            tl.textColor = COL_DIM;
+            tl.font = [UIFont fontWithName:@"Courier" size:7];
+            tl.textAlignment = NSTextAlignmentCenter;
+            [extraTabContainer addSubview:tl];
+        }
+    }
 
     // ══ CONFIG TAB ════════════════════════════════════════════════════
     settingTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
@@ -1610,10 +1671,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (_espBusy) return;
     _espBusy = YES;
 
-    // FOV круг — только в матче (авто-рубильник)
+    // FOV круг — только в матче, self.bounds (как в старом рабочем коде)
     if (isAimbot && isInMatch) {
-        float cx = self.bounds.size.width / 2;
-        float cy = self.bounds.size.height / 2;
+        float cx = self.bounds.size.width / 2.0f;
+        float cy = self.bounds.size.height / 2.0f;
         float radius = aimFov;
         _fovLayer.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
         _fovLayer.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy)
@@ -1691,12 +1752,11 @@ bool get_IsFiring(uint64_t player) {
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
 
-    // ── Авто-детекция матча ──────────────────────────────────────────
-    // Читаем IsMatchStarted из GameFacade_Static+0x1D9
+    // Авто-детекция матча (IsMatchStarted @ GameFacade_Static+0x1D9)
     uint64_t _gfTI = ReadAddr<uint64_t>(Moudule_Base + ENCRYPTOFFSET("0xA4D2968"));
     uint64_t _gfST = ReadAddr<uint64_t>(_gfTI + ENCRYPTOFFSET("0xB8"));
     bool nowInMatch = ReadAddr<bool>(_gfST + 0x1D9);
-    // Fallback: если флаг false но playerList валиден — туториал/спецрежим
+    // Fallback — туториал/спецрежим: флаг false но игроки есть
     if (!nowInMatch) {
         uint64_t _plist = ReadAddr<uint64_t>(match + ENCRYPTOFFSET("0x120"));
         uint64_t _parr  = ReadAddr<uint64_t>(_plist + ENCRYPTOFFSET("0x28"));
@@ -1707,7 +1767,7 @@ bool get_IsFiring(uint64_t player) {
         }
     }
     isInMatch = nowInMatch;
-    // Вне матча — очищаем ESP и выходим
+    // Вне матча — очищаем слои и выходим
     if (!isInMatch) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [CATransaction begin]; [CATransaction setDisableActions:YES];
@@ -1730,8 +1790,14 @@ bool get_IsFiring(uint64_t player) {
     if (totalCount <= 0 || totalCount > 64) totalCount = 64;
 
     float *matrix = GetViewMatrix(camera);
-    float vW = self.bounds.size.width;
-    float vH = self.bounds.size.height;
+    // Берём РЕАЛЬНЫЙ размер отображения — self.bounds меняется с поворотом
+    // superview (_blurView) имеет autoresizingMask и правильный bounds после поворота
+    float vW = (float)self.bounds.size.width;
+    float vH = (float)self.bounds.size.height;
+    if (vW < 10 || vH < 10) {
+        vW = self.superview ? (float)self.superview.bounds.size.width  : [UIScreen mainScreen].bounds.size.width;
+        vH = self.superview ? (float)self.superview.bounds.size.height : [UIScreen mainScreen].bounds.size.height;
+    }
     CGPoint center = CGPointMake(vW * 0.5f, vH * 0.5f);
 
     // Paths по цветовым зонам: Near(<40м) Mid(<100м) Far(>=100м) Knocked
@@ -1794,7 +1860,7 @@ bool get_IsFiring(uint64_t player) {
 
         float dis = Vector3::Distance(myLoc, HeadPos);
         // Убираем лишний cut-off — ESP работает до 600м
-        if (dis > 600.0f) continue;
+        if (dis > espDistance) continue;
 
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
