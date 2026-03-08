@@ -268,12 +268,14 @@ int main(int argc, char *argv[])
                 pid_t pid = (pid_t)[pidString intValue];
                 if (kill(pid, 0) == 0) {
                     // Убиваем только если это наш процесс
-                    char procName[256] = {0};
-                    int nameLen = proc_name(pid, procName, sizeof(procName));
-                    NSString *myExec = [[[NSBundle mainBundle] executablePath] lastPathComponent];
-                    if (nameLen > 0 && myExec &&
-                        strncmp(procName, myExec.UTF8String, strlen(myExec.UTF8String)) == 0) {
-                        kill(pid, SIGKILL);
+                    struct kinfo_proc kp;
+                    size_t kpSize = sizeof(kp);
+                    int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)pid};
+                    if (sysctl(mib, 4, &kp, &kpSize, NULL, 0) == 0 && kpSize > 0) {
+                        NSString *myExec = [[[NSBundle mainBundle] executablePath] lastPathComponent];
+                        if (myExec && strncmp(kp.kp_proc.p_comm, myExec.UTF8String, MAXCOMLEN) == 0) {
+                            kill(pid, SIGKILL);
+                        }
                     }
                 }
                 unlink(GetPIDFilePath().UTF8String);
@@ -290,14 +292,15 @@ int main(int argc, char *argv[])
                 // Проверяем что процесс с этим PID жив И это именно наш процесс
                 // (не переиспользованный PID другого процесса)
                 if (kill(pid, 0) == 0) {
-                    // Дополнительная проверка через proc_name
-                    char procName[256] = {0};
-                    int nameLen = proc_name(pid, procName, sizeof(procName));
-                    // Имя исполняемого файла нашего приложения
-                    NSString *myExec = [[[NSBundle mainBundle] executablePath] lastPathComponent];
-                    if (nameLen > 0 && myExec &&
-                        strncmp(procName, myExec.UTF8String, strlen(myExec.UTF8String)) == 0) {
-                        return EXIT_FAILURE; // HUD точно запущен
+                    // Проверяем что это наш процесс через sysctl
+                    struct kinfo_proc kp;
+                    size_t kpSize = sizeof(kp);
+                    int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)pid};
+                    if (sysctl(mib, 4, &kp, &kpSize, NULL, 0) == 0 && kpSize > 0) {
+                        NSString *myExec = [[[NSBundle mainBundle] executablePath] lastPathComponent];
+                        if (myExec && strncmp(kp.kp_proc.p_comm, myExec.UTF8String, MAXCOMLEN) == 0) {
+                            return EXIT_FAILURE; // HUD точно запущен
+                        }
                     }
                 }
                 // PID устарел или чужой — удаляем файл
