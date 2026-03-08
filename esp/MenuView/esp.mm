@@ -1050,7 +1050,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     ay += 4;
     UIView *aSec1 = [self makeSectionHeaderWithTitle:@"MODE" atY:ay width:aW];
     [aimTabContainer addSubview:aSec1]; ay += 16;
-    // Выбор цели: минимальный HP в FOV (как в оригинальном проекте)
+    [self addSegmentTo:aimTabContainer atY:ay title:@"" options:@[@"Closest Player", @"Crosshair"] selectedRef:&aimMode tag:10]; ay += 30;
 
     ay += 4;
     UIView *aSec2 = [self makeSectionHeaderWithTitle:@"TARGET" atY:ay width:aW];
@@ -1595,8 +1595,11 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    // Только 0x53C — как в оригинальном проекте (проверено рабочим)
-    WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);
+    // Пишем в оба: вход (0x53C) и выход (0x172C)
+    // Игра: читает 0x53C → интерполирует → пишет в 0x172C
+    // Мы перекрываем оба — нет окна для конкурентной записи игрой
+    WriteAddr<Quaternion>(player + OFF_ROTATION,    rotation);  // 0x53C — вход
+    WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);  // 0x172C — выход/пули
 }
 
 // Slerp от текущего угла к целевому — без прыжка через тело
@@ -1723,7 +1726,7 @@ bool get_IsFiring(uint64_t player) {
     };
 
     uint64_t bestTarget = 0;
-    float    bestScore  = FLT_MAX; // комбинированный скор (HP + дистанция + прицел)
+    float    bestScore  = FLT_MAX;
     bool     isFire     = get_IsFiring(myPawnObject);
 
     for (int i = 0; i < totalCount; i++) {
@@ -1758,16 +1761,8 @@ bool get_IsFiring(uint64_t player) {
             float dx = ws.x - center.x, dy = ws.y - center.y;
             float d2 = sqrtf(dx*dx+dy*dy);
             if (d2 <= aimFov) {
-                // Комбинированный скор: 3 фактора с весами
-                //   HP ratio (0..1)     — чем меньше HP тем лучше,  вес 0.4
-                //   dis (0..aimDist)    — чем ближе тем лучше,      вес 0.3
-                //   d2/aimFov (0..1)    — чем ближе к прицелу лучше, вес 0.3
-                float maxHP   = (float)(ReadAddr<int>(PawnObject + 0x68) > 0 ? 200 : 200);
-                float hpScore  = (float)CurHP / 200.f;            // 0=мертвый 1=полный
-                float disScore = dis / aimDistance;                // 0=рядом 1=далеко
-                float fovScore = d2 / aimFov;                      // 0=центр 1=край FOV
-                float score    = hpScore * 0.4f + disScore * 0.3f + fovScore * 0.3f;
-                if (score < bestScore) { bestScore = score; bestTarget = PawnObject; }
+                float sc = (aimMode == 0) ? dis : d2;
+                if (sc < bestScore) { bestScore = sc; bestTarget = PawnObject; }
             }
         }
 
@@ -1786,7 +1781,7 @@ bool get_IsFiring(uint64_t player) {
             s_HeadTop.y < -200 || s_HeadTop.y > vH+200) continue;
 
         float boxH = fabsf(s_HeadTop.y - s_Toe.y);
-        if (boxH < 2.0f) continue;   // слишком маленький — за горизонтом
+        if (boxH < 6.0f) continue;   // слишком маленький — за горизонтом
         float boxW = boxH * 0.45f;
         float bx   = s_HeadTop.x - boxW * 0.5f;
         float by   = s_HeadTop.y;
@@ -1948,10 +1943,11 @@ bool get_IsFiring(uint64_t player) {
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
-        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget)) + Vector3(0,-0.15f,0);
+        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget)) + Vector3(0,-0.12f,0);
         else                   ap = getPositionExt(getHip(bestTarget));
-        // y_bias=0.1f — как в оригинальном рабочем проекте
-        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
+        // Snap прямо на цель — никакого Slerp, никакого y_bias для головы
+        // OFF_ROTATION (камера) + OFF_CURRENT_AIM (пули) — оба обновляются в set_aim
+        set_aim(myPawnObject, GetRotationToLocation(ap, 0.f, myLoc));
     }
 
 
