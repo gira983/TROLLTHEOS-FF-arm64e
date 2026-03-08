@@ -1660,8 +1660,9 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    WriteAddr<Quaternion>(player + OFF_ROTATION,     rotation);  // камера
-    WriteAddr<Quaternion>(player + OFF_CURRENT_AIM,  rotation);  // пули (silent aim fix)
+    // Пишем ТОЛЬКО в пульный офсет — камеру не трогаем чтобы не дрожала
+    // OFF_ROTATION (камера) управляется игрой, мы не конкурируем с ней
+    WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);
 }
 
 // Slerp от текущего угла к целевому — без прыжка через тело
@@ -1908,64 +1909,60 @@ bool get_IsFiring(uint64_t player) {
             CGPathAddLineToPoint(xp,nil,bx+boxW,by+boxH-cL);
         }
 
-        // ── HP BAR ───────────────────────────────────────────────────
+        // ── HP BAR — горизонтальная полоска прямо над головой ──────
         if (isHealth) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
                 float ratio  = fmaxf(0.f, fminf(1.f, (float)CurHP / MaxHP));
-                float hpBW   = 3.5f;
-                float hpBX   = bx - hpBW - 3.f;
-                float hpBY   = by;
-                CGPathAddRect(hpBgPath,   nil, CGRectMake(hpBX, hpBY, hpBW, boxH));
-                float fillH = boxH * ratio;
+                float hpBarH = 3.f;
+                float hpBarY = by - hpBarH - 2.f;  // прямо над головой (top бокса)
+                float hpBarX = bx;
+                float hpBarW = boxW;
+                // Фон полоски
+                CGPathAddRect(hpBgPath, nil, CGRectMake(hpBarX, hpBarY, hpBarW, hpBarH));
+                // Заливка
                 CGMutablePathRef fillPath = (ratio > 0.6f) ? hpFillGreenPath
                                           : (ratio > 0.3f) ? hpFillYellowPath : hpFillRedPath;
-                // Нокнутый — пустая полоска, только фон
                 if (!isKnocked)
-                    CGPathAddRect(fillPath, nil, CGRectMake(hpBX, hpBY+boxH-fillH, hpBW, fillH));
-
-                // HP цифра рисуется выше вместе с ником (см. ниже)
+                    CGPathAddRect(fillPath, nil, CGRectMake(hpBarX, hpBarY, hpBarW * ratio, hpBarH));
             }
         }
 
-        // ── NAME + HP цифра — над боксом, с фоном ──────────────────
+        // ── NAME (с фоном) + HP цифра (с фоном, только если isHealth) ──
         {
-            // HP цифра
-            int MaxHP = get_MaxHP(PawnObject);
-            char hpBuf[16];
-            float hpR, hpG, hpB;
-            if (isKnocked) {
-                snprintf(hpBuf, sizeof(hpBuf), "KO");
-                hpR=0.7f; hpG=0.3f; hpB=1.f;
-            } else if (MaxHP > 0) {
-                snprintf(hpBuf, sizeof(hpBuf), "%d/%d", CurHP, MaxHP);
-                float ratio = (float)CurHP / MaxHP;
-                hpR = (ratio > 0.6f) ? 0.15f : 1.f;
-                hpG = (ratio > 0.6f) ? 0.9f  : (ratio > 0.3f ? 0.75f : 0.2f);
-                hpB = (ratio > 0.6f) ? 0.35f : (ratio > 0.3f ? 0.f   : 0.2f);
-            } else {
-                snprintf(hpBuf, sizeof(hpBuf), "?");
-                hpR=0.7f; hpG=0.7f; hpB=0.7f;
-            }
-
             float rowW = MAX(boxW + 16.f, 72.f);
             float rowX = s_HeadTop.x - rowW * 0.5f;
+            float curY = by;  // стартуем от верха бокса, идём вверх
+
+            // HP полоска уже нарисована выше — текст идёт над ней
+            if (isHealth) {
+                // HP цифра — просто CurHP
+                int MaxHP = get_MaxHP(PawnObject);
+                char hpBuf[12];
+                float hpR, hpG, hpB;
+                if (isKnocked) {
+                    snprintf(hpBuf, sizeof(hpBuf), "KO");
+                    hpR=0.7f; hpG=0.3f; hpB=1.f;
+                } else if (MaxHP > 0) {
+                    snprintf(hpBuf, sizeof(hpBuf), "%d", CurHP);
+                    float ratio = (float)CurHP / MaxHP;
+                    hpR = (ratio > 0.6f) ? 0.15f : 1.f;
+                    hpG = (ratio > 0.6f) ? 0.9f  : (ratio > 0.3f ? 0.75f : 0.2f);
+                    hpB = (ratio > 0.6f) ? 0.35f : (ratio > 0.3f ? 0.0f  : 0.2f);
+                } else {
+                    snprintf(hpBuf, sizeof(hpBuf), "?");
+                    hpR=0.7f; hpG=0.7f; hpB=0.7f;
+                }
+                curY -= 7.f;  // отступ от полоски HP
+                addText(hpBuf, rowX, curY - 11.f, rowW, 11.f, 9.f, hpR, hpG, hpB, 0.95f, 0.55f, 1);
+                curY -= 13.f;
+            }
 
             if (isName) {
-                // Строка 1: никнейм с тёмным фоном
                 NSString *name = GetNickName(PawnObject);
                 const char *ns = (name && name.length) ? [name UTF8String] : "?";
                 char nb[48]; strncpy(nb, ns, 47); nb[47] = 0;
-                float nameY = by - 24.f;
-                addText(nb, rowX, nameY, rowW, 11.f, 9.f, acR, acG, acB, 0.95f, 0.55f, 1);
-
-                // Строка 2: HP цифра с тёмным фоном
-                float hpTextY = by - 12.f;
-                addText(hpBuf, rowX, hpTextY, rowW, 11.f, 9.f, hpR, hpG, hpB, 0.95f, 0.55f, 1);
-            } else {
-                // Только HP цифра (без ника)
-                float hpTextY = by - 12.f;
-                addText(hpBuf, rowX, hpTextY, rowW, 11.f, 9.f, hpR, hpG, hpB, 0.95f, 0.55f, 1);
+                addText(nb, rowX, curY - 11.f, rowW, 11.f, 9.f, acR, acG, acB, 0.95f, 0.55f, 1);
             }
         }
 
