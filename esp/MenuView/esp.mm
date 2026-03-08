@@ -1753,7 +1753,7 @@ bool get_IsFiring(uint64_t player) {
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
             // Head mode: +0.25 unit above head center = headshot zone
-            Vector3 ap = HeadPos + Vector3(0, 0.45f, 0);
+            Vector3 ap = HeadPos + Vector3(0, 0.15f, 0);
             if (aimTarget == 1) ap = HeadPos;
             else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
             Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
@@ -1941,7 +1941,7 @@ bool get_IsFiring(uint64_t player) {
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
-        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget)) + Vector3(0, 0.45f, 0);
+        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget)) + Vector3(0, 0.15f, 0);
         else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget));
         else                   ap = getPositionExt(getHip(bestTarget));
         // Snap прямо на цель — никакого Slerp, никакого y_bias для головы
