@@ -407,6 +407,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     CAShapeLayer *_boxLayer;
     CAShapeLayer *_lineLayer;
     CAShapeLayer *_fovLayer;
+    Quaternion   _lastAimRot;   // Slerp — текущий угол между кадрами
+    bool         _lastAimValid; // первый кадр — нет предыдущего угла
     // (no additional ivars needed for value-scan features)
     CAShapeLayer *_hpBgLayer;
     CAShapeLayer *_hpFillGreen;   // ratio > 0.6
@@ -1660,6 +1662,15 @@ void set_aim(uint64_t player, Quaternion rotation) {
     WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);
 }
 
+// Slerp от текущего угла к целевому — без прыжка через тело
+// t=1.0 = мгновенно (старое поведение), t=0.1 = очень плавно
+static Quaternion SlerpAimTo(Quaternion current, Quaternion target, float t) {
+    // Clamp t
+    if (t <= 0.0f) return current;
+    if (t >= 1.0f) return target;
+    return Quaternion::Slerp(current, target, t);
+}
+
 bool get_IsFiring(uint64_t player) {
     if (!isVaildPtr(player)) return false;
     return ReadAddr<bool>(player + OFF_FIRING);
@@ -1960,10 +1971,32 @@ bool get_IsFiring(uint64_t player) {
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
-        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
-        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
-        else                   ap = getPositionExt(getHip(bestTarget));
-        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
+        float yBias;
+        if      (aimTarget==0) { ap = getPositionExt(getHead(bestTarget)); yBias = 0.12f; }  // голова — целимся чуть выше центра черепа
+        else if (aimTarget==1) { ap = getPositionExt(getHead(bestTarget)); yBias = -0.10f; } // шея — чуть ниже головы
+        else                   { ap = getPositionExt(getHip(bestTarget));  yBias = 0.0f;  }  // хип
+
+        Quaternion targetRot = GetRotationToLocation(ap, yBias, myLoc);
+
+        // Slerp: если aimSpeed=1.0 — мгновенно на цель (нет промаха через тело)
+        // если aimSpeed<1.0 — плавно, пропорционально скорости
+        // t подбираем так чтобы при aimSpeed=1.0 был snap, при 0.05 — плавный вход
+        Quaternion finalRot;
+        if (!_lastAimValid || aimSpeed >= 1.0f) {
+            // Первый кадр или максимальная скорость — snap прямо на цель
+            finalRot = targetRot;
+        } else {
+            // Читаем текущий реальный угол камеры из памяти как базу Slerp
+            Quaternion currentRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+            float t = aimSpeed * 0.35f; // масштаб: aimSpeed 0.05→t≈0.017, 0.5→t≈0.175, 1.0→snap
+            finalRot = SlerpAimTo(currentRot, targetRot, t);
+        }
+        _lastAimRot   = finalRot;
+        _lastAimValid = true;
+        set_aim(myPawnObject, finalRot);
+    } else {
+        // Цель потеряна — сбрасываем Slerp state
+        _lastAimValid = false;
     }
 
 
