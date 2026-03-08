@@ -264,11 +264,14 @@ int main(int argc, char *argv[])
             NSString *pidString = [NSString stringWithContentsOfFile:GetPIDFilePath()
                                                             encoding:NSUTF8StringEncoding
                                                                error:nil];
-            if (pidString) {
+            
+            if (pidString)
+            {
                 pid_t pid = (pid_t)[pidString intValue];
-                if (pid > 0) kill(pid, SIGKILL);
+                kill(pid, SIGKILL);
                 unlink(GetPIDFilePath().UTF8String);
             }
+
             return EXIT_SUCCESS;
         }
         else if (strcmp(argv[1], "-check") == 0)
@@ -276,26 +279,14 @@ int main(int argc, char *argv[])
             NSString *pidString = [NSString stringWithContentsOfFile:GetPIDFilePath()
                                                             encoding:NSUTF8StringEncoding
                                                                error:nil];
-            if (pidString) {
+            
+            if (pidString)
+            {
                 pid_t pid = (pid_t)[pidString intValue];
-                if (pid > 0 && kill(pid, 0) == 0) {
-                    // Процесс жив — проверяем что не зомби
-                    struct kinfo_proc kp;
-                    size_t kpSize = sizeof(kp);
-                    int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)pid};
-                    if (sysctl(mib, 4, &kp, &kpSize, NULL, 0) == 0 && kpSize > 0) {
-                        // p_stat: SZOMB=5 — зомби не считаем живым
-                        if (kp.kp_proc.p_stat != 5) {
-                            return EXIT_FAILURE; // HUD запущен
-                        }
-                    } else {
-                        return EXIT_FAILURE; // sysctl не смог — считаем живым
-                    }
-                }
-                // Мёртв или зомби — чистим файл
-                unlink(GetPIDFilePath().UTF8String);
+                int killed = kill(pid, 0);
+                return (killed == 0 ? EXIT_FAILURE : EXIT_SUCCESS);
             }
-            return EXIT_SUCCESS; // HUD не запущен
+            else return EXIT_SUCCESS;  // No PID file, so HUD is not running
         }
     }
 }
