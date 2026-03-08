@@ -101,7 +101,8 @@ static float aimDistance   = 200.0f;
 static int  aimMode = 1;           // 0 = Closest to Player, 1 = Closest to Crosshair
 static int  aimTrigger = 1;        // 0 = Always, 1 = Only Shooting, 2 = Only Aiming
 static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
-static float aimSpeed = 1.0f;      // Aim smoothing 0.05 - 1.0
+static float aimSpeed      = 1.0f;
+static float headOffset    = 0.0f;  // vertical head correction, tune in menu
 static bool isStreamerMode = NO;   // Stream Proof
 
 
@@ -1086,6 +1087,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addSliderTo:extraTabContainer label:@"FOV RADIUS" atY:ey width:eW minVal:10 maxVal:400 value:aimFov format:@"%.0f" onChanged:^(float v){ aimFov = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM DISTANCE" atY:ey width:eW minVal:10 maxVal:500 value:aimDistance format:@"%.0fm" onChanged:^(float v){ aimDistance = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM SPEED" atY:ey width:eW minVal:0.05 maxVal:1.0 value:aimSpeed format:@"%.2f" onChanged:^(float v){ aimSpeed = v; }]; ey += 54;
+    [self addSliderTo:extraTabContainer label:@"HEAD OFFSET" atY:ey width:eW minVal:-0.5 maxVal:0.5 value:headOffset format:@"%.2f" onChanged:^(float v){ headOffset = v; }]; ey += 54;
     // Разделитель
     UIView *espSep = [[UIView alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 1)];
     espSep.backgroundColor = COL_LINE;
@@ -1583,14 +1585,41 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     });
 }
 
-Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 myLoc) {
-    return Quaternion::LookRotation((targetLocation + Vector3(0, y_bias, 0)) - myLoc, Vector3(0, 1, 0));
+// Prediction state
+static uint64_t  s_lastTarget   = 0;
+static Vector3   s_lastHeadPos  = {0,0,0};
+static Vector3   s_headVelocity = {0,0,0};
+static double    s_lastAimTime  = 0.0;
+static const float kBulletDelay = 0.11f; // ~80ms ping + 33ms frame
+
+Quaternion GetRotationToLocation(Vector3 target, Vector3 myLoc) {
+    return Quaternion::LookRotation(target - myLoc, Vector3(0, 1, 0));
 }
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
     WriteAddr<Quaternion>(player + OFF_ROTATION,    rotation);
     WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);
+}
+
+static Vector3 PredictHeadPosition(uint64_t target, Vector3 head) {
+    double now = CACurrentMediaTime();
+    if (target == s_lastTarget && s_lastAimTime > 0.0) {
+        float dt = (float)(now - s_lastAimTime);
+        if (dt > 0.001f && dt < 0.3f) {
+            Vector3 rawVel = (head - s_lastHeadPos) * (1.0f / dt);
+            // exponential smoothing - weight recent frames more
+            s_headVelocity = s_headVelocity * 0.35f + rawVel * 0.65f;
+        }
+    } else {
+        s_headVelocity = Vector3(0, 0, 0);
+    }
+    s_lastTarget  = target;
+    s_lastHeadPos = head;
+    s_lastAimTime = now;
+    Vector3 predicted = head + s_headVelocity * kBulletDelay;
+    predicted.y += headOffset;
+    return predicted;
 }
 
 // Slerp от текущего угла к целевому — без прыжка через тело
@@ -1940,13 +1969,18 @@ bool get_IsFiring(uint64_t player) {
     // ── Обычный Aimbot apply ─────────────────────────────────────────
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
+        Vector3 rawHead = getPositionExt(getHead(bestTarget));
         Vector3 ap;
-        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget)) + Vector3(0, 0.15f, 0);
-        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget));
-        else                   ap = getPositionExt(getHip(bestTarget));
+        if (aimTarget == 0) {
+            ap = PredictHeadPosition(bestTarget, rawHead);
+        } else if (aimTarget == 1) {
+            ap = PredictHeadPosition(bestTarget, rawHead) + Vector3(0, -0.1f, 0);
+        } else {
+            ap = getPositionExt(getHip(bestTarget));
+        }
         // Snap прямо на цель — никакого Slerp, никакого y_bias для головы
         // OFF_ROTATION (камера) + OFF_CURRENT_AIM (пули) — оба обновляются в set_aim
-        set_aim(myPawnObject, GetRotationToLocation(ap, 0.0f, myLoc));
+        set_aim(myPawnObject, GetRotationToLocation(ap, myLoc));
     }
 
 
