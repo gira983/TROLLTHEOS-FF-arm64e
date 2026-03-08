@@ -111,6 +111,7 @@ static bool isStreamerMode = NO;   // Stream Proof
 static bool isNoRecoil   = NO;
 // ── Speed (value scan, loop) ─────────────────────────────────────────
 static bool isSpeedActive = NO;
+static bool isInMatch     = NO;  // авто-детекция матча
 
 @interface CustomSwitch : UIControl
 @property (nonatomic, assign, getter=isOn) BOOL on;
@@ -559,9 +560,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     iconLabel.userInteractionEnabled = NO;
     [floatingButton addSubview:iconLabel];
 
-    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(33, 33, 5, 5)];
-    dot.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
-    dot.layer.cornerRadius = 2.5;
+    UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(33, 33, 8, 8)];
+    dot.tag = 77; // индикатор матча: жёлтый = лобби, зелёный = матч
+    dot.backgroundColor = [UIColor colorWithRed:1.0 green:0.8 blue:0.0 alpha:1.0]; // жёлтый по умолчанию
+    dot.layer.cornerRadius = 4;
     [floatingButton addSubview:dot];
 
     UIPanGestureRecognizer *iconPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
@@ -1615,10 +1617,13 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (_espBusy) return;
     _espBusy = YES;
 
-    // FOV круг — белый для aimbot
+    // FOV круг — используем superview.bounds как и для ESP
     if (isAimbot) {
-        float cx = self.bounds.size.width / 2;
-        float cy = self.bounds.size.height / 2;
+        float vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
+        float vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
+        if (vW < 10 || vH < 10) { vW = self.bounds.size.width; vH = self.bounds.size.height; }
+        float cx = vW / 2.0f;
+        float cy = vH / 2.0f;
         float radius = aimFov;
         _fovLayer.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
         _fovLayer.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy)
@@ -1643,6 +1648,22 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
     WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);
+}
+
+static Quaternion SlerpAim(Quaternion from, Quaternion to, float t) {
+    t = fmaxf(0.0f, fminf(1.0f, t));
+    float dot = from.x*to.x + from.y*to.y + from.z*to.z + from.w*to.w;
+    if (dot < 0.0f) { to.x=-to.x; to.y=-to.y; to.z=-to.z; to.w=-to.w; dot=-dot; }
+    if (dot > 0.9995f) {
+        Quaternion r; r.x=from.x+t*(to.x-from.x); r.y=from.y+t*(to.y-from.y);
+        r.z=from.z+t*(to.z-from.z); r.w=from.w+t*(to.w-from.w);
+        float len=sqrtf(r.x*r.x+r.y*r.y+r.z*r.z+r.w*r.w);
+        if(len>0){r.x/=len;r.y/=len;r.z/=len;r.w/=len;} return r;
+    }
+    float angle=acosf(dot), sa=sinf(angle);
+    float s0=sinf((1.0f-t)*angle)/sa, s1=sinf(t*angle)/sa;
+    Quaternion r; r.x=s0*from.x+s1*to.x; r.y=s0*from.y+s1*to.y;
+    r.z=s0*from.z+s1*to.z; r.w=s0*from.w+s1*to.w; return r;
 }
 
 bool get_IsFiring(uint64_t player) {
@@ -1677,15 +1698,28 @@ bool get_IsFiring(uint64_t player) {
     uint64_t matchGame = getMatchGame(Moudule_Base);
     uint64_t camera    = CameraMain(matchGame);
     if (!isVaildPtr(camera)) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [CATransaction begin]; [CATransaction setDisableActions:YES];
-            _boneLayer.path=nil; _boxLayer.path=nil;
-            _hpBgLayer.path=nil; _hpFillLayer.path=nil; _lineLayer.path=nil;
-            for (CATextLayer *t in _textPool) t.hidden = YES;
-            [CATransaction commit];
-        });
+        // Не сбрасываем paths мгновенно — даём несколько кадров буфера
+        // чтобы избежать мигания при кратковременной потере камеры
+        static int _cameraLostFrames = 0;
+        _cameraLostFrames++;
+        if (_cameraLostFrames > 10) {
+            _cameraLostFrames = 0;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [CATransaction begin]; [CATransaction setDisableActions:YES];
+                for (CAShapeLayer *sl in @[self->_boneNear,self->_boneMid,self->_boneFar,self->_boneKnocked,
+                    self->_boxNear,self->_boxMid,self->_boxFar,self->_boxKnocked,
+                    self->_lineNear,self->_lineMid,self->_lineFar,
+                    self->_hpBgLayer,self->_hpFillGreen,self->_hpFillYellow,self->_hpFillRed]) {
+                    sl.path = nil;
+                }
+                for (CATextLayer *t in self->_textPool) t.hidden = YES;
+                [CATransaction commit];
+            });
+        }
         return;
     }
+    // Сбрасываем счётчик при успешной камере
+    { static int _cameraLostFrames = 0; _cameraLostFrames = 0; }
 
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
@@ -1773,16 +1807,17 @@ bool get_IsFiring(uint64_t player) {
 
         float dis = Vector3::Distance(myLoc, HeadPos);
         // Убираем лишний cut-off — ESP работает до 600м
-        if (dis > 600.0f) continue;
+        if (dis > 1000.0f) continue;
 
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
-            Vector3 ap = HeadPos;
-            if (aimTarget == 1) ap = HeadPos + Vector3(0,-0.15f,0);
-            else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
+            Vector3 ap;
+            if      (aimTarget == 0) ap = HeadPos + Vector3(0, -0.05f, 0);
+            else if (aimTarget == 1) ap = HeadPos + Vector3(0, -0.22f, 0);
+            else                     ap = getPositionExt(getHip(PawnObject));
             Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
             float dx = ws.x - center.x, dy = ws.y - center.y;
-            float d2 = sqrtf(dx*dx+dy*dy);
+            float d2 = sqrtf(dx*dx + dy*dy);
             if (d2 <= aimFov) {
                 float sc = (aimMode == 0) ? dis : d2;
                 if (sc < bestScore) { bestScore = sc; bestTarget = PawnObject; }
@@ -1800,11 +1835,11 @@ bool get_IsFiring(uint64_t player) {
         Vector3 s_Head    = WorldToScreen(HeadPos,  matrix, vW, vH);
 
         // Если голова за экраном — пропускаем
-        if (s_HeadTop.x < -200 || s_HeadTop.x > vW+200 ||
-            s_HeadTop.y < -200 || s_HeadTop.y > vH+200) continue;
+        if (s_HeadTop.x < -400 || s_HeadTop.x > vW+400 ||
+            s_HeadTop.y < -400 || s_HeadTop.y > vH+400) continue;
 
         float boxH = fabsf(s_HeadTop.y - s_Toe.y);
-        if (boxH < 6.0f) continue;   // слишком маленький — за горизонтом
+        if (boxH < 2.0f) continue;   // только совсем невидимые
         float boxW = boxH * 0.45f;
         float bx   = s_HeadTop.x - boxW * 0.5f;
         float by   = s_HeadTop.y;
@@ -1813,15 +1848,17 @@ bool get_IsFiring(uint64_t player) {
         // <40м красный → <100м жёлтый → белый
         // Нокнутый всегда серо-фиолетовый
         float acR, acG, acB;
-        if (isKnocked) { acR=0.6f; acG=0.4f; acB=1.f; }       // фиолетовый = нокнут
+        if (isKnocked)        { acR=0.6f; acG=0.4f; acB=1.f;  }  // фиолетовый = нокнут
+        else if (dis < 15.f)  { acR=1.f; acG=0.4f; acB=0.0f; }  // оранжевый = вплотную
         else if (dis < 40.f)  { acR=1.f; acG=0.2f; acB=0.2f; }  // красный
-        else if (dis < 100.f) { acR=1.f; acG=0.85f; acB=0.f;  }  // жёлтый
-        else if (dis < 250.f) { acR=1.f; acG=1.f;  acB=1.f;  }   // белый
-        else                  { acR=0.5f;acG=0.8f; acB=1.f;  }   // голубой = далеко
+        else if (dis < 100.f) { acR=1.f; acG=0.85f; acB=0.f; }  // жёлтый
+        else if (dis < 300.f) { acR=1.f; acG=1.f;  acB=1.f;  }  // белый
+        else if (dis < 600.f) { acR=0.5f;acG=0.8f; acB=1.f;  }  // голубой
+        else                  { acR=0.7f;acG=0.7f; acB=0.7f;  } // серый = очень далеко
         float acA = isKnocked ? 0.65f : 0.92f; // нокнутые чуть прозрачнее
 
         // ── SKELETON (только ≤ 150м — дальше незаметно, но жрёт ресурсы) ──
-        if (isBone && dis <= 150.f) {
+        if (isBone && dis <= 300.f) {
             uint64_t hipNode = getHip(PawnObject);
             Vector3 HipPos  = isVaildPtr(hipNode) ? getPositionExt(hipNode) : HeadPos;
             Vector3 s_Hip   = WorldToScreen(HipPos,  matrix, vW, vH);
@@ -1939,14 +1976,30 @@ bool get_IsFiring(uint64_t player) {
         }
     } // end player loop
 
-    // ── Обычный Aimbot apply ─────────────────────────────────────────
+    // ── Aimbot apply — точный прицел + smoothing ────────────────────
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
-    if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
+    if (isAimbot && isInMatch && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
-        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
-        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
-        else                   ap = getPositionExt(getHip(bestTarget));
-        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
+        if (aimTarget == 0) {
+            // HEAD: чуть ниже центра головы = лоб, точная зона
+            ap = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.05f, 0);
+        } else if (aimTarget == 1) {
+            // NECK: между головой и плечами
+            ap = getPositionExt(getHead(bestTarget)) + Vector3(0, -0.22f, 0);
+        } else {
+            // HIP: центр тела
+            ap = getPositionExt(getHip(bestTarget));
+        }
+        Quaternion targetRot = GetRotationToLocation(ap, 0.0f, myLoc);
+
+        // Smoothing через SLERP — aimSpeed=1.0 мгновенно, 0.05 плавно
+        Quaternion currentRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+        float smooth = fmaxf(0.05f, fminf(1.0f, aimSpeed));
+        Quaternion finalRot = SlerpAim(currentRot, targetRot, smooth);
+
+        // Пишем в камеру (0x53C) и направление пули (0x172C)
+        WriteAddr<Quaternion>(myPawnObject + OFF_ROTATION, finalRot);
+        WriteAddr<Quaternion>(myPawnObject + ENCRYPTOFFSET("0x172C"), finalRot);
     }
 
 
