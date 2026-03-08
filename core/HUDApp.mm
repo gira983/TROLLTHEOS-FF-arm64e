@@ -264,14 +264,20 @@ int main(int argc, char *argv[])
             NSString *pidString = [NSString stringWithContentsOfFile:GetPIDFilePath()
                                                             encoding:NSUTF8StringEncoding
                                                                error:nil];
-            
-            if (pidString)
-            {
+            if (pidString) {
                 pid_t pid = (pid_t)[pidString intValue];
-                kill(pid, SIGKILL);
+                if (kill(pid, 0) == 0) {
+                    // Убиваем только если это наш процесс
+                    char procName[256] = {0};
+                    int nameLen = proc_name(pid, procName, sizeof(procName));
+                    NSString *myExec = [[[NSBundle mainBundle] executablePath] lastPathComponent];
+                    if (nameLen > 0 && myExec &&
+                        strncmp(procName, myExec.UTF8String, strlen(myExec.UTF8String)) == 0) {
+                        kill(pid, SIGKILL);
+                    }
+                }
                 unlink(GetPIDFilePath().UTF8String);
             }
-
             return EXIT_SUCCESS;
         }
         else if (strcmp(argv[1], "-check") == 0)
@@ -279,14 +285,25 @@ int main(int argc, char *argv[])
             NSString *pidString = [NSString stringWithContentsOfFile:GetPIDFilePath()
                                                             encoding:NSUTF8StringEncoding
                                                                error:nil];
-            
-            if (pidString)
-            {
+            if (pidString) {
                 pid_t pid = (pid_t)[pidString intValue];
-                int killed = kill(pid, 0);
-                return (killed == 0 ? EXIT_FAILURE : EXIT_SUCCESS);
+                // Проверяем что процесс с этим PID жив И это именно наш процесс
+                // (не переиспользованный PID другого процесса)
+                if (kill(pid, 0) == 0) {
+                    // Дополнительная проверка через proc_name
+                    char procName[256] = {0};
+                    int nameLen = proc_name(pid, procName, sizeof(procName));
+                    // Имя исполняемого файла нашего приложения
+                    NSString *myExec = [[[NSBundle mainBundle] executablePath] lastPathComponent];
+                    if (nameLen > 0 && myExec &&
+                        strncmp(procName, myExec.UTF8String, strlen(myExec.UTF8String)) == 0) {
+                        return EXIT_FAILURE; // HUD точно запущен
+                    }
+                }
+                // PID устарел или чужой — удаляем файл
+                unlink(GetPIDFilePath().UTF8String);
             }
-            else return EXIT_SUCCESS;  // No PID file, so HUD is not running
+            return EXIT_SUCCESS; // HUD не запущен
         }
     }
 }
