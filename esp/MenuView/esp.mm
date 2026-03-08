@@ -26,6 +26,7 @@ static void espLog(NSString *msg) {
 // Silent aim: пишем в оба поля rotation одновременно
 // m_AimRotation (камера)         @ 0x53C  = OFF_ROTATION
 // m_CurrentAimRotation (пуля)    @ 0x172C
+#define OFF_CURRENT_AIM     ENCRYPTOFFSET("0x172C")   // пули идут сюда
 #define OFF_FIRING          ENCRYPTOFFSET("0x750")
 
 // Knocked state через PropertyData pool @ player+0x68 (varID=2)
@@ -463,9 +464,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         _boxLayer   = _boxFar; // алиас
 
         // Линии ESP по зонам
-        _lineNear = makeShape([UIColor colorWithRed:1.f green:0.2f blue:0.2f alpha:0.55f], 0.9f, NO);
-        _lineMid  = makeShape([UIColor colorWithRed:1.f green:0.85f blue:0.f alpha:0.5f],  0.8f, NO);
-        _lineFar  = makeShape([UIColor colorWithWhite:0.8f alpha:0.4f],                    0.7f, NO);
+        _lineNear = makeShape([UIColor colorWithRed:1.f green:0.2f blue:0.2f alpha:0.85f], 0.9f, NO);
+        _lineMid  = makeShape([UIColor colorWithRed:1.f green:0.85f blue:0.f  alpha:0.85f], 0.8f, NO);
+        _lineFar  = makeShape([UIColor colorWithWhite:1.0f alpha:0.85f],                   0.8f, NO);
         _lineLayer = _lineFar; // алиас
 
         // HP полоски
@@ -1659,7 +1660,8 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);
+    WriteAddr<Quaternion>(player + OFF_ROTATION,     rotation);  // камера
+    WriteAddr<Quaternion>(player + OFF_CURRENT_AIM,  rotation);  // пули (silent aim fix)
 }
 
 // Slerp от текущего угла к целевому — без прыжка через тело
@@ -1841,12 +1843,11 @@ bool get_IsFiring(uint64_t player) {
         // <40м красный → <100м жёлтый → белый
         // Нокнутый всегда серо-фиолетовый
         float acR, acG, acB;
-        if (isKnocked) { acR=0.6f; acG=0.4f; acB=1.f; }       // фиолетовый = нокнут
-        else if (dis < 40.f)  { acR=1.f; acG=0.2f; acB=0.2f; }  // красный
-        else if (dis < 100.f) { acR=1.f; acG=0.85f; acB=0.f;  }  // жёлтый
-        else if (dis < 250.f) { acR=1.f; acG=1.f;  acB=1.f;  }   // белый
-        else                  { acR=0.5f;acG=0.8f; acB=1.f;  }   // голубой = далеко
-        float acA = isKnocked ? 0.65f : 0.92f; // нокнутые чуть прозрачнее
+        if (isKnocked)        { acR=0.7f; acG=0.3f; acB=1.0f; }  // фиолетовый = нокнут
+        else if (dis < 40.f)  { acR=1.0f; acG=0.2f; acB=0.2f; }  // красный
+        else if (dis < 100.f) { acR=1.0f; acG=0.8f; acB=0.0f; }  // оранжево-жёлтый
+        else                  { acR=0.6f; acG=0.6f; acB=0.6f; }  // серый — далеко
+        float acA = isKnocked ? 0.65f : 0.92f;
 
         // ── SKELETON (только ≤ 150м — дальше незаметно, но жрёт ресурсы) ──
         if (isBone && dis <= 150.f) {
@@ -1923,35 +1924,62 @@ bool get_IsFiring(uint64_t player) {
                 if (!isKnocked)
                     CGPathAddRect(fillPath, nil, CGRectMake(hpBX, hpBY+boxH-fillH, hpBW, fillH));
 
-                // HP текст — только текущее HP, без MaxHP
-                float hr=(ratio>0.6f)?0.15f:1.f, hg=(ratio>0.6f)?0.9f:(ratio>0.3f?0.75f:0.2f), hb=(ratio>0.6f)?0.35f:(ratio>0.3f?0.f:0.2f);
-                char hpBuf[32];
-                if (isKnocked) snprintf(hpBuf,sizeof(hpBuf),"KO");
-                else           snprintf(hpBuf,sizeof(hpBuf),"%d",CurHP);
-                float tW = 24.f;
-                addText(hpBuf, hpBX + hpBW*0.5f - tW*0.5f, hpBY-10.f, tW, 10.f, 9.f, hr,hg,hb,1.f, 0.f, 1);
+                // HP цифра рисуется выше вместе с ником (см. ниже)
             }
         }
 
-        // ── NAME ─────────────────────────────────────────────────────
-        if (isName) {
-            NSString *name = GetNickName(PawnObject);
-            const char *ns = (name && name.length) ? [name UTF8String] : "?";
-            float nW = MAX(boxW, 60.f);
-            float nY = by - 12.f - (isHealth ? 10.f : 0.f);
-            char nb[48]; strncpy(nb, ns, 47); nb[47]=0;
-            addText(nb, bx+(boxW-nW)*0.5f, nY, nW, 11.f, 10.f, 1.f,1.f,1.f,1.f, 0.5f, 1);
+        // ── NAME + HP цифра — над боксом, с фоном ──────────────────
+        {
+            // HP цифра
+            int MaxHP = get_MaxHP(PawnObject);
+            char hpBuf[16];
+            float hpR, hpG, hpB;
+            if (isKnocked) {
+                snprintf(hpBuf, sizeof(hpBuf), "KO");
+                hpR=0.7f; hpG=0.3f; hpB=1.f;
+            } else if (MaxHP > 0) {
+                snprintf(hpBuf, sizeof(hpBuf), "%d/%d", CurHP, MaxHP);
+                float ratio = (float)CurHP / MaxHP;
+                hpR = (ratio > 0.6f) ? 0.15f : 1.f;
+                hpG = (ratio > 0.6f) ? 0.9f  : (ratio > 0.3f ? 0.75f : 0.2f);
+                hpB = (ratio > 0.6f) ? 0.35f : (ratio > 0.3f ? 0.f   : 0.2f);
+            } else {
+                snprintf(hpBuf, sizeof(hpBuf), "?");
+                hpR=0.7f; hpG=0.7f; hpB=0.7f;
+            }
+
+            float rowW = MAX(boxW + 16.f, 72.f);
+            float rowX = s_HeadTop.x - rowW * 0.5f;
+
+            if (isName) {
+                // Строка 1: никнейм с тёмным фоном
+                NSString *name = GetNickName(PawnObject);
+                const char *ns = (name && name.length) ? [name UTF8String] : "?";
+                char nb[48]; strncpy(nb, ns, 47); nb[47] = 0;
+                float nameY = by - 24.f;
+                addText(nb, rowX, nameY, rowW, 11.f, 9.f, acR, acG, acB, 0.95f, 0.55f, 1);
+
+                // Строка 2: HP цифра с тёмным фоном
+                float hpTextY = by - 12.f;
+                addText(hpBuf, rowX, hpTextY, rowW, 11.f, 9.f, hpR, hpG, hpB, 0.95f, 0.55f, 1);
+            } else {
+                // Только HP цифра (без ника)
+                float hpTextY = by - 12.f;
+                addText(hpBuf, rowX, hpTextY, rowW, 11.f, 9.f, hpR, hpG, hpB, 0.95f, 0.55f, 1);
+            }
         }
 
-        // ── DISTANCE ─────────────────────────────────────────────────
+        // ── DISTANCE — мелко под ногами, серый, формат "134m" ──────
         if (isDis) {
             char db[24];
-            if (isKnocked) snprintf(db,sizeof(db),"KO %.0fm",dis);
-            else           snprintf(db,sizeof(db),"%.0fm",dis);
-            // Ширина — минимум 50pt чтобы текст не обрезался
-            float distW = MAX(boxW, 50.f);
-            float distX = bx + (boxW - distW) * 0.5f; // центрируем относительно бокса
-            addText(db, distX, by+boxH+2.f, distW, 11.f, 9.f, acR,acG,acB,acA, 0.f, 1);
+            snprintf(db, sizeof(db), "%.0fm", dis);
+            float distW = MAX(boxW, 36.f);
+            float distX = s_HeadTop.x - distW * 0.5f;
+            // Цвет = серый для дальних, акцентный для ближних
+            float dr = (dis < 40.f) ? acR : 0.7f;
+            float dg = (dis < 40.f) ? acG : 0.7f;
+            float db2= (dis < 40.f) ? acB : 0.7f;
+            addText(db, distX, by+boxH+1.f, distW, 9.f, 8.f, dr,dg,db2, 0.75f, 0.f, 1);
         }
 
         // ── ESP LINE ─────────────────────────────────────────────────
@@ -1971,32 +1999,12 @@ bool get_IsFiring(uint64_t player) {
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
-        float yBias;
-        if      (aimTarget==0) { ap = getPositionExt(getHead(bestTarget)); yBias = 0.12f; }  // голова — целимся чуть выше центра черепа
-        else if (aimTarget==1) { ap = getPositionExt(getHead(bestTarget)); yBias = -0.10f; } // шея — чуть ниже головы
-        else                   { ap = getPositionExt(getHip(bestTarget));  yBias = 0.0f;  }  // хип
-
-        Quaternion targetRot = GetRotationToLocation(ap, yBias, myLoc);
-
-        // Slerp: если aimSpeed=1.0 — мгновенно на цель (нет промаха через тело)
-        // если aimSpeed<1.0 — плавно, пропорционально скорости
-        // t подбираем так чтобы при aimSpeed=1.0 был snap, при 0.05 — плавный вход
-        Quaternion finalRot;
-        if (!_lastAimValid || aimSpeed >= 1.0f) {
-            // Первый кадр или максимальная скорость — snap прямо на цель
-            finalRot = targetRot;
-        } else {
-            // Читаем текущий реальный угол камеры из памяти как базу Slerp
-            Quaternion currentRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
-            float t = aimSpeed * 0.35f; // масштаб: aimSpeed 0.05→t≈0.017, 0.5→t≈0.175, 1.0→snap
-            finalRot = SlerpAimTo(currentRot, targetRot, t);
-        }
-        _lastAimRot   = finalRot;
-        _lastAimValid = true;
-        set_aim(myPawnObject, finalRot);
-    } else {
-        // Цель потеряна — сбрасываем Slerp state
-        _lastAimValid = false;
+        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
+        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget)) + Vector3(0,-0.12f,0);
+        else                   ap = getPositionExt(getHip(bestTarget));
+        // Snap прямо на цель — никакого Slerp, никакого y_bias для головы
+        // OFF_ROTATION (камера) + OFF_CURRENT_AIM (пули) — оба обновляются в set_aim
+        set_aim(myPawnObject, GetRotationToLocation(ap, 0.f, myLoc));
     }
 
 
