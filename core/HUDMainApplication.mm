@@ -10,13 +10,17 @@
 #import <sys/types.h>
 #import <sys/sysctl.h>
 #import <mach/vm_param.h>
+#import <mach/mach.h>
+#import <mach/processor_set.h>
+#import <mach/mach_host.h>
 #import <mach-o/dyld.h>
 #import <objc/runtime.h>
+#import <notify.h>
 #import <UIKit/UIKit.h>
 #import "HUDPresetPosition.h"
 #import "../esp/MenuView/esp.h"
 
-#define SPAWN_AS_ROOT 0
+#define SPAWN_AS_ROOT 1
 
 extern "C" char **environ;
 
@@ -477,6 +481,100 @@ static void SpringBoardLockStatusChanged
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PORT STASH SERVER — работает только в HUD процессе (root, UID 0)
+//
+// Слушает NOTIFY_PORT_REQUEST, читает запрос из файла,
+// находит task port игры через processor_set_tasks,
+// стэшит его в registered ports app процесса через mach_ports_register,
+// сигналит NOTIFY_PORT_READY.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#define NOTIFY_PORT_REQUEST  "ch.xxtou.notification.port.request"
+#define NOTIFY_PORT_READY    "ch.xxtou.notification.port.ready"
+#define PORT_REQUEST_FILE    "/var/mobile/Library/Caches/fryzz_port_req.txt"
+
+static mach_port_t HUD_FindTaskForPid(pid_t targetPid) {
+    host_t host = mach_host_self();
+
+    processor_set_name_t psDefault;
+    if (processor_set_default(host, &psDefault) != KERN_SUCCESS)
+        return MACH_PORT_NULL;
+
+    processor_set_t psPriv;
+    if (host_processor_set_priv(host, psDefault, &psPriv) != KERN_SUCCESS) {
+        mach_port_deallocate(mach_task_self(), psDefault);
+        return MACH_PORT_NULL;
+    }
+
+    task_array_t tasks;
+    mach_msg_type_number_t taskCount = 0;
+    if (processor_set_tasks(psPriv, &tasks, &taskCount) != KERN_SUCCESS) {
+        mach_port_deallocate(mach_task_self(), psPriv);
+        mach_port_deallocate(mach_task_self(), psDefault);
+        return MACH_PORT_NULL;
+    }
+
+    mach_port_t result = MACH_PORT_NULL;
+    for (mach_msg_type_number_t i = 0; i < taskCount; i++) {
+        pid_t pid = -1;
+        pid_for_task(tasks[i], &pid);
+        if (pid == targetPid) {
+            result = tasks[i];
+        } else {
+            mach_port_deallocate(mach_task_self(), tasks[i]);
+        }
+    }
+    vm_deallocate(mach_task_self(), (vm_address_t)tasks, taskCount * sizeof(task_t));
+    mach_port_deallocate(mach_task_self(), psPriv);
+    mach_port_deallocate(mach_task_self(), psDefault);
+    return result;
+}
+
+static void HUD_StartPortStashServer(void) {
+    int token;
+    notify_register_dispatch(NOTIFY_PORT_REQUEST, &token,
+        dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0),
+        ^(int t) {
+            // Читаем запрос: targetPid appPid
+            FILE *f = fopen(PORT_REQUEST_FILE, "r");
+            if (!f) return;
+            int targetPid = 0, appPid = 0;
+            fscanf(f, "%d %d", &targetPid, &appPid);
+            fclose(f);
+            if (targetPid == 0 || appPid == 0) return;
+
+            // Находим task port игры (мы root — processor_set_tasks работает)
+            mach_port_t gameTask = HUD_FindTaskForPid((pid_t)targetPid);
+            if (gameTask == MACH_PORT_NULL) {
+                notify_post(NOTIFY_PORT_READY); // сигналим даже при ошибке
+                return;
+            }
+
+            // Находим task port app процесса (нам нужно в него стэшить)
+            mach_port_t appTask = HUD_FindTaskForPid((pid_t)appPid);
+            if (appTask == MACH_PORT_NULL) {
+                mach_port_deallocate(mach_task_self(), gameTask);
+                notify_post(NOTIFY_PORT_READY);
+                return;
+            }
+
+            // Стэшим game task port в registered ports массив app процесса
+            // Kernel сам безопасно переносит send right — никаких ручных аллокаций
+            mach_port_array_t ports = (mach_port_array_t)malloc(sizeof(mach_port_t));
+            ports[0] = gameTask;
+            kern_return_t kr = mach_ports_register(appTask, ports, 1);
+            free(ports);
+
+            mach_port_deallocate(mach_task_self(), appTask);
+            // gameTask теперь принадлежит appTask — не deallocate его здесь
+
+            // Сигналим app что port готов
+            notify_post(NOTIFY_PORT_READY);
+        });
+}
+
+
 #pragma mark - HUDMainApplication
 
 #import <pthread.h>
@@ -523,6 +621,10 @@ static void DumpThreads(void)
         os_log_debug(OS_LOG_DEFAULT, "- [HUDMainApplication init]");
 #endif
         notify_post(NOTIFY_LAUNCHED_HUD);
+        
+        // Запускаем port stash сервер — отвечает на запросы от app процесса
+        // processor_set_tasks работает т.к. HUD запущен как root (UID 0)
+        HUD_StartPortStashServer();
         
 #ifdef NOTIFY_DISMISSAL_HUD
         {
