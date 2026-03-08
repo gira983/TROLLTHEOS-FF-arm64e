@@ -266,18 +266,7 @@ int main(int argc, char *argv[])
                                                                error:nil];
             if (pidString) {
                 pid_t pid = (pid_t)[pidString intValue];
-                if (kill(pid, 0) == 0) {
-                    // Убиваем только если это наш процесс
-                    struct kinfo_proc kp;
-                    size_t kpSize = sizeof(kp);
-                    int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)pid};
-                    if (sysctl(mib, 4, &kp, &kpSize, NULL, 0) == 0 && kpSize > 0) {
-                        NSString *myExec = [[[NSBundle mainBundle] executablePath] lastPathComponent];
-                        if (myExec && strncmp(kp.kp_proc.p_comm, myExec.UTF8String, MAXCOMLEN) == 0) {
-                            kill(pid, SIGKILL);
-                        }
-                    }
-                }
+                if (pid > 0) kill(pid, SIGKILL);
                 unlink(GetPIDFilePath().UTF8String);
             }
             return EXIT_SUCCESS;
@@ -289,21 +278,21 @@ int main(int argc, char *argv[])
                                                                error:nil];
             if (pidString) {
                 pid_t pid = (pid_t)[pidString intValue];
-                // Проверяем что процесс с этим PID жив И это именно наш процесс
-                // (не переиспользованный PID другого процесса)
-                if (kill(pid, 0) == 0) {
-                    // Проверяем что это наш процесс через sysctl
+                if (pid > 0 && kill(pid, 0) == 0) {
+                    // Процесс жив — проверяем что не зомби
                     struct kinfo_proc kp;
                     size_t kpSize = sizeof(kp);
                     int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)pid};
                     if (sysctl(mib, 4, &kp, &kpSize, NULL, 0) == 0 && kpSize > 0) {
-                        NSString *myExec = [[[NSBundle mainBundle] executablePath] lastPathComponent];
-                        if (myExec && strncmp(kp.kp_proc.p_comm, myExec.UTF8String, MAXCOMLEN) == 0) {
-                            return EXIT_FAILURE; // HUD точно запущен
+                        // p_stat: SZOMB=5 — зомби не считаем живым
+                        if (kp.kp_proc.p_stat != 5) {
+                            return EXIT_FAILURE; // HUD запущен
                         }
+                    } else {
+                        return EXIT_FAILURE; // sysctl не смог — считаем живым
                     }
                 }
-                // PID устарел или чужой — удаляем файл
+                // Мёртв или зомби — чистим файл
                 unlink(GetPIDFilePath().UTF8String);
             }
             return EXIT_SUCCESS; // HUD не запущен
