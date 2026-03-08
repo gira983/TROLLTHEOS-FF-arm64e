@@ -1,6 +1,6 @@
 #import "MemoryUtils.h"
 
-// Глобальный task port игрового процесса (инициализируется в GetGameModule_Base)
+// Глобальный task port игрового процесса
 mach_port_t get_task = MACH_PORT_NULL;
 pid_t Processpid = 0;
 
@@ -30,47 +30,64 @@ pid_t GetGameProcesspid(char* GameProcessName) {
     return -1;
 }
 
-// Получить task port через processor_set_tasks — не детектируется как task_for_pid
-// Требует entitlement: com.apple.system-task-ports (уже в ent.plist)
-static mach_port_t GetTaskViaProcessorSet(pid_t targetPid) {
-    host_t host = mach_host_self();
+// ─────────────────────────────────────────────────────────────────────────────
+// Port Stash Retrieval
+//
+// Схема (из workaround.md):
+//   HUD (root) → processor_set_tasks → task port игры
+//   HUD → mach_ports_register(app_task, [game_task], 1)   ← kernel сам переносит right
+//   App → mach_ports_lookup(mach_task_self(), ...)         ← забираем port
+//
+// Вся «опасная» работа происходит в HUD процессе (root).
+// Основной app не вызывает task_for_pid — античит не видит ничего.
+// ─────────────────────────────────────────────────────────────────────────────
 
-    // Получаем default processor set
-    processor_set_name_t psDefault;
-    if (processor_set_default(host, &psDefault) != KERN_SUCCESS)
-        return MACH_PORT_NULL;
+#define NOTIFY_PORT_REQUEST  "ch.xxtou.notification.port.request"
+#define NOTIFY_PORT_READY    "ch.xxtou.notification.port.ready"
+#define PORT_REQUEST_FILE    "/var/mobile/Library/Caches/fryzz_port_req.txt"
 
-    // Получаем привилегированный порт processor set
-    processor_set_t psPriv;
-    if (host_processor_set_priv(host, psDefault, &psPriv) != KERN_SUCCESS) {
-        mach_port_deallocate(mach_task_self(), psDefault);
+// Запросить task port у HUD процесса через file-based IPC + Darwin notifications
+// HUD слушает NOTIFY_PORT_REQUEST, выполняет processor_set_tasks,
+// стэшит port через mach_ports_register, сигналит NOTIFY_PORT_READY
+static mach_port_t RequestPortFromHUD(pid_t targetPid) {
+    // Записываем запрос: targetPid + наш PID
+    pid_t myPid = getpid();
+    char req[64];
+    snprintf(req, sizeof(req), "%d %d", (int)targetPid, (int)myPid);
+    FILE *f = fopen(PORT_REQUEST_FILE, "w");
+    if (!f) return MACH_PORT_NULL;
+    fputs(req, f);
+    fclose(f);
+
+    // Регистрируем ожидание ответа ПЕРЕД сигналом запроса
+    __block int readyToken = 0;
+    __block dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    notify_register_dispatch(NOTIFY_PORT_READY, &readyToken, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^(int t) {
+        notify_cancel(t);
+        dispatch_semaphore_signal(sem);
+    });
+
+    // Сигналим HUD
+    notify_post(NOTIFY_PORT_REQUEST);
+
+    // Ждём ответа максимум 5 секунд
+    int timedOut = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 5LL * NSEC_PER_SEC));
+    if (timedOut) {
+        notify_cancel(readyToken);
         return MACH_PORT_NULL;
     }
 
-    // Получаем список всех tasks в системе
-    task_array_t tasks;
-    mach_msg_type_number_t taskCount = 0;
-    if (processor_set_tasks(psPriv, &tasks, &taskCount) != KERN_SUCCESS) {
-        mach_port_deallocate(mach_task_self(), psPriv);
-        mach_port_deallocate(mach_task_self(), psDefault);
+    // Забираем стэшнутый port из нашего registered ports array
+    mach_port_array_t ports = NULL;
+    mach_msg_type_number_t portsCount = 0;
+    kern_return_t kr = mach_ports_lookup(mach_task_self(), &ports, &portsCount);
+    if (kr != KERN_SUCCESS || portsCount == 0 || ports == NULL)
         return MACH_PORT_NULL;
-    }
 
-    mach_port_t result = MACH_PORT_NULL;
-    for (mach_msg_type_number_t i = 0; i < taskCount; i++) {
-        pid_t pid = -1;
-        pid_for_task(tasks[i], &pid);  // обратный lookup — менее подозрительно
-        if (pid == targetPid) {
-            result = tasks[i];
-        } else {
-            // Освобождаем все task ports кроме нашего
-            mach_port_deallocate(mach_task_self(), tasks[i]);
-        }
-    }
+    mach_port_t result = ports[0];
 
-    vm_deallocate(mach_task_self(), (vm_address_t)tasks, taskCount * sizeof(task_t));
-    mach_port_deallocate(mach_task_self(), psPriv);
-    mach_port_deallocate(mach_task_self(), psDefault);
+    // Освобождаем массив (но НЕ сам port — он нам нужен)
+    vm_deallocate(mach_task_self(), (vm_address_t)ports, portsCount * sizeof(mach_port_t));
 
     return result;
 }
@@ -84,14 +101,11 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
 
     pid_t pid = GetGameProcesspid(GameProcessName);
     if (pid == -1) return 0;
+    Processpid = pid;
 
-    // task_for_pid — основной метод, работает с TrollStore
-    task_for_pid(mach_task_self(), pid, &get_task);
-
-    // processor_set_tasks — fallback если task_for_pid не сработал
-    if (get_task == MACH_PORT_NULL) {
-        get_task = GetTaskViaProcessorSet(pid);
-    }
+    // Запрашиваем port у HUD (root процесс) через port stashing
+    // Никакого task_for_pid в основном процессе — античит не детектирует
+    get_task = RequestPortFromHUD(pid);
 
     if (get_task != MACH_PORT_NULL) {
         kern_return_t kr = mach_vm_region_recurse(get_task, &vmoffset, &vmsize,
@@ -99,6 +113,8 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
         if (kr == KERN_SUCCESS) {
             return vmoffset;
         }
+        mach_port_deallocate(mach_task_self(), get_task);
+        get_task = MACH_PORT_NULL;
     }
 
     return 0;
@@ -107,13 +123,10 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
 bool _read(long addr, void *buffer, int len)
 {
     if (!isVaildPtr(addr)) return false;
+    if (get_task == MACH_PORT_NULL) return false;
     vm_size_t size = 0;
     kern_return_t error = vm_read_overwrite(get_task, (vm_address_t)addr, len, (vm_address_t)buffer, &size);
-    if(error != KERN_SUCCESS || size != len)
-    {
-        return false;
-    }
-    return true;
+    return (error == KERN_SUCCESS && size == (vm_size_t)len);
 }
 
 bool _write(long addr, const void *buffer, int len)
@@ -121,8 +134,6 @@ bool _write(long addr, const void *buffer, int len)
     if (!isVaildPtr(addr)) return false;
     if (get_task == MACH_PORT_NULL) return false;
 
-    // Проверяем что регион существует и доступен для записи
-    // vm_protect временно делает страницу writable если нужно
     vm_address_t region = (vm_address_t)addr;
     vm_size_t    rsize  = 0;
     vm_region_basic_info_data_64_t info;
@@ -131,8 +142,7 @@ bool _write(long addr, const void *buffer, int len)
     kern_return_t kr = vm_region_64(get_task, &region, &rsize,
                                     VM_REGION_BASIC_INFO_64,
                                     (vm_region_info_t)&info, &infoCnt, &obj);
-    if (kr != KERN_SUCCESS) return false;  // регион не существует — не пишем
-    // addr должен попасть в найденный регион
+    if (kr != KERN_SUCCESS) return false;
     if ((vm_address_t)addr < region || (vm_address_t)addr + len > region + rsize)
         return false;
 
@@ -141,39 +151,4 @@ bool _write(long addr, const void *buffer, int len)
                   (vm_offset_t)buffer,
                   (mach_msg_type_number_t)len);
     return kr == KERN_SUCCESS;
-}
-
-
-// Сканирование памяти чужого процесса по значению — аналог h5gg.searchNumber
-// Читает память кусками по 1MB, ищет паттерн с шагом patSize (выравненный поиск)
-int scanForValue(uint64_t rangeStart, uint64_t rangeEnd,
-                 const void *pattern, size_t patSize,
-                 uint64_t *outAddrs, int maxResults) {
-    if (get_task == MACH_PORT_NULL || patSize == 0 || !outAddrs || maxResults <= 0)
-        return 0;
-
-    const size_t CHUNK = 0x100000; // 1MB
-    uint8_t *buf = (uint8_t *)malloc(CHUNK);
-    if (!buf) return 0;
-
-    int found = 0;
-    for (uint64_t addr = rangeStart; addr < rangeEnd && found < maxResults; addr += CHUNK) {
-        vm_size_t actualRead = 0;
-        kern_return_t kr = vm_read_overwrite(get_task,
-                                             (vm_address_t)addr,
-                                             (vm_size_t)CHUNK,
-                                             (vm_address_t)buf,
-                                             &actualRead);
-        if (kr != KERN_SUCCESS || actualRead < patSize) continue;
-
-        // Выравненный поиск по patSize (как h5gg I32/I64 search)
-        for (vm_size_t i = 0; i + patSize <= actualRead; i += patSize) {
-            if (memcmp(buf + i, pattern, patSize) == 0) {
-                outAddrs[found++] = addr + i;
-                if (found >= maxResults) break;
-            }
-        }
-    }
-    free(buf);
-    return found;
 }
