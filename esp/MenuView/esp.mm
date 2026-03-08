@@ -320,6 +320,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 @implementation MenuView {
     UIView *menuContainer;
     UIView *floatingButton;
+    CGPoint _floatingButtonSavedCenter;  // сохранённая позиция кнопки
     CGPoint _initialTouchPoint;
     
     // Tab Views
@@ -422,6 +423,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [floatingButton addGestureRecognizer:openTap];
     
     [self addSubview:floatingButton];
+    _floatingButtonSavedCenter = floatingButton.center;
 }
 
 - (void)addFeatureToView:(UIView *)view withTitle:(NSString *)title atY:(CGFloat)y initialValue:(BOOL)isOn andAction:(SEL)action {
@@ -1084,15 +1086,16 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         }
     }
     if (floatingButton) {
+        // Восстанавливаем сохранённую позицию — self.frame = newFrame выше сбрасывает subviews
         CGRect sb = self.bounds;
-        CGPoint btnCenter = floatingButton.center;
-        CGFloat halfW = floatingButton.bounds.size.width / 2;
-        CGFloat halfH = floatingButton.bounds.size.height / 2;
-        if (btnCenter.x < halfW) btnCenter.x = halfW;
-        if (btnCenter.x > sb.size.width - halfW) btnCenter.x = sb.size.width - halfW;
-        if (btnCenter.y < halfH) btnCenter.y = halfH;
-        if (btnCenter.y > sb.size.height - halfH) btnCenter.y = sb.size.height - halfH;
-        floatingButton.center = btnCenter;
+        CGPoint c = _floatingButtonSavedCenter;
+        CGFloat hw = floatingButton.bounds.size.width  / 2;
+        CGFloat hh = floatingButton.bounds.size.height / 2;
+        // Клампим в экран (на случай поворота)
+        c.x = MAX(hw + 8, MIN(c.x, sb.size.width  - hw - 8));
+        c.y = MAX(hh + 8, MIN(c.y, sb.size.height - hh - 8));
+        floatingButton.center = c;
+        _floatingButtonSavedCenter = c;
     }
 }
 
@@ -1150,7 +1153,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
     UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
     CGPoint translation = [gesture translationInView:self];
-    
+
     if (gesture.state == UIGestureRecognizerStateBegan ||
         gesture.state == UIGestureRecognizerStateChanged) {
         viewToMove.center = CGPointMake(
@@ -1158,6 +1161,22 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             viewToMove.center.y + translation.y
         );
         [gesture setTranslation:CGPointZero inView:self];
+    }
+
+    if (gesture.state == UIGestureRecognizerStateEnded ||
+        gesture.state == UIGestureRecognizerStateCancelled) {
+        // Не даём уйти за края экрана
+        CGRect sb = self.bounds;
+        CGPoint c = viewToMove.center;
+        CGFloat hw = viewToMove.bounds.size.width  / 2;
+        CGFloat hh = viewToMove.bounds.size.height / 2;
+        c.x = MAX(hw + 8, MIN(c.x, sb.size.width  - hw - 8));
+        c.y = MAX(hh + 8, MIN(c.y, sb.size.height - hh - 8));
+        viewToMove.center = c;
+        // Сохраняем позицию кнопки чтобы layoutSubviews не сбрасывал
+        if (viewToMove == floatingButton) {
+            _floatingButtonSavedCenter = c;
+        }
     }
 }
 
