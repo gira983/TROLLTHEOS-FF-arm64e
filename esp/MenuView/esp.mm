@@ -95,6 +95,8 @@ static int  lineOrigin = 1;    // 0 = Top, 1 = Center, 2 = Bottom
 // ── Обычный Aimbot ──────────────────────────────────────────────────
 static bool  isAimbot      = NO;
 static float aimFov        = 150.0f;
+static bool  isInMatch     = NO;    // детекция матча — обновляется в renderESP
+static float espDistance   = 400.0f; // дальность ESP (слайдер в Extra)
 static float aimDistance   = 200.0f;
 
 
@@ -1089,7 +1091,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     [self addSliderTo:extraTabContainer label:@"FOV RADIUS" atY:ey width:eW minVal:10 maxVal:400 value:aimFov format:@"%.0f" onChanged:^(float v){ aimFov = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM DISTANCE" atY:ey width:eW minVal:10 maxVal:500 value:aimDistance format:@"%.0fm" onChanged:^(float v){ aimDistance = v; }]; ey += 54;
-    [self addSliderTo:extraTabContainer label:@"AIM SPEED" atY:ey width:eW minVal:0.05 maxVal:1.0 value:aimSpeed format:@"%.2f" onChanged:^(float v){ aimSpeed = v; }];
+    [self addSliderTo:extraTabContainer label:@"AIM SPEED" atY:ey width:eW minVal:0.05 maxVal:1.0 value:aimSpeed format:@"%.2f" onChanged:^(float v){ aimSpeed = v; }]; ey += 54;
+    // Разделитель
+    UIView *espSep = [[UIView alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 1)];
+    espSep.backgroundColor = COL_LINE;
+    [extraTabContainer addSubview:espSep]; ey += 8;
+    [self addSliderTo:extraTabContainer label:@"ESP DISTANCE" atY:ey width:eW minVal:50 maxVal:1000 value:espDistance format:@"%.0fm" onChanged:^(float v){ espDistance = v; }];
 
     // ══ CONFIG TAB ════════════════════════════════════════════════════
     settingTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
@@ -1620,8 +1627,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (_espBusy) return;
     _espBusy = YES;
 
-    // FOV круг — используем superview.bounds как и для ESP
-    if (isAimbot) {
+    // FOV круг — показываем только если aimbot включён И мы в матче
+    if (isAimbot && isInMatch) {
         float vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
         float vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
         if (vW < 10 || vH < 10) { vW = self.bounds.size.width; vH = self.bounds.size.height; }
@@ -1685,6 +1692,7 @@ bool get_IsFiring(uint64_t player) {
     uint64_t matchGame = getMatchGame(Moudule_Base);
     uint64_t camera    = CameraMain(matchGame);
     if (!isVaildPtr(camera)) {
+        isInMatch = NO;  // не в матче — сбрасываем флаг
         dispatch_async(dispatch_get_main_queue(), ^{
             [CATransaction begin]; [CATransaction setDisableActions:YES];
             _boneLayer.path=nil; _boxLayer.path=nil;
@@ -1694,6 +1702,7 @@ bool get_IsFiring(uint64_t player) {
         });
         return;
     }
+    isInMatch = YES;  // камера валидна — мы в матче
 
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
@@ -1780,8 +1789,8 @@ bool get_IsFiring(uint64_t player) {
         Vector3 HeadPos = getPositionExt(headNode);
 
         float dis = Vector3::Distance(myLoc, HeadPos);
-        // Убираем лишний cut-off — ESP работает до 600м
-        if (dis > 600.0f) continue;
+        // Фильтрация по слайдеру дальности ESP
+        if (dis > espDistance) continue;
 
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
