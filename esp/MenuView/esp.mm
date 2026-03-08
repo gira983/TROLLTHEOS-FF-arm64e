@@ -1637,34 +1637,41 @@ bool get_IsFiring(uint64_t player) {
     if (Moudule_Base == -1) return;
 
     uint64_t matchGame = getMatchGame(Moudule_Base);
+    uint64_t camera    = CameraMain(matchGame);
+    uint64_t match     = isVaildPtr(camera) ? getMatch(matchGame) : 0;
+    uint64_t myPawnObject = isVaildPtr(match) ? getLocalPlayer(match) : 0;
 
-    // Детекция матча: camera ptr невалиден → не в матче
-    uint64_t camera = CameraMain(matchGame);
-    if (!isVaildPtr(camera)) {
+    // Детекция матча:
+    // 1. camera валиден
+    // 2. localPlayer валиден (лобби: нет игрока в списке)
+    // 3. у моего игрока есть HP (лобби: MaxHP=0)
+    bool inMatch = NO;
+    if (isVaildPtr(camera) && isVaildPtr(match) && isVaildPtr(myPawnObject)) {
+        int myMaxHP = get_MaxHP(myPawnObject);
+        inMatch = (myMaxHP > 0);
+    }
+
+    if (!inMatch) {
         if (isInMatch) {
-            // Только что вышли — полная очистка всех слоёв
             isInMatch = NO;
             dispatch_async(dispatch_get_main_queue(), ^{
                 [CATransaction begin]; [CATransaction setDisableActions:YES];
-                _boneLayer.path   = nil;
-                _boxLayer.path    = nil;
-                _hpBgLayer.path   = nil;
-                _hpFillLayer.path = nil;
-                _lineLayer.path   = nil;
+                // Полная очистка всех слоёв
+                _boneNear.path = nil; _boneMid.path = nil;
+                _boneFar.path  = nil; _boneKnocked.path = nil;
+                _boxNear.path  = nil; _boxMid.path  = nil;
+                _boxFar.path   = nil; _boxKnocked.path  = nil;
+                _lineNear.path = nil; _lineMid.path = nil; _lineFar.path = nil;
+                _hpBgLayer.path = nil;
+                _hpFillGreen.path = nil; _hpFillYellow.path = nil; _hpFillRed.path = nil;
                 for (CATextLayer *t in _textPool) t.hidden = YES;
-                _fovLayer.hidden  = YES;
+                _fovLayer.hidden = YES;
                 [CATransaction commit];
             });
         }
         return;
     }
     isInMatch = YES;
-
-    uint64_t match = getMatch(matchGame);
-    if (!isVaildPtr(match)) return;
-
-    uint64_t myPawnObject = getLocalPlayer(match);
-    if (!isVaildPtr(myPawnObject)) return;
 
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
@@ -1736,8 +1743,8 @@ bool get_IsFiring(uint64_t player) {
         if (MaxHP <= 0) continue;
         if (CurHP <= 0) continue;  // трупы (HP=0) — не рендерить, не целиться
         // Нокнутый — прямые field reads из IL2CPP дампа:
-        bool isKnocked = ReadAddr<bool>(PawnObject + 0xA0)
-                      || ReadAddr<bool>(PawnObject + 0x1110);
+        bool isKnocked = ReadAddr<bool>(PawnObject + ENCRYPTOFFSET("0xA0"))
+                      || ReadAddr<bool>(PawnObject + ENCRYPTOFFSET("0x1110"));
 
         // Читаем голову — для дистанции и aimbot
         uint64_t headNode = getHead(PawnObject);
