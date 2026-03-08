@@ -110,10 +110,7 @@ static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
 static float aimSpeed = 1.0f;      // Aim smoothing 0.05 - 1.0
 static bool isStreamerMode = NO;   // Stream Proof
 
-// ── No Recoil (value scan, loop) ─────────────────────────────────────
-static bool isNoRecoil   = NO;
-// ── Speed (value scan, loop) ─────────────────────────────────────────
-static bool isSpeedActive = NO;
+
 
 @interface CustomSwitch : UIControl
 @property (nonatomic, assign, getter=isOn) BOOL on;
@@ -1128,20 +1125,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [settingTabContainer addSubview:cHdr];
     cy += 32;
 
-    // PATCHES
-    UIView *cSec1 = [self makeSectionHeaderWithTitle:@"PATCHES" atY:cy width:cW];
-    [settingTabContainer addSubview:cSec1]; cy += 18;
-
-    UIColor *loopColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
-    UIColor *scanColor = [UIColor colorWithRed:0.18 green:0.78 blue:0.71 alpha:1.0];
-    UIView *nrRow = [self makeCheckRowWithTitle:@"No Recoil" badge:@"LOOP" badgeColor:loopColor atY:cy width:cW initialValue:NO action:@selector(toggleNoRecoil:)];
-    [settingTabContainer addSubview:nrRow]; cy += 28;
-    UIView *spRow = [self makeCheckRowWithTitle:@"Speed" badge:@"SCAN" badgeColor:scanColor atY:cy width:cW initialValue:NO action:@selector(toggleSpeed:)];
-    [settingTabContainer addSubview:spRow]; cy += 28;
-
-    cy += 4;
-    // PRIVACY
-    UIView *cSec2 = [self makeSectionHeaderWithTitle:@"PRIVACY" atY:cy width:cW];
+        UIView *cSec2 = [self makeSectionHeaderWithTitle:@"PRIVACY" atY:cy width:cW];
     [settingTabContainer addSubview:cSec2]; cy += 18;
     UIView *spfRow = [self makeCheckRowWithTitle:@"Stream Proof" badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleStreamerMode:)];
     [settingTabContainer addSubview:spfRow]; cy += 26;
@@ -1370,56 +1354,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     __applyHideCapture(self, isStreamerMode);
 }
 
-// ── Value scan helper ────────────────────────────────────────────────
-// ── No Recoil ─────────────────────────────────────────────────────────
-// h5gg: searchNumber('1016018816','I32','0x100000000','0x160000000') → editAll('180','I32')
-// ── No Recoil — loop каждые 2 сек, ловит новые оружия ───────────────
-// scan: I32=1016018816 → patch: 180
-// Restore убран — запись по устаревшим адресам после смены оружия/выхода = краш
-- (void)toggleNoRecoil:(CustomSwitch *)sender {
-    isNoRecoil = sender.isOn;
-    if (isNoRecoil) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            const int MAX   = 4096;
-            int32_t search  = 1016018816;
-            int32_t patch   = 180;
-            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
-            while (isNoRecoil) {
-                int count = scanForValue(0x100000000, 0x160000000,
-                                         &search, sizeof(search), addrs, MAX);
-                for (int i = 0; i < count; i++)
-                    WriteAddr<int32_t>((long)addrs[i], patch);
-                // Sleep прерываемый — проверяем флаг каждые 100мс
-                for (int s = 0; s < 20 && isNoRecoil; s++)
-                    [NSThread sleepForTimeInterval:0.1];
-            }
-            free(addrs);
-        });
-    }
-}
 
-// ── Speed — loop каждые 2 сек, ловит новые оружия/регионы ───────────
-// scan: I64=4397530849764387586 → patch: 4366458311853765201
-- (void)toggleSpeed:(CustomSwitch *)sender {
-    isSpeedActive = sender.isOn;
-    if (isSpeedActive) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            const int MAX   = 4096;
-            int64_t search  = 4397530849764387586LL;
-            int64_t patch   = 4366458311853765201LL;
-            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
-            while (isSpeedActive) {
-                int count = scanForValue(0x100000000, 0x200000000,
-                                         &search, sizeof(search), addrs, MAX);
-                for (int i = 0; i < count; i++)
-                    WriteAddr<int64_t>((long)addrs[i], patch);
-                for (int s = 0; s < 20 && isSpeedActive; s++)
-                    [NSThread sleepForTimeInterval:0.1];
-            }
-            free(addrs);
-        });
-    }
-}
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
     void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, &kSegHandlerKey);
@@ -2007,7 +1942,6 @@ bool get_IsFiring(uint64_t player) {
     }
 
 
-    // No Recoil и Speed — работают через value-scan (разовые патчи), не renderESP
 
     // ── Передаём на main thread ──────────────────────────────────────
     BOOL b_bone=isBone, b_box=isBox, b_hp=isHealth, b_line=isLine;
@@ -2073,7 +2007,6 @@ bool get_IsFiring(uint64_t player) {
         CGPathRelease(hpFillGreenPath); CGPathRelease(hpFillYellowPath);
         CGPathRelease(hpFillRedPath);
 
-        // No Recoil работает на background queue — main thread ничего не рендерит
     });
 }
 
