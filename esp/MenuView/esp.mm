@@ -1667,7 +1667,7 @@ bool get_IsFiring(uint64_t player) {
                 _lineLayer.path = nil;
                 for (CATextLayer *t in _textPool) t.hidden = YES;
                 // Скрываем FOV круг аимбота
-                _fovCircleLayer.hidden = YES;
+                _fovLayer.hidden = YES;
                 [CATransaction commit];
             });
         }
