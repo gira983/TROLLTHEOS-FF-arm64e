@@ -1660,9 +1660,11 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    // Пишем ТОЛЬКО в пульный офсет — камеру не трогаем чтобы не дрожала
-    // OFF_ROTATION (камера) управляется игрой, мы не конкурируем с ней
-    WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);
+    // Пишем в оба: вход (0x53C) и выход (0x172C)
+    // Игра: читает 0x53C → интерполирует → пишет в 0x172C
+    // Мы перекрываем оба — нет окна для конкурентной записи игрой
+    WriteAddr<Quaternion>(player + OFF_ROTATION,    rotation);  // 0x53C — вход
+    WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);  // 0x172C — выход/пули
 }
 
 // Slerp от текущего угла к целевому — без прыжка через тело
@@ -1914,8 +1916,8 @@ bool get_IsFiring(uint64_t player) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
                 float ratio  = fmaxf(0.f, fminf(1.f, (float)CurHP / MaxHP));
-                float hpBarH = 3.f;
-                float hpBarY = by - hpBarH - 2.f;  // прямо над головой (top бокса)
+                float hpBarH = 4.f;                 // чуть толще
+                float hpBarY = by - hpBarH - 1.f;  // прямо над головой
                 float hpBarX = bx;
                 float hpBarW = boxW;
                 // Фон полоски
