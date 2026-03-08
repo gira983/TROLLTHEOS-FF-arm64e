@@ -85,14 +85,9 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
     pid_t pid = GetGameProcesspid(GameProcessName);
     if (pid == -1) return 0;
 
-    // Сначала пробуем processor_set_tasks — не детектируется античитом
+    // processor_set_tasks — не детектируется античитом как task_for_pid
+    // task_for_pid убран — детектируется Free Fire античитом
     get_task = GetTaskViaProcessorSet(pid);
-
-    // Fallback: task_for_pid если processor_set_tasks не сработал
-    // (например нет прав на com.apple.system-task-ports)
-    if (get_task == MACH_PORT_NULL) {
-        task_for_pid(mach_task_self(), pid, &get_task);
-    }
 
     if (get_task != MACH_PORT_NULL) {
         kern_return_t kr = mach_vm_region_recurse(get_task, &vmoffset, &vmsize,
