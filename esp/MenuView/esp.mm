@@ -1589,7 +1589,8 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);  // 0x53C only
+    WriteAddr<Quaternion>(player + OFF_ROTATION,    rotation);
+    WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);
 }
 
 // Slerp от текущего угла к целевому — без прыжка через тело
@@ -1752,7 +1753,7 @@ bool get_IsFiring(uint64_t player) {
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
             // Head mode: +0.25 unit above head center = headshot zone
-            Vector3 ap = HeadPos + Vector3(0, 0.25f, 0);
+            Vector3 ap = HeadPos + Vector3(0, 0.45f, 0);
             if (aimTarget == 1) ap = HeadPos;
             else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
             Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
@@ -1940,7 +1941,7 @@ bool get_IsFiring(uint64_t player) {
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
-        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget)) + Vector3(0, 0.25f, 0);
+        if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget)) + Vector3(0, 0.45f, 0);
         else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget));
         else                   ap = getPositionExt(getHip(bestTarget));
         // Snap прямо на цель — никакого Slerp, никакого y_bias для головы
