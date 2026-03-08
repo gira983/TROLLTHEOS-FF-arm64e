@@ -994,7 +994,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     isNoRecoil = sender.isOn;
     if (!isNoRecoil) return;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        while (self->isNoRecoil) {
+        while (isNoRecoil) {
             int32_t pattern = 1016018816;
             int32_t patch   = 180;
             uint64_t addrs[64]; int found = 0;
@@ -1009,7 +1009,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     isSpeedHack = sender.isOn;
     if (!isSpeedHack) return;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        while (self->isSpeedHack) {
+        while (isSpeedHack) {
             int64_t pattern = 4397530849764387586LL;
             int64_t patch   = 4366458311853765201LL;
             uint64_t addrs[64]; int found = 0;
@@ -1167,7 +1167,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         while (true) {
             uint64_t base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
             if (base > 0x100000000ULL) {
-                self->Moudule_Base = base;
+                Moudule_Base = base;
                 NSLog(@"[ESP] Module base: 0x%llx", base);
                 break;
             }
