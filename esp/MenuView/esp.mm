@@ -20,46 +20,40 @@ static void espLog(NSString *msg) {
 }
 #import "mahoa.h"
 
-// --- Obfuscated offsets (compile-time encrypted, runtime decrypted) ---
-// Player fields
-#define OFF_ROTATION        ENCRYPTOFFSET("0x53C")    // m_AimRotation (камера)
-// Silent aim: пишем в оба поля rotation одновременно
-// m_AimRotation (камера)         @ 0x53C  = OFF_ROTATION
-// m_CurrentAimRotation (пуля)    @ 0x172C
-#define OFF_CURRENT_AIM     ENCRYPTOFFSET("0x172C")   // пули идут сюда
-#define OFF_FIRING          ENCRYPTOFFSET("0x750")
+// Оффсеты: XOR-обфусцированные числа — никаких строк в бинарнике
+#define OFF_XOR_KEY 0x5A3F9C17ULL
+#define OFF_ROTATION ((uint64_t)(0x5A3F992BULL ^ OFF_XOR_KEY))
+#define OFF_CURRENT_AIM ((uint64_t)(0x5A3F8B3BULL ^ OFF_XOR_KEY))
+#define OFF_FIRING ((uint64_t)(0x5A3F9B47ULL ^ OFF_XOR_KEY))
+#define OFF_PLAYERID ((uint64_t)(0x5A3F9F2FULL ^ OFF_XOR_KEY))
+#define OFF_CAMERA_TRANSFORM ((uint64_t)(0x5A3F9F0FULL ^ OFF_XOR_KEY))
+#define OFF_HEAD_NODE ((uint64_t)(0x5A3F99AFULL ^ OFF_XOR_KEY))
+#define OFF_HIP_NODE ((uint64_t)(0x5A3F99D7ULL ^ OFF_XOR_KEY))
+#define OFF_LEFTANKLE_NODE ((uint64_t)(0x5A3F99E7ULL ^ OFF_XOR_KEY))
+#define OFF_RIGHTANKLE_NODE ((uint64_t)(0x5A3F99EFULL ^ OFF_XOR_KEY))
+#define OFF_RIGHTTOE_NODE ((uint64_t)(0x5A3F9A1FULL ^ OFF_XOR_KEY))
+#define OFF_LEFTARM_NODE ((uint64_t)(0x5A3F9A37ULL ^ OFF_XOR_KEY))
+#define OFF_LEFTFOREARM_NODE ((uint64_t)(0x5A3F9A5FULL ^ OFF_XOR_KEY))
+#define OFF_LEFTHAND_NODE ((uint64_t)(0x5A3F9A2FULL ^ OFF_XOR_KEY))
+#define OFF_RIGHTARM_NODE ((uint64_t)(0x5A3F9A3FULL ^ OFF_XOR_KEY))
+#define OFF_RIGHTFOREARM_NODE ((uint64_t)(0x5A3F9A57ULL ^ OFF_XOR_KEY))
+#define OFF_RIGHTHAND_NODE ((uint64_t)(0x5A3F9A27ULL ^ OFF_XOR_KEY))
+#define OFF_MATCH ((uint64_t)(0x5A3F9C87ULL ^ OFF_XOR_KEY))
+#define OFF_LOCALPLAYER ((uint64_t)(0x5A3F9CA7ULL ^ OFF_XOR_KEY))
+#define OFF_CAMERA_MGR ((uint64_t)(0x5A3F9CCFULL ^ OFF_XOR_KEY))
+#define OFF_CAMERA_MGR2 ((uint64_t)(0x5A3F9C0FULL ^ OFF_XOR_KEY))
+#define OFF_MATRIX_BASE ((uint64_t)(0x5A3F9CCFULL ^ OFF_XOR_KEY))
+#define OFF_CAM_V1 ((uint64_t)(0x5A3F9C07ULL ^ OFF_XOR_KEY))
+#define OFF_PLAYERLIST ((uint64_t)(0x5A3F9D37ULL ^ OFF_XOR_KEY))
+#define OFF_PLAYERLIST_ARR ((uint64_t)(0x5A3F9C3FULL ^ OFF_XOR_KEY))
+#define OFF_PLAYERLIST_CNT ((uint64_t)(0x5A3F9C0FULL ^ OFF_XOR_KEY))
+#define OFF_PLAYERLIST_ITEM ((uint64_t)(0x5A3F9C37ULL ^ OFF_XOR_KEY))
+#define OFF_GAMEFACADE_TI ((uint64_t)(0x5072B57FULL ^ OFF_XOR_KEY))
+#define OFF_GAMEFACADE_ST ((uint64_t)(0x5A3F9CAFULL ^ OFF_XOR_KEY))
+#define OFF_BODYPART_POS ((uint64_t)(0x5A3F9C07ULL ^ OFF_XOR_KEY))
+#define OFF_KNOCKED1 ((uint64_t)(0x5A3F9CB7ULL ^ OFF_XOR_KEY))
+#define OFF_KNOCKED2 ((uint64_t)(0x5A3F8D07ULL ^ OFF_XOR_KEY))
 
-// Knocked state через PropertyData pool @ player+0x68 (varID=2)
-// Тот же механизм что HP (varID=0,1) — работает стабильно
-#define OFF_PLAYERID        ENCRYPTOFFSET("0x338")
-#define OFF_CAMERA_TRANSFORM ENCRYPTOFFSET("0x318")
-#define OFF_HEAD_NODE       ENCRYPTOFFSET("0x5B8")
-#define OFF_HIP_NODE        ENCRYPTOFFSET("0x5C0")
-#define OFF_LEFTANKLE_NODE  ENCRYPTOFFSET("0x5F0")
-#define OFF_RIGHTANKLE_NODE ENCRYPTOFFSET("0x5F8")
-#define OFF_RIGHTTOE_NODE   ENCRYPTOFFSET("0x608")
-#define OFF_LEFTARM_NODE    ENCRYPTOFFSET("0x620")
-#define OFF_LEFTFOREARM_NODE ENCRYPTOFFSET("0x648")
-#define OFF_LEFTHAND_NODE   ENCRYPTOFFSET("0x638")
-#define OFF_RIGHTARM_NODE   ENCRYPTOFFSET("0x628")
-#define OFF_RIGHTFOREARM_NODE ENCRYPTOFFSET("0x640")
-#define OFF_RIGHTHAND_NODE  ENCRYPTOFFSET("0x630")
-// Match/game fields
-#define OFF_MATCH           ENCRYPTOFFSET("0x90")
-#define OFF_LOCALPLAYER     ENCRYPTOFFSET("0xB0")
-#define OFF_CAMERA_MGR      ENCRYPTOFFSET("0xD8")
-#define OFF_CAMERA_MGR2     ENCRYPTOFFSET("0x18")
-#define OFF_MATRIX_BASE     ENCRYPTOFFSET("0xD8")
-#define OFF_CAM_V1          ENCRYPTOFFSET("0x10")
-#define OFF_PLAYERLIST      ENCRYPTOFFSET("0x120")
-#define OFF_PLAYERLIST_ARR  ENCRYPTOFFSET("0x28")
-#define OFF_PLAYERLIST_CNT  ENCRYPTOFFSET("0x18")
-#define OFF_PLAYERLIST_ITEM ENCRYPTOFFSET("0x20")
-// GameFacade
-#define OFF_GAMEFACADE_TI   ENCRYPTOFFSET("0xA4D2968")
-#define OFF_GAMEFACADE_ST   ENCRYPTOFFSET("0xB8")
-// BodyPart
-#define OFF_BODYPART_POS    ENCRYPTOFFSET("0x10")
 #import <QuartzCore/QuartzCore.h>
 #import <UIKit/UIKit.h> 
 #include <sys/mman.h>
@@ -1743,8 +1737,8 @@ bool get_IsFiring(uint64_t player) {
         if (MaxHP <= 0) continue;
         if (CurHP <= 0) continue;  // трупы (HP=0) — не рендерить, не целиться
         // Нокнутый — прямые field reads из IL2CPP дампа:
-        bool isKnocked = ReadAddr<bool>(PawnObject + ENCRYPTOFFSET("0xA0"))
-                      || ReadAddr<bool>(PawnObject + ENCRYPTOFFSET("0x1110"));
+        bool isKnocked = ReadAddr<bool>(PawnObject + OFF_KNOCKED1)
+                      || ReadAddr<bool>(PawnObject + OFF_KNOCKED2);
 
         // Читаем голову — для дистанции и aimbot
         uint64_t headNode = getHead(PawnObject);
