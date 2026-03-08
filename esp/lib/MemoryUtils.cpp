@@ -154,3 +154,37 @@ bool _write(long addr, const void *buffer, int len) {
                                   (mach_msg_type_number_t)len);
     return (wkr == KERN_SUCCESS);
 }
+
+// ── Сканирование памяти по значению (аналог h5gg searchNumber) ────────
+// Читает память кусками по 1MB, ищет паттерн с выравниванием по patSize
+int scanForValue(uint64_t rangeStart, uint64_t rangeEnd,
+                 const void *pattern, size_t patSize,
+                 uint64_t *outAddrs, int maxResults) {
+    if (get_task == MACH_PORT_NULL || patSize == 0 || !outAddrs || maxResults <= 0)
+        return 0;
+
+    const size_t CHUNK = 0x100000; // 1MB кусками
+    uint8_t *buf = (uint8_t *)malloc(CHUNK);
+    if (!buf) return 0;
+
+    int found = 0;
+    for (uint64_t addr = rangeStart; addr < rangeEnd && found < maxResults; addr += CHUNK) {
+        vm_size_t actualRead = 0;
+        kern_return_t kr = vm_read_overwrite(get_task,
+                                             (vm_address_t)addr,
+                                             (vm_size_t)CHUNK,
+                                             (vm_address_t)buf,
+                                             &actualRead);
+        if (kr != KERN_SUCCESS || actualRead < patSize) continue;
+
+        // Выравненный поиск — как h5gg I32/I64 search
+        for (vm_size_t i = 0; i + patSize <= actualRead; i += patSize) {
+            if (memcmp(buf + i, pattern, patSize) == 0) {
+                outAddrs[found++] = addr + i;
+                if (found >= maxResults) break;
+            }
+        }
+    }
+    free(buf);
+    return found;
+}
