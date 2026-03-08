@@ -1,4 +1,8 @@
 #import "MemoryUtils.h"
+#import <dispatch/dispatch.h>
+#import <notify.h>
+#import <unistd.h>
+#import <stdio.h>
 
 // Глобальный task port игрового процесса
 mach_port_t get_task = MACH_PORT_NULL;
@@ -62,8 +66,9 @@ static mach_port_t RequestPortFromHUD(pid_t targetPid) {
     // Регистрируем ожидание ответа ПЕРЕД сигналом запроса
     __block int readyToken = 0;
     __block dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    notify_register_dispatch(NOTIFY_PORT_READY, &readyToken, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^(int t) {
-        notify_cancel(t);
+    notify_register_dispatch(NOTIFY_PORT_READY, &readyToken, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^(int token) {
+        (void)token;
+        notify_cancel(readyToken);
         dispatch_semaphore_signal(sem);
     });
 
