@@ -218,8 +218,7 @@
 	<!-- <array> -->
 		<!-- <string>assistivetouchd</string> -->
 	<!-- </array> -->
-	<key>task_for_pid-allow</key>
-	<true/>
+	<!-- task_for_pid-allow removed — detected by anticheat -->
 	<key>user-preference-read</key>
 	<true/>
 	<key>user-preference-write</key>
