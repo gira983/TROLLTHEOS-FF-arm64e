@@ -58,7 +58,6 @@ static void espLog(NSString *msg) {
 // GameFacade
 #define OFF_GAMEFACADE_TI   ENCRYPTOFFSET("0xA4D2968")
 #define OFF_GAMEFACADE_ST   ENCRYPTOFFSET("0xB8")
-#define OFF_IS_MATCH_STARTED ENCRYPTOFFSET("0x1D9")  // bool IsMatchStarted @ BaseGame+0x1D9
 // BodyPart
 #define OFF_BODYPART_POS    ENCRYPTOFFSET("0x10")
 #import <QuartzCore/QuartzCore.h>
@@ -1643,31 +1642,21 @@ bool get_IsFiring(uint64_t player) {
 
     uint64_t matchGame = getMatchGame(Moudule_Base);
 
-    // ── Надёжная детекция матча: 2 условия ──────────────────────────────────
-    // 1. IsMatchStarted (bool @ matchgame+0x1D9) — игровой флаг
-    // 2. Camera ptr валиден — 3D рендер активен
-    // Лобби: 3D камера ЕСТЬ но IsMatchStarted=false → ESP не рендерим
-    bool matchStarted = false;
-    if (isVaildPtr(matchGame)) {
-        matchStarted = (ReadAddr<uint8_t>(matchGame + OFF_IS_MATCH_STARTED) != 0);
-    }
+    // Детекция матча: camera ptr невалиден → не в матче
     uint64_t camera = CameraMain(matchGame);
-    bool inMatch = matchStarted && isVaildPtr(camera);
-
-    if (!inMatch) {
+    if (!isVaildPtr(camera)) {
         if (isInMatch) {
-            // Только что вышли из матча — полная очистка всех данных
+            // Только что вышли — полная очистка всех слоёв
             isInMatch = NO;
             dispatch_async(dispatch_get_main_queue(), ^{
                 [CATransaction begin]; [CATransaction setDisableActions:YES];
-                _boneLayer.path = nil;
-                _boxLayer.path  = nil;
-                _hpBgLayer.path = nil;
+                _boneLayer.path   = nil;
+                _boxLayer.path    = nil;
+                _hpBgLayer.path   = nil;
                 _hpFillLayer.path = nil;
-                _lineLayer.path = nil;
+                _lineLayer.path   = nil;
                 for (CATextLayer *t in _textPool) t.hidden = YES;
-                // Скрываем FOV круг аимбота
-                _fovLayer.hidden = YES;
+                _fovLayer.hidden  = YES;
                 [CATransaction commit];
             });
         }
