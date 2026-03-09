@@ -1680,14 +1680,14 @@ bool get_IsFiring(uint64_t player) {
     if (myMaxHP <= 0) { isInMatch = NO; return; }
 
     // Cooldown 4с после смены матча — не пишем aim пока игра не стабилизировалась
-    static NSTimeInterval _matchStartTime = 0;
-    static uint64_t _lastMatchPtr = 0;
-    if (match != _lastMatchPtr) {
-        _lastMatchPtr = match;
-        _matchStartTime = CACurrentMediaTime();
+    static NSTimeInterval sMatchStartTime = 0;
+    static uint64_t sLastMatchPtr = 0;
+    if (match != sLastMatchPtr) {
+        sLastMatchPtr = match;
+        sMatchStartTime = CACurrentMediaTime();
         isInMatch = NO; return; // пропускаем этот кадр
     }
-    bool _aimCooldown = (CACurrentMediaTime() - _matchStartTime) < 4.0;
+    bool _aimCooldown = (CACurrentMediaTime() - sMatchStartTime) < 4.0;
     isInMatch = YES;
 
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
