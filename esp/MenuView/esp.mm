@@ -20,40 +20,46 @@ static void espLog(NSString *msg) {
 }
 #import "mahoa.h"
 
-// Оффсеты: XOR-обфусцированные числа — никаких строк в бинарнике
-#define OFF_XOR_KEY 0x5A3F9C17ULL
-#define OFF_ROTATION ((uint64_t)(0x5A3F992BULL ^ OFF_XOR_KEY))
-#define OFF_CURRENT_AIM ((uint64_t)(0x5A3F8B3BULL ^ OFF_XOR_KEY))
-#define OFF_FIRING ((uint64_t)(0x5A3F9B47ULL ^ OFF_XOR_KEY))
-#define OFF_PLAYERID ((uint64_t)(0x5A3F9F2FULL ^ OFF_XOR_KEY))
-#define OFF_CAMERA_TRANSFORM ((uint64_t)(0x5A3F9F0FULL ^ OFF_XOR_KEY))
-#define OFF_HEAD_NODE ((uint64_t)(0x5A3F99AFULL ^ OFF_XOR_KEY))
-#define OFF_HIP_NODE ((uint64_t)(0x5A3F99D7ULL ^ OFF_XOR_KEY))
-#define OFF_LEFTANKLE_NODE ((uint64_t)(0x5A3F99E7ULL ^ OFF_XOR_KEY))
-#define OFF_RIGHTANKLE_NODE ((uint64_t)(0x5A3F99EFULL ^ OFF_XOR_KEY))
-#define OFF_RIGHTTOE_NODE ((uint64_t)(0x5A3F9A1FULL ^ OFF_XOR_KEY))
-#define OFF_LEFTARM_NODE ((uint64_t)(0x5A3F9A37ULL ^ OFF_XOR_KEY))
-#define OFF_LEFTFOREARM_NODE ((uint64_t)(0x5A3F9A5FULL ^ OFF_XOR_KEY))
-#define OFF_LEFTHAND_NODE ((uint64_t)(0x5A3F9A2FULL ^ OFF_XOR_KEY))
-#define OFF_RIGHTARM_NODE ((uint64_t)(0x5A3F9A3FULL ^ OFF_XOR_KEY))
-#define OFF_RIGHTFOREARM_NODE ((uint64_t)(0x5A3F9A57ULL ^ OFF_XOR_KEY))
-#define OFF_RIGHTHAND_NODE ((uint64_t)(0x5A3F9A27ULL ^ OFF_XOR_KEY))
-#define OFF_MATCH ((uint64_t)(0x5A3F9C87ULL ^ OFF_XOR_KEY))
-#define OFF_LOCALPLAYER ((uint64_t)(0x5A3F9CA7ULL ^ OFF_XOR_KEY))
-#define OFF_CAMERA_MGR ((uint64_t)(0x5A3F9CCFULL ^ OFF_XOR_KEY))
-#define OFF_CAMERA_MGR2 ((uint64_t)(0x5A3F9C0FULL ^ OFF_XOR_KEY))
-#define OFF_MATRIX_BASE ((uint64_t)(0x5A3F9CCFULL ^ OFF_XOR_KEY))
-#define OFF_CAM_V1 ((uint64_t)(0x5A3F9C07ULL ^ OFF_XOR_KEY))
-#define OFF_PLAYERLIST ((uint64_t)(0x5A3F9D37ULL ^ OFF_XOR_KEY))
-#define OFF_PLAYERLIST_ARR ((uint64_t)(0x5A3F9C3FULL ^ OFF_XOR_KEY))
-#define OFF_PLAYERLIST_CNT ((uint64_t)(0x5A3F9C0FULL ^ OFF_XOR_KEY))
-#define OFF_PLAYERLIST_ITEM ((uint64_t)(0x5A3F9C37ULL ^ OFF_XOR_KEY))
-#define OFF_GAMEFACADE_TI ((uint64_t)(0x5072B57FULL ^ OFF_XOR_KEY))
-#define OFF_GAMEFACADE_ST ((uint64_t)(0x5A3F9CAFULL ^ OFF_XOR_KEY))
-#define OFF_BODYPART_POS ((uint64_t)(0x5A3F9C07ULL ^ OFF_XOR_KEY))
-#define OFF_KNOCKED1 ((uint64_t)(0x5A3F9CB7ULL ^ OFF_XOR_KEY))
-#define OFF_KNOCKED2 ((uint64_t)(0x5A3F8D07ULL ^ OFF_XOR_KEY))
+// --- Obfuscated offsets (compile-time encrypted, runtime decrypted) ---
+// Player fields
+#define OFF_ROTATION        ENCRYPTOFFSET("0x53C")    // m_AimRotation (камера)
+// Silent aim: пишем в оба поля rotation одновременно
+// m_AimRotation (камера)         @ 0x53C  = OFF_ROTATION
+// m_CurrentAimRotation (пуля)    @ 0x172C
+#define OFF_CURRENT_AIM     ENCRYPTOFFSET("0x172C")   // пули идут сюда
+#define OFF_FIRING          ENCRYPTOFFSET("0x750")
 
+// Knocked state через PropertyData pool @ player+0x68 (varID=2)
+// Тот же механизм что HP (varID=0,1) — работает стабильно
+#define OFF_PLAYERID        ENCRYPTOFFSET("0x338")
+#define OFF_CAMERA_TRANSFORM ENCRYPTOFFSET("0x318")
+#define OFF_HEAD_NODE       ENCRYPTOFFSET("0x5B8")
+#define OFF_HIP_NODE        ENCRYPTOFFSET("0x5C0")
+#define OFF_LEFTANKLE_NODE  ENCRYPTOFFSET("0x5F0")
+#define OFF_RIGHTANKLE_NODE ENCRYPTOFFSET("0x5F8")
+#define OFF_RIGHTTOE_NODE   ENCRYPTOFFSET("0x608")
+#define OFF_LEFTARM_NODE    ENCRYPTOFFSET("0x620")
+#define OFF_LEFTFOREARM_NODE ENCRYPTOFFSET("0x648")
+#define OFF_LEFTHAND_NODE   ENCRYPTOFFSET("0x638")
+#define OFF_RIGHTARM_NODE   ENCRYPTOFFSET("0x628")
+#define OFF_RIGHTFOREARM_NODE ENCRYPTOFFSET("0x640")
+#define OFF_RIGHTHAND_NODE  ENCRYPTOFFSET("0x630")
+// Match/game fields
+#define OFF_MATCH           ENCRYPTOFFSET("0x90")
+#define OFF_LOCALPLAYER     ENCRYPTOFFSET("0xB0")
+#define OFF_CAMERA_MGR      ENCRYPTOFFSET("0xD8")
+#define OFF_CAMERA_MGR2     ENCRYPTOFFSET("0x18")
+#define OFF_MATRIX_BASE     ENCRYPTOFFSET("0xD8")
+#define OFF_CAM_V1          ENCRYPTOFFSET("0x10")
+#define OFF_PLAYERLIST      ENCRYPTOFFSET("0x120")
+#define OFF_PLAYERLIST_ARR  ENCRYPTOFFSET("0x28")
+#define OFF_PLAYERLIST_CNT  ENCRYPTOFFSET("0x18")
+#define OFF_PLAYERLIST_ITEM ENCRYPTOFFSET("0x20")
+// GameFacade
+#define OFF_GAMEFACADE_TI   ENCRYPTOFFSET("0xA4D2968")
+#define OFF_GAMEFACADE_ST   ENCRYPTOFFSET("0xB8")
+// BodyPart
+#define OFF_BODYPART_POS    ENCRYPTOFFSET("0x10")
 #import <QuartzCore/QuartzCore.h>
 #import <UIKit/UIKit.h> 
 #include <sys/mman.h>
@@ -101,8 +107,7 @@ static float aimDistance   = 200.0f;
 static int  aimMode = 1;           // 0 = Closest to Player, 1 = Closest to Crosshair
 static int  aimTrigger = 1;        // 0 = Always, 1 = Only Shooting, 2 = Only Aiming
 static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
-static float aimSpeed      = 1.0f;
-static float headOffset    = 0.0f;  // vertical head correction, tune in menu
+static float aimSpeed = 1.0f;      // Aim smoothing 0.05 - 1.0
 static bool isStreamerMode = NO;   // Stream Proof
 
 
@@ -234,34 +239,20 @@ static bool isStreamerMode = NO;   // Stream Proof
         self.userInteractionEnabled = YES;
         self.multipleTouchEnabled = NO;
         [self buildUI];
+        // Собственный pan — перехватывает горизонтальное движение раньше containerPan
+        UIPanGestureRecognizer *sliderPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSliderPan:)];
+        sliderPan.maximumNumberOfTouches = 1;
+        [self addGestureRecognizer:sliderPan];
     }
     return self;
 }
 
-// Прямые touches — не конфликтуют ни с чем
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    UITouch *t = touches.anyObject;
-    CGPoint loc = [t locationInView:self];
-    _dragStartX = loc.x;
-    _dragStartValue = _value;
-    [self updateValueFromX:loc.x];
-}
-
-- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    UITouch *t = touches.anyObject;
-    CGPoint loc = [t locationInView:self];
-    [self updateValueFromX:loc.x];
-}
-
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
-
-// hitTest всегда возвращает self — touches на дочерних views идут к HUDSlider
-- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-    if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
-    // Расширяем hit area по вертикали для удобства
-    CGRect expanded = CGRectInset(self.bounds, 0, -10);
-    return CGRectContainsPoint(expanded, point) ? self : nil;
+- (void)handleSliderPan:(UIPanGestureRecognizer *)gr {
+    if (gr.state == UIGestureRecognizerStateBegan ||
+        gr.state == UIGestureRecognizerStateChanged) {
+        CGPoint loc = [gr locationInView:self];
+        [self updateValueFromX:loc.x];
+    }
 }
 
 - (void)layoutSubviews {
@@ -329,7 +320,11 @@ static bool isStreamerMode = NO;   // Stream Proof
     _thumb.frame = CGRectMake(thumbX, thumbY, thumbSize, thumbSize);
 }
 
-// HUDSlider использует прямые touches — gesture recognizer не нужен
+// Запрещаем родительским gesture получать touches когда слайдер активен
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gr {
+    // Разрешаем только собственный sliderPan
+    return (gr.view == self);
+}
 
 - (void)updateValueFromX:(CGFloat)x {
     CGFloat trackW = _track.bounds.size.width;
@@ -376,10 +371,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *aimTabContainer;
     UIView *settingTabContainer;
     UIView *extraTabContainer;
-    UIScrollView *extraScroll;
     UIView *_sidebar;
-    UIView *_menuHdr; // header для drag
-    UIView *_menuDragZone; // зона перетаскивания
 
     UIView *previewView;
     UIView *previewContentContainer;
@@ -892,18 +884,14 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [closeBtn addGestureRecognizer:closeTap];
     // (добавляется в menuContainer после sidebar)
 
-    _menuHdr = hdr;
-    // Drag-зона — левые 2/3 header (правая часть занята кнопкой X)
-    UIView *dragZone = [[UIView alloc] initWithFrame:CGRectMake(0, 0, menuWidth * 0.85, hdrH)];
-    dragZone.backgroundColor = [UIColor clearColor];
-    dragZone.userInteractionEnabled = YES;
-    [hdr addSubview:dragZone];
-    _menuDragZone = dragZone;
     UIPanGestureRecognizer *menuPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-    menuPan.cancelsTouchesInView = YES;
-    [dragZone addGestureRecognizer:menuPan];
+    [hdr addGestureRecognizer:menuPan];
 
-    // Drag только за header — не конфликтует с extraScroll и слайдерами
+    // Pan на весь menuContainer — можно тащить за любую точку
+    UIPanGestureRecognizer *containerPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+    containerPan.cancelsTouchesInView = NO; // не блокировать тапы на кнопки
+    containerPan.delaysTouchesBegan = NO;
+    [menuContainer addGestureRecognizer:containerPan];
 
     // ── SIDEBAR (СЛЕВА) ───────────────────────────────────────────────
     CGFloat sbW = 52 * scale;
@@ -1075,23 +1063,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:@[@"Always", @"Shooting"] selectedRef:&aimTrigger tag:12];
 
     // ══ EXTRA TAB ═════════════════════════════════════════════════════
-    // Extra tab использует UIScrollView чтобы слайдеры не выходили за край
-    extraScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
-    extraScroll.backgroundColor = COL_BG1;
-    extraScroll.hidden = YES;
-    extraScroll.showsVerticalScrollIndicator = YES;
-    extraScroll.bounces = NO;
-    extraScroll.alwaysBounceVertical = NO;
-    extraScroll.canCancelContentTouches = YES;
-    extraScroll.delaysContentTouches = YES;
-    extraScroll.scrollEnabled = YES;
-    [menuContainer addSubview:extraScroll];
-    extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(0, 0, tabW, 400)];
+    extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
     extraTabContainer.backgroundColor = COL_BG1;
-    extraTabContainer.hidden = NO;
-    [extraScroll addSubview:extraTabContainer];
-    extraScroll.contentSize = CGSizeMake(tabW, 400);
-
+    extraTabContainer.hidden = YES;
+    [menuContainer addSubview:extraTabContainer];
 
     CGFloat eW = tabW;
     CGFloat ey = 0;
@@ -1117,15 +1092,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addSliderTo:extraTabContainer label:@"FOV RADIUS" atY:ey width:eW minVal:10 maxVal:400 value:aimFov format:@"%.0f" onChanged:^(float v){ aimFov = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM DISTANCE" atY:ey width:eW minVal:10 maxVal:500 value:aimDistance format:@"%.0fm" onChanged:^(float v){ aimDistance = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM SPEED" atY:ey width:eW minVal:0.05 maxVal:1.0 value:aimSpeed format:@"%.2f" onChanged:^(float v){ aimSpeed = v; }]; ey += 54;
-    [self addSliderTo:extraTabContainer label:@"HEAD OFFSET" atY:ey width:eW minVal:-0.5 maxVal:0.5 value:headOffset format:@"%.2f" onChanged:^(float v){ headOffset = v; }]; ey += 54;
-    // Разделитель
-    UIView *espSep = [[UIView alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 1)];
-    espSep.backgroundColor = COL_LINE;
-    [extraTabContainer addSubview:espSep]; ey += 8;
-    [self addSliderTo:extraTabContainer label:@"ESP DISTANCE" atY:ey width:eW minVal:50 maxVal:1000 value:espDistance format:@"%.0fm" onChanged:^(float v){ espDistance = v; }]; ey += 54;
-    // Обновляем contentSize точно под контент
-    extraTabContainer.frame = CGRectMake(0, 0, tabW, ey + 10);
-    extraScroll.contentSize = CGSizeMake(tabW, ey + 10);
+    [self addSliderTo:extraTabContainer label:@"HEAD OFFSET" atY:ey width:eW minVal:-0.5 maxVal:0.5 value:headOffset format:@"%.2f" onChanged:^(float v){ headOffset = v; }];
 
     // ══ CONFIG TAB ════════════════════════════════════════════════════
     settingTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
@@ -1203,11 +1170,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)switchToTab:(NSInteger)tabIndex {
     mainTabContainer.hidden = YES;
     aimTabContainer.hidden = YES;
-    extraScroll.hidden = YES;          // скрываем ScrollView, не child
+    extraTabContainer.hidden = YES;
     settingTabContainer.hidden = YES;
     mainTabContainer.userInteractionEnabled = NO;
     aimTabContainer.userInteractionEnabled = NO;
-    extraScroll.userInteractionEnabled = NO;
+    extraTabContainer.userInteractionEnabled = NO;
     settingTabContainer.userInteractionEnabled = NO;
     
     for (UIView *sub in _sidebar.subviews) {
@@ -1249,9 +1216,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             aimTabContainer.userInteractionEnabled = YES;
             break;
         case 2:
-            extraScroll.frame = CGRectMake(tabX, tabY, tabW, tabH);
-            extraScroll.hidden = NO;
-            extraScroll.userInteractionEnabled = YES;
+            extraTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
+            extraTabContainer.hidden = NO;
+            extraTabContainer.userInteractionEnabled = YES;
             break;
         case 3:
             settingTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
@@ -1504,13 +1471,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 
-// Delegate — containerPan не перехватывает слайдеры и UIScrollView
+// Delegate — containerPan не перехватывает слайдеры
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr shouldReceiveTouch:(UITouch *)touch {
     UIView *v = touch.view;
     while (v != nil) {
         if ([v isKindOfClass:[HUDSlider class]]) return NO;
         if ([v isKindOfClass:[CustomSwitch class]]) return NO;
-        if ([v isKindOfClass:[UIScrollView class]]) return NO; // extraScroll
         if (v == menuContainer) break;
         v = v.superview;
     }
@@ -1518,54 +1484,55 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
-    // containerPan уступает слайдерам и UIScrollView
+    // Если один из них — слайдерный pan — containerPan уступает
     UIView *otherView = other.view;
     while (otherView) {
         if ([otherView isKindOfClass:[HUDSlider class]]) return NO;
-        if ([otherView isKindOfClass:[UIScrollView class]]) return NO;
         otherView = otherView.superview;
     }
     return NO;
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    // Разрешаем drag ТОЛЬКО с floatingButton, header и sidebar
-    BOOL isAllowed = (gesture.view == floatingButton ||
-                      gesture.view == _menuDragZone);
-    if (!isAllowed) return;
     UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
     CGPoint translation = [gesture translationInView:self];
 
-    CGFloat containerW = self.superview ? self.superview.bounds.size.width  : self.bounds.size.width;
-    CGFloat containerH = self.superview ? self.superview.bounds.size.height : self.bounds.size.height;
-    if (containerW < 10 || containerH < 10) {
-        containerW = [UIScreen mainScreen].bounds.size.width;
-        containerH = [UIScreen mainScreen].bounds.size.height;
-    }
-    CGFloat halfW  = viewToMove.bounds.size.width  / 2.0;
-    CGFloat halfH  = viewToMove.bounds.size.height / 2.0;
-    CGFloat margin = 8.0;
-
     if (gesture.state == UIGestureRecognizerStateBegan ||
         gesture.state == UIGestureRecognizerStateChanged) {
-        CGFloat nx = viewToMove.center.x + translation.x;
-        CGFloat ny = viewToMove.center.y + translation.y;
-        // Ограничиваем во время движения — меню не вылетает за экран
-        nx = MAX(halfW + margin, MIN(nx, containerW - halfW - margin));
-        ny = MAX(halfH + margin, MIN(ny, containerH - halfH - margin));
-        viewToMove.center = CGPointMake(nx, ny);
+        // Во время перетаскивания — полная свобода, никаких ограничений
+        viewToMove.center = CGPointMake(
+            viewToMove.center.x + translation.x,
+            viewToMove.center.y + translation.y
+        );
         [gesture setTranslation:CGPointZero inView:self];
     }
 
-    // При отпускании или отмене — snap в экран (на случай если всё же вышло)
+    // При отпускании — плавно возвращаем в экран
     if (gesture.state == UIGestureRecognizerStateEnded ||
         gesture.state == UIGestureRecognizerStateCancelled) {
-        CGFloat cx = MAX(halfW + margin, MIN(viewToMove.center.x, containerW - halfW - margin));
-        CGFloat cy = MAX(halfH + margin, MIN(viewToMove.center.y, containerH - halfH - margin));
-        [UIView animateWithDuration:0.25
+
+        // superview (_blurView) всегда полноэкранный — берём его размеры
+        CGFloat containerW = self.superview ? self.superview.bounds.size.width  : self.bounds.size.width;
+        CGFloat containerH = self.superview ? self.superview.bounds.size.height : self.bounds.size.height;
+        if (containerW < 10 || containerH < 10) {
+            containerW = [UIScreen mainScreen].bounds.size.width;
+            containerH = [UIScreen mainScreen].bounds.size.height;
+        }
+        CGFloat halfW = viewToMove.bounds.size.width  / 2.0;
+        CGFloat halfH = viewToMove.bounds.size.height / 2.0;
+        CGFloat margin = 8.0;
+
+        CGFloat cx = viewToMove.center.x;
+        CGFloat cy = viewToMove.center.y;
+
+        // Меню полностью внутри экрана при отпускании
+        cx = MAX(halfW + margin, MIN(cx, containerW - halfW - margin));
+        cy = MAX(halfH + margin, MIN(cy, containerH - halfH - margin));
+
+        [UIView animateWithDuration:0.3
                                delay:0
-              usingSpringWithDamping:0.8
-               initialSpringVelocity:0.3
+              usingSpringWithDamping:0.75
+               initialSpringVelocity:0.5
                              options:UIViewAnimationOptionCurveEaseOut
                           animations:^{ viewToMove.center = CGPointMake(cx, cy); }
                           completion:nil];
@@ -1618,44 +1585,17 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     });
 }
 
-// Prediction state
-static uint64_t  s_lastTarget   = 0;
-static Vector3   s_lastHeadPos  = {0,0,0};
-static Vector3   s_headVelocity = {0,0,0};
-static double    s_lastAimTime  = 0.0;
-static const float kBulletDelay = 0.11f; // ~80ms ping + 33ms frame
-
-Quaternion GetRotationToLocation(Vector3 target, Vector3 myLoc) {
-    return Quaternion::LookRotation(target - myLoc, Vector3(0, 1, 0));
+Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 myLoc) {
+    return Quaternion::LookRotation((targetLocation + Vector3(0, y_bias, 0)) - myLoc, Vector3(0, 1, 0));
 }
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    WriteAddr<Quaternion>(player + OFF_ROTATION,    rotation);
-    WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);
-}
-
-static Vector3 PredictHeadPosition(uint64_t target, Vector3 head, bool doTrack) {
-    double now = CACurrentMediaTime();
-    if (doTrack) {
-        // Track velocity only while aiming — no stale drift on first lock
-        if (target == s_lastTarget && s_lastAimTime > 0.0) {
-            float dt = (float)(now - s_lastAimTime);
-            if (dt > 0.001f && dt < 0.15f) {
-                Vector3 rawVel = (head - s_lastHeadPos) * (1.0f / dt);
-                s_headVelocity = s_headVelocity * 0.4f + rawVel * 0.6f;
-            }
-        } else {
-            // New target or aim just activated — reset, go straight to head
-            s_headVelocity = Vector3(0, 0, 0);
-        }
-        s_lastTarget  = target;
-        s_lastHeadPos = head;
-        s_lastAimTime = now;
-    }
-    Vector3 predicted = head + s_headVelocity * kBulletDelay;
-    predicted.y += headOffset;
-    return predicted;
+    // Пишем в оба: вход (0x53C) и выход (0x172C)
+    // Игра: читает 0x53C → интерполирует → пишет в 0x172C
+    // Мы перекрываем оба — нет окна для конкурентной записи игрой
+    WriteAddr<Quaternion>(player + OFF_ROTATION,    rotation);  // 0x53C — вход
+    WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);  // 0x172C — выход/пули
 }
 
 // Slerp от текущего угла к целевому — без прыжка через тело
@@ -1697,41 +1637,34 @@ bool get_IsFiring(uint64_t player) {
     if (Moudule_Base == -1) return;
 
     uint64_t matchGame = getMatchGame(Moudule_Base);
-    uint64_t camera    = CameraMain(matchGame);
-    uint64_t match     = isVaildPtr(camera) ? getMatch(matchGame) : 0;
-    uint64_t myPawnObject = isVaildPtr(match) ? getLocalPlayer(match) : 0;
 
-    // Детекция матча:
-    // 1. camera валиден
-    // 2. localPlayer валиден (лобби: нет игрока в списке)
-    // 3. у моего игрока есть HP (лобби: MaxHP=0)
-    bool inMatch = NO;
-    if (isVaildPtr(camera) && isVaildPtr(match) && isVaildPtr(myPawnObject)) {
-        int myMaxHP = get_MaxHP(myPawnObject);
-        inMatch = (myMaxHP > 0);
-    }
-
-    if (!inMatch) {
+    // Детекция матча: camera ptr невалиден → не в матче
+    uint64_t camera = CameraMain(matchGame);
+    if (!isVaildPtr(camera)) {
         if (isInMatch) {
+            // Только что вышли — полная очистка всех слоёв
             isInMatch = NO;
             dispatch_async(dispatch_get_main_queue(), ^{
                 [CATransaction begin]; [CATransaction setDisableActions:YES];
-                // Полная очистка всех слоёв
-                _boneNear.path = nil; _boneMid.path = nil;
-                _boneFar.path  = nil; _boneKnocked.path = nil;
-                _boxNear.path  = nil; _boxMid.path  = nil;
-                _boxFar.path   = nil; _boxKnocked.path  = nil;
-                _lineNear.path = nil; _lineMid.path = nil; _lineFar.path = nil;
-                _hpBgLayer.path = nil;
-                _hpFillGreen.path = nil; _hpFillYellow.path = nil; _hpFillRed.path = nil;
+                _boneLayer.path   = nil;
+                _boxLayer.path    = nil;
+                _hpBgLayer.path   = nil;
+                _hpFillLayer.path = nil;
+                _lineLayer.path   = nil;
                 for (CATextLayer *t in _textPool) t.hidden = YES;
-                _fovLayer.hidden = YES;
+                _fovLayer.hidden  = YES;
                 [CATransaction commit];
             });
         }
         return;
     }
     isInMatch = YES;
+
+    uint64_t match = getMatch(matchGame);
+    if (!isVaildPtr(match)) return;
+
+    uint64_t myPawnObject = getLocalPlayer(match);
+    if (!isVaildPtr(myPawnObject)) return;
 
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
@@ -1803,8 +1736,8 @@ bool get_IsFiring(uint64_t player) {
         if (MaxHP <= 0) continue;
         if (CurHP <= 0) continue;  // трупы (HP=0) — не рендерить, не целиться
         // Нокнутый — прямые field reads из IL2CPP дампа:
-        bool isKnocked = ReadAddr<bool>(PawnObject + OFF_KNOCKED1)
-                      || ReadAddr<bool>(PawnObject + OFF_KNOCKED2);
+        bool isKnocked = ReadAddr<bool>(PawnObject + 0xA0)
+                      || ReadAddr<bool>(PawnObject + 0x1110);
 
         // Читаем голову — для дистанции и aimbot
         uint64_t headNode = getHead(PawnObject);
@@ -1817,15 +1750,15 @@ bool get_IsFiring(uint64_t player) {
 
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
-            // Для scoring в crosshair режиме ВСЕГДА берём голову —
-            // иначе при aimTarget=Hip прицел ищет ближайшее тело, а стреляет в голову.
-            // Для Player mode (dis) кость не важна — берём голову тоже.
-            Vector3 aimPt = HeadPos + Vector3(0, headOffset, 0);
-            Vector3 ws = WorldToScreen(aimPt, matrix, vW, vH);
+            // Scoring ВСЕГДА по голове + headOffset — не по телу
+            // Crosshair режим: ищем чья голова ближе к центру прицела
+            // Player режим: 3D дистанция до игрока
+            Vector3 scorePt = HeadPos + Vector3(0, headOffset, 0);
+            Vector3 ws = WorldToScreen(scorePt, matrix, vW, vH);
             float dx = ws.x - center.x, dy = ws.y - center.y;
-            float d2 = sqrtf(dx*dx + dy*dy);
+            float d2 = sqrtf(dx*dx+dy*dy);
             if (d2 <= aimFov) {
-                float sc = (aimMode == 1) ? d2 : dis;
+                float sc = (aimMode == 0) ? dis : d2;
                 if (sc < bestScore) { bestScore = sc; bestTarget = PawnObject; }
             }
         }
@@ -1845,7 +1778,7 @@ bool get_IsFiring(uint64_t player) {
             s_HeadTop.y < -200 || s_HeadTop.y > vH+200) continue;
 
         float boxH = fabsf(s_HeadTop.y - s_Toe.y);
-        if (boxH < 2.0f) continue;   // слишком маленький — за горизонтом
+        if (boxH < 6.0f) continue;   // слишком маленький — за горизонтом
         float boxW = boxH * 0.45f;
         float bx   = s_HeadTop.x - boxW * 0.5f;
         float by   = s_HeadTop.y;
@@ -2007,16 +1940,11 @@ bool get_IsFiring(uint64_t player) {
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 rawHead = getPositionExt(getHead(bestTarget));
         Vector3 ap;
-        if (aimTarget == 0) {
-            ap = PredictHeadPosition(bestTarget, rawHead, true);
-        } else if (aimTarget == 1) {
-            ap = PredictHeadPosition(bestTarget, rawHead, true) + Vector3(0, -0.1f, 0);
-        } else {
-            ap = getPositionExt(getHip(bestTarget));
-        }
-        // Snap прямо на цель — никакого Slerp, никакого y_bias для головы
+        if      (aimTarget==0) ap = rawHead + Vector3(0, headOffset, 0);
+        else if (aimTarget==1) ap = rawHead + Vector3(0, headOffset - 0.12f, 0);
+        else                   ap = getPositionExt(getHip(bestTarget)) + Vector3(0, headOffset, 0);
         // OFF_ROTATION (камера) + OFF_CURRENT_AIM (пули) — оба обновляются в set_aim
-        set_aim(myPawnObject, GetRotationToLocation(ap, myLoc));
+        set_aim(myPawnObject, GetRotationToLocation(ap, 0.f, myLoc));
     }
 
 
