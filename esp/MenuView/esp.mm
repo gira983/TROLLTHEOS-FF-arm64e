@@ -108,6 +108,7 @@ static int  aimMode = 1;           // 0 = Closest to Player, 1 = Closest to Cros
 static int  aimTrigger = 1;        // 0 = Always, 1 = Only Shooting, 2 = Only Aiming
 static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
 static float aimSpeed = 1.0f;      // Aim smoothing 0.05 - 1.0
+static float headOffset = 0.0f;    // смещение точки прицеливания по Y (голова)
 static bool isStreamerMode = NO;   // Stream Proof
 
 
