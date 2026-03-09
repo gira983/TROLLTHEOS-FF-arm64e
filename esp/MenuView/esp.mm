@@ -883,11 +883,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIPanGestureRecognizer *menuPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
     [hdr addGestureRecognizer:menuPan];
 
-    // Pan на весь menuContainer — можно тащить за любую точку
-    UIPanGestureRecognizer *containerPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-    containerPan.cancelsTouchesInView = NO; // не блокировать тапы на кнопки
-    containerPan.delaysTouchesBegan = NO;
-    [menuContainer addGestureRecognizer:containerPan];
+    // Drag только за header — не конфликтует с extraScroll и слайдерами
 
     // ── SIDEBAR (СЛЕВА) ───────────────────────────────────────────────
     CGFloat sbW = 52 * scale;
@@ -1063,11 +1059,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     extraScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
     extraScroll.backgroundColor = COL_BG1;
     extraScroll.hidden = YES;
-    extraScroll.showsVerticalScrollIndicator = NO;
-    extraScroll.bounces = NO;
-    extraScroll.alwaysBounceVertical = NO;
-    extraScroll.canCancelContentTouches = NO;
-    extraScroll.delaysContentTouches = NO;
+    extraScroll.showsVerticalScrollIndicator = YES;
+    extraScroll.bounces = YES;
+    extraScroll.alwaysBounceVertical = YES;
+    extraScroll.canCancelContentTouches = YES;
+    extraScroll.delaysContentTouches = YES;
+    extraScroll.scrollEnabled = YES;
     [menuContainer addSubview:extraScroll];
     extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(0, 0, tabW, 400)];
     extraTabContainer.backgroundColor = COL_BG1;
