@@ -892,6 +892,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     sidebar.backgroundColor = COL_BG0;
     sidebar.userInteractionEnabled = YES;
     _sidebar = sidebar;
+    // Pan за sidebar — двигает меню (как header)
+    UIPanGestureRecognizer *sidebarPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
+    sidebarPan.cancelsTouchesInView = NO;
+    [sidebar addGestureRecognizer:sidebarPan];
 
     UIView *sbLine = [[UIView alloc] initWithFrame:CGRectMake(sbW - 1, 0, 1, menuHeight - sbY)];
     sbLine.backgroundColor = COL_LINE;
@@ -1509,45 +1513,41 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
+    // Не двигать меню если pan начался внутри extraScroll
+    if (gesture.view == extraScroll) return;
     UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
     CGPoint translation = [gesture translationInView:self];
 
+    CGFloat containerW = self.superview ? self.superview.bounds.size.width  : self.bounds.size.width;
+    CGFloat containerH = self.superview ? self.superview.bounds.size.height : self.bounds.size.height;
+    if (containerW < 10 || containerH < 10) {
+        containerW = [UIScreen mainScreen].bounds.size.width;
+        containerH = [UIScreen mainScreen].bounds.size.height;
+    }
+    CGFloat halfW  = viewToMove.bounds.size.width  / 2.0;
+    CGFloat halfH  = viewToMove.bounds.size.height / 2.0;
+    CGFloat margin = 8.0;
+
     if (gesture.state == UIGestureRecognizerStateBegan ||
         gesture.state == UIGestureRecognizerStateChanged) {
-        // Во время перетаскивания — полная свобода, никаких ограничений
-        viewToMove.center = CGPointMake(
-            viewToMove.center.x + translation.x,
-            viewToMove.center.y + translation.y
-        );
+        CGFloat nx = viewToMove.center.x + translation.x;
+        CGFloat ny = viewToMove.center.y + translation.y;
+        // Ограничиваем во время движения — меню не вылетает за экран
+        nx = MAX(halfW + margin, MIN(nx, containerW - halfW - margin));
+        ny = MAX(halfH + margin, MIN(ny, containerH - halfH - margin));
+        viewToMove.center = CGPointMake(nx, ny);
         [gesture setTranslation:CGPointZero inView:self];
     }
 
-    // При отпускании — плавно возвращаем в экран
+    // При отпускании или отмене — snap в экран (на случай если всё же вышло)
     if (gesture.state == UIGestureRecognizerStateEnded ||
         gesture.state == UIGestureRecognizerStateCancelled) {
-
-        // superview (_blurView) всегда полноэкранный — берём его размеры
-        CGFloat containerW = self.superview ? self.superview.bounds.size.width  : self.bounds.size.width;
-        CGFloat containerH = self.superview ? self.superview.bounds.size.height : self.bounds.size.height;
-        if (containerW < 10 || containerH < 10) {
-            containerW = [UIScreen mainScreen].bounds.size.width;
-            containerH = [UIScreen mainScreen].bounds.size.height;
-        }
-        CGFloat halfW = viewToMove.bounds.size.width  / 2.0;
-        CGFloat halfH = viewToMove.bounds.size.height / 2.0;
-        CGFloat margin = 8.0;
-
-        CGFloat cx = viewToMove.center.x;
-        CGFloat cy = viewToMove.center.y;
-
-        // Меню полностью внутри экрана при отпускании
-        cx = MAX(halfW + margin, MIN(cx, containerW - halfW - margin));
-        cy = MAX(halfH + margin, MIN(cy, containerH - halfH - margin));
-
-        [UIView animateWithDuration:0.3
+        CGFloat cx = MAX(halfW + margin, MIN(viewToMove.center.x, containerW - halfW - margin));
+        CGFloat cy = MAX(halfH + margin, MIN(viewToMove.center.y, containerH - halfH - margin));
+        [UIView animateWithDuration:0.25
                                delay:0
-              usingSpringWithDamping:0.75
-               initialSpringVelocity:0.5
+              usingSpringWithDamping:0.8
+               initialSpringVelocity:0.3
                              options:UIViewAnimationOptionCurveEaseOut
                           animations:^{ viewToMove.center = CGPointMake(cx, cy); }
                           completion:nil];
