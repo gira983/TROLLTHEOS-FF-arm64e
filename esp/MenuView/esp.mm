@@ -1063,8 +1063,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     extraScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
     extraScroll.backgroundColor = COL_BG1;
     extraScroll.hidden = YES;
-    extraScroll.showsVerticalScrollIndicator = YES;
-    extraScroll.bounces = YES;
+    extraScroll.showsVerticalScrollIndicator = NO;
+    extraScroll.bounces = NO;
+    extraScroll.alwaysBounceVertical = NO;
+    extraScroll.canCancelContentTouches = NO;
+    extraScroll.delaysContentTouches = NO;
     [menuContainer addSubview:extraScroll];
     extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(0, 0, tabW, 400)];
     extraTabContainer.backgroundColor = COL_BG1;
@@ -1183,11 +1186,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)switchToTab:(NSInteger)tabIndex {
     mainTabContainer.hidden = YES;
     aimTabContainer.hidden = YES;
-    extraTabContainer.hidden = YES;
+    extraScroll.hidden = YES;          // скрываем ScrollView, не child
     settingTabContainer.hidden = YES;
     mainTabContainer.userInteractionEnabled = NO;
     aimTabContainer.userInteractionEnabled = NO;
-    extraTabContainer.userInteractionEnabled = NO;
+    extraScroll.userInteractionEnabled = NO;
     settingTabContainer.userInteractionEnabled = NO;
     
     for (UIView *sub in _sidebar.subviews) {
@@ -1484,12 +1487,13 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 
-// Delegate — containerPan не перехватывает слайдеры
+// Delegate — containerPan не перехватывает слайдеры и UIScrollView
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr shouldReceiveTouch:(UITouch *)touch {
     UIView *v = touch.view;
     while (v != nil) {
         if ([v isKindOfClass:[HUDSlider class]]) return NO;
         if ([v isKindOfClass:[CustomSwitch class]]) return NO;
+        if ([v isKindOfClass:[UIScrollView class]]) return NO; // extraScroll
         if (v == menuContainer) break;
         v = v.superview;
     }
@@ -1497,10 +1501,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
-    // Если один из них — слайдерный pan — containerPan уступает
+    // containerPan уступает слайдерам и UIScrollView
     UIView *otherView = other.view;
     while (otherView) {
         if ([otherView isKindOfClass:[HUDSlider class]]) return NO;
+        if ([otherView isKindOfClass:[UIScrollView class]]) return NO;
         otherView = otherView.superview;
     }
     return NO;
