@@ -1058,10 +1058,20 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:@[@"Always", @"Shooting"] selectedRef:&aimTrigger tag:12];
 
     // ══ EXTRA TAB ═════════════════════════════════════════════════════
-    extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
+    // Extra tab использует UIScrollView чтобы слайдеры не выходили за край
+    UIScrollView *extraScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
+    extraScroll.backgroundColor = COL_BG1;
+    extraScroll.hidden = YES;
+    extraScroll.showsVerticalScrollIndicator = YES;
+    extraScroll.bounces = YES;
+    [menuContainer addSubview:extraScroll];
+    extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(0, 0, tabW, 400)];
     extraTabContainer.backgroundColor = COL_BG1;
-    extraTabContainer.hidden = YES;
-    [menuContainer addSubview:extraTabContainer];
+    extraTabContainer.hidden = NO;
+    [extraScroll addSubview:extraTabContainer];
+    extraScroll.contentSize = CGSizeMake(tabW, 400);
+    // Скроллвью становится нашим "контейнером" для show/hide
+    #define extraScrollView extraScroll
 
     CGFloat eW = tabW;
     CGFloat ey = 0;
@@ -1092,7 +1102,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *espSep = [[UIView alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 1)];
     espSep.backgroundColor = COL_LINE;
     [extraTabContainer addSubview:espSep]; ey += 8;
-    [self addSliderTo:extraTabContainer label:@"ESP DISTANCE" atY:ey width:eW minVal:50 maxVal:1000 value:espDistance format:@"%.0fm" onChanged:^(float v){ espDistance = v; }];
+    [self addSliderTo:extraTabContainer label:@"ESP DISTANCE" atY:ey width:eW minVal:50 maxVal:1000 value:espDistance format:@"%.0fm" onChanged:^(float v){ espDistance = v; }]; ey += 54;
+    // Обновляем contentSize точно под контент
+    extraTabContainer.frame = CGRectMake(0, 0, tabW, ey + 10);
+    extraScroll.contentSize = CGSizeMake(tabW, ey + 10);
 
     // ══ CONFIG TAB ════════════════════════════════════════════════════
     settingTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
@@ -1216,9 +1229,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             aimTabContainer.userInteractionEnabled = YES;
             break;
         case 2:
-            extraTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
-            extraTabContainer.hidden = NO;
-            extraTabContainer.userInteractionEnabled = YES;
+            extraScrollView.frame = CGRectMake(tabX, tabY, tabW, tabH);
+            extraScrollView.hidden = NO;
+            extraScrollView.userInteractionEnabled = YES;
             break;
         case 3:
             settingTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
@@ -1602,21 +1615,24 @@ void set_aim(uint64_t player, Quaternion rotation) {
     WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);
 }
 
-static Vector3 PredictHeadPosition(uint64_t target, Vector3 head) {
+static Vector3 PredictHeadPosition(uint64_t target, Vector3 head, bool doTrack) {
     double now = CACurrentMediaTime();
-    if (target == s_lastTarget && s_lastAimTime > 0.0) {
-        float dt = (float)(now - s_lastAimTime);
-        if (dt > 0.001f && dt < 0.3f) {
-            Vector3 rawVel = (head - s_lastHeadPos) * (1.0f / dt);
-            // exponential smoothing - weight recent frames more
-            s_headVelocity = s_headVelocity * 0.35f + rawVel * 0.65f;
+    if (doTrack) {
+        // Track velocity only while aiming — no stale drift on first lock
+        if (target == s_lastTarget && s_lastAimTime > 0.0) {
+            float dt = (float)(now - s_lastAimTime);
+            if (dt > 0.001f && dt < 0.15f) {
+                Vector3 rawVel = (head - s_lastHeadPos) * (1.0f / dt);
+                s_headVelocity = s_headVelocity * 0.4f + rawVel * 0.6f;
+            }
+        } else {
+            // New target or aim just activated — reset, go straight to head
+            s_headVelocity = Vector3(0, 0, 0);
         }
-    } else {
-        s_headVelocity = Vector3(0, 0, 0);
+        s_lastTarget  = target;
+        s_lastHeadPos = head;
+        s_lastAimTime = now;
     }
-    s_lastTarget  = target;
-    s_lastHeadPos = head;
-    s_lastAimTime = now;
     Vector3 predicted = head + s_headVelocity * kBulletDelay;
     predicted.y += headOffset;
     return predicted;
@@ -1781,15 +1797,17 @@ bool get_IsFiring(uint64_t player) {
 
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
-            // Head mode: +0.25 unit above head center = headshot zone
-            Vector3 ap = HeadPos + Vector3(0, 0.15f, 0);
-            if (aimTarget == 1) ap = HeadPos;
-            else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
-            Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
+            // Проецируем ВСЕГДА голову (+ headOffset) — не тело
+            // Crosshair mode: d2 = пикселей от центра экрана до головы врага
+            // Player mode:    sc = 3D дистанция до игрока
+            Vector3 aimPt;
+            if (aimTarget == 2) aimPt = getPositionExt(getHip(PawnObject));
+            else                aimPt = HeadPos + Vector3(0, headOffset, 0);
+            Vector3 ws = WorldToScreen(aimPt, matrix, vW, vH);
             float dx = ws.x - center.x, dy = ws.y - center.y;
-            float d2 = sqrtf(dx*dx+dy*dy);
+            float d2 = sqrtf(dx*dx + dy*dy);
             if (d2 <= aimFov) {
-                float sc = (aimMode == 0) ? dis : d2;
+                float sc = (aimMode == 1) ? d2 : dis;
                 if (sc < bestScore) { bestScore = sc; bestTarget = PawnObject; }
             }
         }
@@ -1972,9 +1990,9 @@ bool get_IsFiring(uint64_t player) {
         Vector3 rawHead = getPositionExt(getHead(bestTarget));
         Vector3 ap;
         if (aimTarget == 0) {
-            ap = PredictHeadPosition(bestTarget, rawHead);
+            ap = PredictHeadPosition(bestTarget, rawHead, true);
         } else if (aimTarget == 1) {
-            ap = PredictHeadPosition(bestTarget, rawHead) + Vector3(0, -0.1f, 0);
+            ap = PredictHeadPosition(bestTarget, rawHead, true) + Vector3(0, -0.1f, 0);
         } else {
             ap = getPositionExt(getHip(bestTarget));
         }
