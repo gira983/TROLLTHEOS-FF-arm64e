@@ -368,6 +368,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *extraTabContainer;
     UIScrollView *extraScroll;
     UIView *_sidebar;
+    UIView *_menuHdr; // header для drag
 
     UIView *previewView;
     UIView *previewContentContainer;
@@ -880,6 +881,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [closeBtn addGestureRecognizer:closeTap];
     // (добавляется в menuContainer после sidebar)
 
+    _menuHdr = hdr; // сохраняем для проверки в handlePan
     UIPanGestureRecognizer *menuPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
     [hdr addGestureRecognizer:menuPan];
 
@@ -895,6 +897,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     // Pan за sidebar — двигает меню (как header)
     UIPanGestureRecognizer *sidebarPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
     sidebarPan.cancelsTouchesInView = NO;
+    sidebarPan.delaysTouchesBegan = NO;
+    sidebarPan.minimumNumberOfTouches = 1;
+    sidebarPan.maximumNumberOfTouches = 1;
     [sidebar addGestureRecognizer:sidebarPan];
 
     UIView *sbLine = [[UIView alloc] initWithFrame:CGRectMake(sbW - 1, 0, 1, menuHeight - sbY)];
@@ -1513,8 +1518,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)handlePan:(UIPanGestureRecognizer *)gesture {
-    // Не двигать меню если pan начался внутри extraScroll
-    if (gesture.view == extraScroll) return;
+    // Разрешаем drag ТОЛЬКО с floatingButton, header и sidebar
+    BOOL isAllowed = (gesture.view == floatingButton ||
+                      gesture.view == _menuHdr      ||
+                      gesture.view == _sidebar);
+    if (!isAllowed) return;
     UIView *viewToMove = (gesture.view == floatingButton) ? floatingButton : menuContainer;
     CGPoint translation = [gesture translationInView:self];
 
