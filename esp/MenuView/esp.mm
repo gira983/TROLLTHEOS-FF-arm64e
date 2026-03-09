@@ -109,6 +109,7 @@ static int  aimTrigger = 1;        // 0 = Always, 1 = Only Shooting, 2 = Only Ai
 static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
 static float aimSpeed = 1.0f;      // Aim smoothing 0.05 - 1.0
 static float headOffset = 0.0f;    // смещение точки прицеливания по Y (голова)
+static bool  isSilentAim = NO;     // Silent Aim: пишем только в 0x172C, камера не двигается
 static bool isStreamerMode = NO;   // Stream Proof
 
 
@@ -1047,6 +1048,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [aimTabContainer addSubview:aSec0]; ay += 18;
     UIView *aimRow = [self makeCheckRowWithTitle:@"Enable Aimbot" badge:nil badgeColor:nil atY:ay width:aW initialValue:NO action:@selector(toggleAimbot:)];
     [aimTabContainer addSubview:aimRow]; ay += 26;
+    UIView *silentRow = [self makeCheckRowWithTitle:@"Silent Aim" badge:@"SAFE" badgeColor:[UIColor colorWithRed:0.2 green:0.9 blue:0.4 alpha:1.0] atY:ay width:aW initialValue:NO action:@selector(toggleSilentAim:)];
+    [aimTabContainer addSubview:silentRow]; ay += 26;
 
     ay += 4;
     UIView *aSec1 = [self makeSectionHeaderWithTitle:@"MODE" atY:ay width:aW];
@@ -1334,6 +1337,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleDist:(CustomSwitch *)sender { isDis = sender.isOn; previewDistLabel.hidden = !isDis; }
 - (void)toggleLine:(CustomSwitch *)sender { isLine = sender.isOn; }
 - (void)toggleAimbot:(CustomSwitch *)sender    { isAimbot    = sender.isOn; }
+- (void)toggleSilentAim:(CustomSwitch *)sender { isSilentAim = sender.isOn; }
 
 
 - (void)toggleStreamerMode:(CustomSwitch *)sender {
@@ -1592,11 +1596,16 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    // Пишем в оба: вход (0x53C) и выход (0x172C)
-    // Игра: читает 0x53C → интерполирует → пишет в 0x172C
-    // Мы перекрываем оба — нет окна для конкурентной записи игрой
-    WriteAddr<Quaternion>(player + OFF_ROTATION,    rotation);  // 0x53C — вход
-    WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);  // 0x172C — выход/пули
+    if (isSilentAim) {
+        // SILENT AIM: пишем ТОЛЬКО в 0x172C (направление пули)
+        // 0x53C (камера) не трогаем — визуально игрок смотрит куда хочет
+        // Сервер не видит поворота камеры — только пуля летит в цель
+        WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);
+    } else {
+        // Обычный aimbot: пишем в оба
+        WriteAddr<Quaternion>(player + OFF_ROTATION,    rotation);  // 0x53C — камера
+        WriteAddr<Quaternion>(player + OFF_CURRENT_AIM, rotation);  // 0x172C — пули
+    }
 }
 
 // Slerp от текущего угла к целевому — без прыжка через тело
@@ -1659,13 +1668,27 @@ bool get_IsFiring(uint64_t player) {
         }
         return;
     }
-    isInMatch = YES;
-
+    // Тройная проверка: camera + match + localPlayer — все должны быть валидны
     uint64_t match = getMatch(matchGame);
-    if (!isVaildPtr(match)) return;
+    if (!isVaildPtr(match)) { isInMatch = NO; return; }
 
     uint64_t myPawnObject = getLocalPlayer(match);
-    if (!isVaildPtr(myPawnObject)) return;
+    if (!isVaildPtr(myPawnObject)) { isInMatch = NO; return; }
+
+    // HP локального игрока > 0 → мы реально в матче, не в лобби
+    int myMaxHP = get_MaxHP(myPawnObject);
+    if (myMaxHP <= 0) { isInMatch = NO; return; }
+
+    // Cooldown 4с после смены матча — не пишем aim пока игра не стабилизировалась
+    static NSTimeInterval _matchStartTime = 0;
+    static uint64_t _lastMatchPtr = 0;
+    if (match != _lastMatchPtr) {
+        _lastMatchPtr = match;
+        _matchStartTime = CACurrentMediaTime();
+        isInMatch = NO; return; // пропускаем этот кадр
+    }
+    bool _aimCooldown = (CACurrentMediaTime() - _matchStartTime) < 4.0;
+    isInMatch = YES;
 
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
@@ -1779,7 +1802,10 @@ bool get_IsFiring(uint64_t player) {
             s_HeadTop.y < -200 || s_HeadTop.y > vH+200) continue;
 
         float boxH = fabsf(s_HeadTop.y - s_Toe.y);
-        if (boxH < 6.0f) continue;   // слишком маленький — за горизонтом
+        if (boxH < 2.0f) continue;   // совсем за горизонтом
+        // На дальних дистанциях бокс очень мал — делаем минимальный размер
+        bool isTinyFar = (boxH < 8.0f);
+        if (isTinyFar) boxH = 8.0f;  // минимум 8px — видно на любой дистанции
         float boxW = boxH * 0.45f;
         float bx   = s_HeadTop.x - boxW * 0.5f;
         float by   = s_HeadTop.y;
@@ -1937,7 +1963,8 @@ bool get_IsFiring(uint64_t player) {
     } // end player loop
 
     // ── Обычный Aimbot apply ─────────────────────────────────────────
-    bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
+    // Silent Aim: всегда только во время стрельбы — иначе смысла нет
+    bool shouldAim = !_aimCooldown && (isSilentAim ? isFire : ((aimTrigger==0)||(aimTrigger==1&&isFire)));
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 rawHead = getPositionExt(getHead(bestTarget));
         Vector3 ap;
