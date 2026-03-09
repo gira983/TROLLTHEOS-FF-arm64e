@@ -366,6 +366,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *aimTabContainer;
     UIView *settingTabContainer;
     UIView *extraTabContainer;
+    UIScrollView *extraScroll;
     UIView *_sidebar;
 
     UIView *previewView;
@@ -1059,7 +1060,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     // ══ EXTRA TAB ═════════════════════════════════════════════════════
     // Extra tab использует UIScrollView чтобы слайдеры не выходили за край
-    UIScrollView *extraScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
+    extraScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
     extraScroll.backgroundColor = COL_BG1;
     extraScroll.hidden = YES;
     extraScroll.showsVerticalScrollIndicator = YES;
@@ -1070,8 +1071,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     extraTabContainer.hidden = NO;
     [extraScroll addSubview:extraTabContainer];
     extraScroll.contentSize = CGSizeMake(tabW, 400);
-    // Скроллвью становится нашим "контейнером" для show/hide
-    #define extraScrollView extraScroll
+
 
     CGFloat eW = tabW;
     CGFloat ey = 0;
@@ -1229,9 +1229,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             aimTabContainer.userInteractionEnabled = YES;
             break;
         case 2:
-            extraScrollView.frame = CGRectMake(tabX, tabY, tabW, tabH);
-            extraScrollView.hidden = NO;
-            extraScrollView.userInteractionEnabled = YES;
+            extraScroll.frame = CGRectMake(tabX, tabY, tabW, tabH);
+            extraScroll.hidden = NO;
+            extraScroll.userInteractionEnabled = YES;
             break;
         case 3:
             settingTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
