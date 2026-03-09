@@ -206,7 +206,7 @@ static bool isStreamerMode = NO;   // Stream Proof
 @end
 
 // Кастомный слайдер — обрабатывает touches с правильным конвертированием координат
-@interface HUDSlider : UIView <UIGestureRecognizerDelegate>
+@interface HUDSlider : UIView
 @property (nonatomic) float minimumValue;
 @property (nonatomic) float maximumValue;
 @property (nonatomic) float value;
@@ -234,23 +234,34 @@ static bool isStreamerMode = NO;   // Stream Proof
         self.userInteractionEnabled = YES;
         self.multipleTouchEnabled = NO;
         [self buildUI];
-        // sliderPan поглощает touch полностью — не пропускает наверх
-        UIPanGestureRecognizer *sliderPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSliderPan:)];
-        sliderPan.maximumNumberOfTouches = 1;
-        sliderPan.cancelsTouchesInView = YES;
-        sliderPan.delaysTouchesBegan = NO;
-        sliderPan.delegate = self;
-        [self addGestureRecognizer:sliderPan];
     }
     return self;
 }
 
-- (void)handleSliderPan:(UIPanGestureRecognizer *)gr {
-    if (gr.state == UIGestureRecognizerStateBegan ||
-        gr.state == UIGestureRecognizerStateChanged) {
-        CGPoint loc = [gr locationInView:self];
-        [self updateValueFromX:loc.x];
-    }
+// Прямые touches — не конфликтуют ни с чем
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *t = touches.anyObject;
+    CGPoint loc = [t locationInView:self];
+    _dragStartX = loc.x;
+    _dragStartValue = _value;
+    [self updateValueFromX:loc.x];
+}
+
+- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    UITouch *t = touches.anyObject;
+    CGPoint loc = [t locationInView:self];
+    [self updateValueFromX:loc.x];
+}
+
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
+
+// hitTest всегда возвращает self — touches на дочерних views идут к HUDSlider
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    if (!self.userInteractionEnabled || self.hidden || self.alpha < 0.01) return nil;
+    // Расширяем hit area по вертикали для удобства
+    CGRect expanded = CGRectInset(self.bounds, 0, -10);
+    return CGRectContainsPoint(expanded, point) ? self : nil;
 }
 
 - (void)layoutSubviews {
@@ -318,16 +329,7 @@ static bool isStreamerMode = NO;   // Stream Proof
     _thumb.frame = CGRectMake(thumbX, thumbY, thumbSize, thumbSize);
 }
 
-// Слайдер всегда начинает gesture и поглощает touch
-- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gr {
-    return YES; // разрешаем sliderPan всегда
-}
-
-// Не разрешаем одновременное распознавание с другими gesture (scroll, pan меню)
-- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr
-    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
-    return NO;
-}
+// HUDSlider использует прямые touches — gesture recognizer не нужен
 
 - (void)updateValueFromX:(CGFloat)x {
     CGFloat trackW = _track.bounds.size.width;
