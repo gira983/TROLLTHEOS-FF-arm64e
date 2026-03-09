@@ -206,7 +206,7 @@ static bool isStreamerMode = NO;   // Stream Proof
 @end
 
 // Кастомный слайдер — обрабатывает touches с правильным конвертированием координат
-@interface HUDSlider : UIView
+@interface HUDSlider : UIView <UIGestureRecognizerDelegate>
 @property (nonatomic) float minimumValue;
 @property (nonatomic) float maximumValue;
 @property (nonatomic) float value;
@@ -234,9 +234,12 @@ static bool isStreamerMode = NO;   // Stream Proof
         self.userInteractionEnabled = YES;
         self.multipleTouchEnabled = NO;
         [self buildUI];
-        // Собственный pan — перехватывает горизонтальное движение раньше containerPan
+        // sliderPan поглощает touch полностью — не пропускает наверх
         UIPanGestureRecognizer *sliderPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handleSliderPan:)];
         sliderPan.maximumNumberOfTouches = 1;
+        sliderPan.cancelsTouchesInView = YES;
+        sliderPan.delaysTouchesBegan = NO;
+        sliderPan.delegate = self;
         [self addGestureRecognizer:sliderPan];
     }
     return self;
@@ -315,10 +318,15 @@ static bool isStreamerMode = NO;   // Stream Proof
     _thumb.frame = CGRectMake(thumbX, thumbY, thumbSize, thumbSize);
 }
 
-// Запрещаем родительским gesture получать touches когда слайдер активен
+// Слайдер всегда начинает gesture и поглощает touch
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gr {
-    // Разрешаем только собственный sliderPan
-    return (gr.view == self);
+    return YES; // разрешаем sliderPan всегда
+}
+
+// Не разрешаем одновременное распознавание с другими gesture (scroll, pan меню)
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr
+    shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
+    return NO;
 }
 
 - (void)updateValueFromX:(CGFloat)x {
@@ -1069,8 +1077,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     extraScroll.backgroundColor = COL_BG1;
     extraScroll.hidden = YES;
     extraScroll.showsVerticalScrollIndicator = YES;
-    extraScroll.bounces = YES;
-    extraScroll.alwaysBounceVertical = YES;
+    extraScroll.bounces = NO;
+    extraScroll.alwaysBounceVertical = NO;
     extraScroll.canCancelContentTouches = YES;
     extraScroll.delaysContentTouches = YES;
     extraScroll.scrollEnabled = YES;
