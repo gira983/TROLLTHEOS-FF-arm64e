@@ -1817,12 +1817,10 @@ bool get_IsFiring(uint64_t player) {
 
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
-            // Проецируем ВСЕГДА голову (+ headOffset) — не тело
-            // Crosshair mode: d2 = пикселей от центра экрана до головы врага
-            // Player mode:    sc = 3D дистанция до игрока
-            Vector3 aimPt;
-            if (aimTarget == 2) aimPt = getPositionExt(getHip(PawnObject));
-            else                aimPt = HeadPos + Vector3(0, headOffset, 0);
+            // Для scoring в crosshair режиме ВСЕГДА берём голову —
+            // иначе при aimTarget=Hip прицел ищет ближайшее тело, а стреляет в голову.
+            // Для Player mode (dis) кость не важна — берём голову тоже.
+            Vector3 aimPt = HeadPos + Vector3(0, headOffset, 0);
             Vector3 ws = WorldToScreen(aimPt, matrix, vW, vH);
             float dx = ws.x - center.x, dy = ws.y - center.y;
             float d2 = sqrtf(dx*dx + dy*dy);
