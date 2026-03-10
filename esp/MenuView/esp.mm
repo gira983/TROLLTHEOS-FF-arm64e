@@ -15,7 +15,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 #import "mahoa.h"
-#import "GameLogic.h"
+// GameLogic.h included via esp.h → ../lib/GameLogic.h
 
 // ── Logging ──────────────────────────────────────────────────────────────────
 #ifdef DEBUG
