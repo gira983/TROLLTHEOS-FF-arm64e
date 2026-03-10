@@ -60,10 +60,11 @@ static inline uint64_t _d(uint64_t v) { return v ^ GL_XOR_KEY; }
 // ─────────────────────────────────────────────────────────────────────────────
 
 uint64_t getMatchGame(uint64_t moduleBase) {
-    // GameFacade statics chain → +0x8 = CurrentMatchGame (verified in new dump)
+    if (!moduleBase || moduleBase == (uint64_t)-1) return 0;
     uint64_t ti      = ReadAddr<uint64_t>(moduleBase + _d(GL_GAMEFACADE_TI));
-    uint64_t statics = ReadAddr<uint64_t>(ti         + _d(GL_GAMEFACADE_ST));
-    // Use +0x8 (CurrentMatchGame) instead of +0x0 (CurrentGame) — more reliable
+    if (!isVaildPtr(ti)) return 0;
+    uint64_t statics = ReadAddr<uint64_t>(ti + _d(GL_GAMEFACADE_ST));
+    if (!isVaildPtr(statics)) return 0;
     return ReadAddr<uint64_t>(statics + _d(GL_MATCHGAME_OFF));
 }
 
