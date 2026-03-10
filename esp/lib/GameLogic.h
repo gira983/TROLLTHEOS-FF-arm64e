@@ -85,17 +85,6 @@
 #define OFF_PLAYERID_TEAMID     0x19        // team ID within PlayerID struct
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STRUCTS
-// ─────────────────────────────────────────────────────────────────────────────
-
-struct COW_GamePlay_PlayerID_o {
-    uint64_t padding;
-    uint8_t  pad2[8];
-    uint8_t  m_TeamID;   // +0x19 relative to struct start in memory
-    uint8_t  _pad[3];
-    uint32_t m_PlayerType; // +0x1C
-};
-
 // ─────────────────────────────────────────────────────────────────────────────
 // FUNCTION DECLARATIONS
 // ─────────────────────────────────────────────────────────────────────────────
