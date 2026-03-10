@@ -113,7 +113,7 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
     }
 
     if (best != 0) {
-        NSLog(@"[FRYZZ] Found freefireth base via regionfilename: 0x%llx", (unsigned long long)best);
+        printf("[FRYZZ] Found freefireth base via regionfilename: 0x%llx\n", (unsigned long long)best);
         return best;
     }
 
@@ -122,7 +122,7 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
     kern_return_t kr = mach_vm_region_recurse(get_task, &addr, &size, &depth,
                                                (vm_region_recurse_info_t)&info, &count);
     if (kr == KERN_SUCCESS) {
-        NSLog(@"[FRYZZ] Fallback base: 0x%llx", (unsigned long long)addr);
+        printf("[FRYZZ] Fallback base: 0x%llx\n", (unsigned long long)addr);
         return addr;
     }
     return 0;
