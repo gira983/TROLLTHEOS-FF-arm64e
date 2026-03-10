@@ -61,11 +61,21 @@ static inline uint64_t _d(uint64_t v) { return v ^ GL_XOR_KEY; }
 
 uint64_t getMatchGame(uint64_t moduleBase) {
     if (!moduleBase || moduleBase == (uint64_t)-1) return 0;
-    uint64_t ti      = ReadAddr<uint64_t>(moduleBase + _d(GL_GAMEFACADE_TI));
+
+    uint64_t ti_off  = _d(GL_GAMEFACADE_TI);
+    uint64_t ti      = ReadAddr<uint64_t>(moduleBase + ti_off);
+    NSLog(@"[FRYZZ] base=0x%llx  ti_off=0x%llx  ti=0x%llx", moduleBase, ti_off, ti);
     if (!isVaildPtr(ti)) return 0;
-    uint64_t statics = ReadAddr<uint64_t>(ti + _d(GL_GAMEFACADE_ST));
+
+    uint64_t st_off  = _d(GL_GAMEFACADE_ST);
+    uint64_t statics = ReadAddr<uint64_t>(ti + st_off);
+    NSLog(@"[FRYZZ] ti=0x%llx  st_off=0x%llx  statics=0x%llx", ti, st_off, statics);
     if (!isVaildPtr(statics)) return 0;
-    return ReadAddr<uint64_t>(statics + _d(GL_MATCHGAME_OFF));
+
+    uint64_t mg_off  = _d(GL_MATCHGAME_OFF);
+    uint64_t mg      = ReadAddr<uint64_t>(statics + mg_off);
+    NSLog(@"[FRYZZ] statics=0x%llx  mg_off=0x%llx  matchGame=0x%llx", statics, mg_off, mg);
+    return mg;
 }
 
 uint64_t getMatch(uint64_t matchGame) {
