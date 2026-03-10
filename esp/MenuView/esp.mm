@@ -978,6 +978,16 @@ static const char kAssocKey = 0;
 // ─────────────────────────────────────────────────────────────────────────────
 #pragma mark - Menu Show/Hide
 // ─────────────────────────────────────────────────────────────────────────────
+// Public interface methods (declared in esp.h)
+- (void)hideMenu   { [self _hideMenu]; }
+- (void)showMenu   { [self _showMenu]; }
+- (void)centerMenu {
+    CGFloat W = self.superview.bounds.size.width  ?: self.bounds.size.width;
+    CGFloat H = self.superview.bounds.size.height ?: self.bounds.size.height;
+    menuContainer.center = CGPointMake(W/2, H/2);
+}
+- (void)handlePan:(UIPanGestureRecognizer *)gesture { [self _handlePan:gesture]; }
+
 - (void)_showMenu {
     CGFloat W = self.superview.bounds.size.width  ?: self.bounds.size.width;
     CGFloat H = self.superview.bounds.size.height ?: self.bounds.size.height;
