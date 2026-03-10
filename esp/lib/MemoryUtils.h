@@ -5,6 +5,7 @@
 #include <mach/processor_set.h>
 #include <mach/mach_host.h>
 #include <sys/sysctl.h>
+#include <libproc.h>
 #include <string>
 
 #pragma mark - Get PID
