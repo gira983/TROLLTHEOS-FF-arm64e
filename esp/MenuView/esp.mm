@@ -1059,7 +1059,12 @@ static const char kAssocKey = 0;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
         while (Moudule_Base == (uint64_t)-1 || Moudule_Base == 0) {
             uint64_t b = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
-            if (b != 0) { Moudule_Base = b; break; }
+            if (b != 0) {
+                Moudule_Base = b;
+                NSLog(@"[FRYZZ] Moudule_Base=0x%llx", Moudule_Base);
+                espLog([NSString stringWithFormat:@"[ESP] ModuleBase=0x%llx", Moudule_Base]);
+                break;
+            }
             [NSThread sleepForTimeInterval:3.0];
         }
     });
@@ -1122,6 +1127,15 @@ static const char kAssocKey = 0;
     if (Moudule_Base == (uint64_t)-1 || Moudule_Base == 0) return;
 
     uint64_t matchGame = getMatchGame(Moudule_Base);
+
+    // Log matchGame value once every 5s for diagnostics
+    static CFAbsoluteTime _lastMGLog = 0;
+    CFAbsoluteTime _now = CFAbsoluteTimeGetCurrent();
+    if (_now - _lastMGLog > 5.0) {
+        _lastMGLog = _now;
+        espLog([NSString stringWithFormat:@"[ESP] matchGame=0x%llx base=0x%llx", matchGame, Moudule_Base]);
+    }
+
     if (!isVaildPtr(matchGame)) {
         if (isInMatch) { isInMatch = NO; dispatch_async(dispatch_get_main_queue(), ^{ [self _clearAllLayers]; }); }
         espLog(@"[ESP] matchGame invalid");
