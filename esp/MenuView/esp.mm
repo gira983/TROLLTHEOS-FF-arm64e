@@ -702,7 +702,7 @@ static const char kAssocKey = 0;
     CGFloat sw = [UIScreen mainScreen].bounds.size.width;
     CGFloat sh = [UIScreen mainScreen].bounds.size.height;
     CGFloat mW = MIN(390, sw - 16);
-    CGFloat mH = MIN(340, sh * 0.48f);
+    CGFloat mH = MIN(420, sh * 0.58f);
 
     // ── Container ──
     menuContainer = [[UIView alloc] initWithFrame:CGRectMake(0,0,mW,mH)];
@@ -917,28 +917,35 @@ static const char kAssocKey = 0;
 - (void)_switchTab:(int)idx {
     NSArray *tabs = @[mainTab, aimTab, extraTab, configTab];
     for (UIView *t in tabs) { t.hidden = YES; t.userInteractionEnabled = NO; }
+
+    // Reset all sidebar buttons by tag
     for (UIView *s in _sidebar.subviews) {
         if (s.tag >= 100 && s.tag <= 103) {
             s.backgroundColor = UIColor.clearColor;
             s.layer.borderColor = UIColor.clearColor.CGColor;
             for (UIView *c in s.subviews) {
-                if ([c isKindOfClass:UILabel.class]) ((UILabel*)c).textColor = COL_DIM;
+                if ([c isKindOfClass:UILabel.class])     ((UILabel*)c).textColor     = COL_DIM;
                 if ([c isKindOfClass:UIImageView.class]) ((UIImageView*)c).tintColor = COL_DIM;
             }
         }
     }
-    UIView *active = _sidebar.subviews[idx < (int)_sidebar.subviews.count ? idx : 0];
-    if (active.tag >= 100 && active.tag <= 103) {
-        active.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.08];
-        active.layer.borderColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.28].CGColor;
-        for (UIView *c in active.subviews) {
-            if ([c isKindOfClass:UILabel.class]) ((UILabel*)c).textColor = COL_ACC;
-            if ([c isKindOfClass:UIImageView.class]) ((UIImageView*)c).tintColor = COL_ACC;
+
+    // Highlight correct button by tag (100+idx), not by subviews array index
+    for (UIView *s in _sidebar.subviews) {
+        if (s.tag == 100 + idx) {
+            s.backgroundColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.08];
+            s.layer.borderColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.28].CGColor;
+            for (UIView *c in s.subviews) {
+                if ([c isKindOfClass:UILabel.class])     ((UILabel*)c).textColor     = COL_ACC;
+                if ([c isKindOfClass:UIImageView.class]) ((UIImageView*)c).tintColor = COL_ACC;
+            }
+            break;
         }
     }
+
     UIView *tab = (idx < (int)tabs.count) ? tabs[idx] : mainTab;
     tab.hidden = NO; tab.userInteractionEnabled = YES;
-    tab.frame = mainTab.frame; // sync frame
+    tab.frame = mainTab.frame;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1115,6 +1122,11 @@ static const char kAssocKey = 0;
     if (Moudule_Base == (uint64_t)-1 || Moudule_Base == 0) return;
 
     uint64_t matchGame = getMatchGame(Moudule_Base);
+    if (!isVaildPtr(matchGame)) {
+        if (isInMatch) { isInMatch = NO; dispatch_async(dispatch_get_main_queue(), ^{ [self _clearAllLayers]; }); }
+        espLog(@"[ESP] matchGame invalid");
+        return;
+    }
 
     // ── Match detection: triple-check + 4s cooldown ──────────────────
     uint64_t camera = CameraMain(matchGame);
@@ -1123,16 +1135,17 @@ static const char kAssocKey = 0;
             isInMatch = NO;
             dispatch_async(dispatch_get_main_queue(), ^{ [self _clearAllLayers]; });
         }
+        espLog(@"[ESP] camera invalid");
         return;
     }
     uint64_t match = getMatch(matchGame);
-    if (!isVaildPtr(match)) { isInMatch = NO; return; }
+    if (!isVaildPtr(match)) { isInMatch = NO; espLog(@"[ESP] match invalid"); return; }
 
     uint64_t myPlayer = getLocalPlayer(match);
-    if (!isVaildPtr(myPlayer)) { isInMatch = NO; return; }
+    if (!isVaildPtr(myPlayer)) { isInMatch = NO; espLog(@"[ESP] myPlayer invalid"); return; }
 
     int myMaxHP = get_MaxHP(myPlayer);
-    if (myMaxHP <= 0) { isInMatch = NO; return; }
+    if (myMaxHP <= 0) { isInMatch = NO; espLog(@"[ESP] maxHP=0"); return; }
 
     // Cooldown: if match ptr changed, wait 4s for game to stabilize
     if (match != _sLastMatchPtr) {
