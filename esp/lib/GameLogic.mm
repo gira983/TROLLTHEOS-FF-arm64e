@@ -177,41 +177,7 @@ bool isPlayerKnocked(uint64_t player) {
     return false;
 }
 
-// NickName: read IL2CPP managed string (header: 0x10 = len, 0x14 = UTF-16 chars)
-NSString* GetNickName(uint64_t player) {
-    uint64_t strObj = ReadAddr<uint64_t>(player + _d(GL_NICKNAME));
-    if (!isVaildPtr(strObj)) return @"";
-    int32_t len = ReadAddr<int32_t>(strObj + 0x10);
-    if (len <= 0 || len > 64) return @"";
-    // Read UTF-16LE chars
-    uint16_t chars[65] = {};
-    _read(strObj + 0x14, chars, (int)MIN((size_t)(len * 2), sizeof(chars) - 2));
-    return [[NSString alloc] initWithBytes:chars
-                                    length:(NSUInteger)(len * 2)
-                                  encoding:NSUTF16LittleEndianStringEncoding] ?: @"?";
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 #pragma mark - Math Utilities
 // ─────────────────────────────────────────────────────────────────────────────
-
-// Read Unity Transform world position via localToWorldMatrix
-Vector3 getPositionExt(uint64_t transformNode) {
-    if (!isVaildPtr(transformNode)) return Vector3(0,0,0);
-    return ReadAddr<Vector3>(transformNode + 0x90);
-}
-
-// Project world position to screen space (standard view-projection)
-Vector3 WorldToScreen(Vector3 worldPos, float* m, float sW, float sH) {
-    // View-Projection multiply
-    float x = m[0]*worldPos.x + m[4]*worldPos.y + m[8] *worldPos.z + m[12];
-    float y = m[1]*worldPos.x + m[5]*worldPos.y + m[9] *worldPos.z + m[13];
-    float w = m[3]*worldPos.x + m[7]*worldPos.y + m[11]*worldPos.z + m[15];
-
-    if (fabsf(w) < 0.0001f) return Vector3(-9999, -9999, 0);
-    float inv = 1.0f / w;
-    // NDC [-1,1] → screen pixels
-    float sx = ( x * inv * 0.5f + 0.5f) * sW;
-    float sy = (-y * inv * 0.5f + 0.5f) * sH;
-    return Vector3(sx, sy, w);
-}
+// getPositionExt, WorldToScreen, GetNickName defined in UnityMath.mm
