@@ -18,22 +18,28 @@
 // GameLogic.h included via esp.h → ../lib/GameLogic.h
 
 // ── Logging ──────────────────────────────────────────────────────────────────
-#ifdef DEBUG
 static void espLog(NSString *msg) {
-    static NSString *path = @"/var/mobile/Library/Caches/fryzz_esp.log";
+    static NSString *path = @"/tmp/fryzz_esp.log";
     NSString *line = [NSString stringWithFormat:@"[%.3f] %@\n", CACurrentMediaTime(), msg];
     static NSFileHandle *_fh = nil;
     if (!_fh) {
-        [@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        NSError *err = nil;
+        [@"" writeToFile:path atomically:NO encoding:NSUTF8StringEncoding error:&err];
         _fh = [NSFileHandle fileHandleForWritingAtPath:path];
+        if (!_fh) {
+            // fallback: try NSDocumentDirectory
+            NSString *docs = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES).firstObject;
+            path = [docs stringByAppendingPathComponent:@"fryzz_esp.log"];
+            [@"" writeToFile:path atomically:NO encoding:NSUTF8StringEncoding error:nil];
+            _fh = [NSFileHandle fileHandleForWritingAtPath:path];
+        }
     }
-    [_fh seekToEndOfFile];
-    [_fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    if (_fh) {
+        [_fh seekToEndOfFile];
+        [_fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+    }
+    NSLog(@"[FRYZZ-ESP] %@", msg);
 }
-#else
-#define espLog(x) ((void)0)
-#endif
-
 // ─────────────────────────────────────────────────────────────────────────────
 // OBFUSCATED OFFSETS — compile-time XOR, never appear as raw hex
 // ─────────────────────────────────────────────────────────────────────────────
@@ -405,6 +411,8 @@ static BOOL applyStreamProof(UIView *v, BOOL hidden) {
 - (instancetype)initWithFrame:(CGRect)frame {
     self = [super initWithFrame:frame];
     if (!self) return nil;
+
+    espLog(@"[ESP] MenuView init START");
 
     self.userInteractionEnabled = YES;
     self.backgroundColor = UIColor.clearColor;
