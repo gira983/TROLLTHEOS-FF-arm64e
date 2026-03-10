@@ -5,8 +5,10 @@
 #include <mach/processor_set.h>
 #include <mach/mach_host.h>
 #include <sys/sysctl.h>
-#include <libproc.h>
 #include <string>
+
+// proc_regionfilename is in libproc but Theos SDK may not have the header
+extern "C" int proc_regionfilename(int pid, uint64_t address, void *buffer, uint32_t buffersize);
 
 #pragma mark - Get PID
 
