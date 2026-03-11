@@ -24,10 +24,10 @@ Fryzz_CFLAGS += -fobjc-arc \
 -Wno-unused-but-set-variable
 
 Fryzz_CFLAGS += -Iinclude
-Fryzz_CFLAGS    += -Iesp/lib
-Fryzz_CCFLAGS   += -Iesp/lib
-Fryzz_OBJCFLAGS  += -Iesp/lib
-Fryzz_OBJCCFLAGS += -Iesp/lib
+Fryzz_CFLAGS    += -Iesp/lib -I.
+Fryzz_CCFLAGS   += -Iesp/lib -I.
+Fryzz_OBJCFLAGS  += -Iesp/lib -I.
+Fryzz_OBJCCFLAGS += -Iesp/lib -I.
 Fryzz_CFLAGS += -include hud-prefix.pch
 # Fryzz_CFLAGS += -I/usr/lib/llvm-16/lib/clang/16.0.0/include
 # Fryzz_CFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
