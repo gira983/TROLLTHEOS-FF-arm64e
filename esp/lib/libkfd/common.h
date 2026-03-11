@@ -128,6 +128,7 @@ typedef uintptr_t usize;
 
 #else /* CONFIG_ASSERT */
 
+#undef assert
 #define assert(condition)
 
 #endif /* CONFIG_ASSERT */
