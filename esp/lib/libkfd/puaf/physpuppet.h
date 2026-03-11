@@ -85,14 +85,17 @@ void physpuppet_run(struct kfd* kfd)
          * vm_map_delete() won't call pmap_remove_options() on exit. But we
          * don't fault in the second page to avoid overwriting our dangling PTE.
          *
-         * Guard: if vm_allocate(FIXED) fails (e.g. the range is already mapped
-         * by something else after our vm_deallocate), skip the memset to avoid
-         * a NULL-deref crash. The PUAF page is still valid in this case.
+         * Use VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE so we don't get KERN_NO_SPACE
+         * if the range was partially re-used. Save address before the call since
+         * vm_allocate may clobber it on failure.
          */
-        vm_address_t realloc_address = address;
-        kern_return_t realloc_kret = vm_allocate(mach_task_self(), &realloc_address, physpuppet_vme_size, VM_FLAGS_FIXED);
-        if (realloc_kret == KERN_SUCCESS && realloc_address == address) {
-            memset((void*)(realloc_address), 'A', physpuppet_vme_offset);
+        vm_address_t saved_address = address;
+        kern_return_t realloc_kret = vm_allocate(mach_task_self(), &address, physpuppet_vme_size, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE);
+        if (realloc_kret == KERN_SUCCESS && address == saved_address && address != 0) {
+            memset((void*)(address), 'A', physpuppet_vme_offset);
+        } else {
+            /* Restore address for puaf_pages_uaddr assignment below */
+            address = saved_address;
         }
     }
 }
