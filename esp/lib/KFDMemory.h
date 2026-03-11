@@ -43,10 +43,14 @@ typedef enum {
 extern KFDStatus g_kfdStatus;
 extern uint64_t  g_kfdHandle;  // opaque kfd descriptor из kopen()
 
-// Инициализировать kfd с выбранным puaf методом
-// Вызывается один раз при старте HUD если g_taskMethod == 3
-// Блокирует до успеха или ошибки — вызывай на background thread!
+// Инициализировать kfd синхронно (блокирует поток)
 bool KFDInit(KFDPuafMethod method);
+
+// Инициализировать kfd асинхронно с callback по завершению
+// Безопасно вызывать из main thread — работает на background thread
+// completion(true) = успех, completion(false) = ошибка/неподдерживается
+typedef void (^KFDInitCompletion)(bool success);
+void KFDInitAsync(KFDPuafMethod method, KFDInitCompletion completion);
 
 // Получить task port целевого процесса через kernel read
 // Читает allproc в ядре, находит proc по pid, извлекает task->itk_sself
