@@ -12,7 +12,7 @@
 // ── GameFacade chain ──────────────────────────────────────────────────────────
 static const uint64_t GL_GAMEFACADE_TI  = GL_ENC(0xA4D2968ULL ^ GL_XOR_KEY);  // 0xA4D2968
 static const uint64_t GL_GAMEFACADE_ST  = GL_ENC(0x5A3F9CAFULL ^ GL_XOR_KEY); // 0xB8  — statics ptr
-static const uint64_t GL_MATCHGAME_OFF  = GL_ENC(0x5A3F9C1FULL ^ GL_XOR_KEY); // 0x8   — CurrentMatchGame (NEW: +0x8 direct)
+static const uint64_t GL_MATCHGAME_OFF  = GL_ENC(0x5A3F9C17ULL ^ GL_XOR_KEY); // 0x0   — CurrentGame (BaseGame) same as old working cheat
 static const uint64_t GL_MATCH          = GL_ENC(0x5A3F9C87ULL ^ GL_XOR_KEY); // 0x90
 static const uint64_t GL_LOCALPLAYER    = GL_ENC(0x5A3F9CA7ULL ^ GL_XOR_KEY); // 0xB0
 static const uint64_t GL_CAM_MGR        = GL_ENC(0x5A3F9CCFULL ^ GL_XOR_KEY); // 0xD8
@@ -61,21 +61,11 @@ static inline uint64_t _d(uint64_t v) { return v ^ GL_XOR_KEY; }
 
 uint64_t getMatchGame(uint64_t moduleBase) {
     if (!moduleBase || moduleBase == (uint64_t)-1) return 0;
-
-    uint64_t ti_off  = _d(GL_GAMEFACADE_TI);
-    uint64_t ti      = ReadAddr<uint64_t>(moduleBase + ti_off);
-    NSLog(@"[FRYZZ] base=0x%llx  ti_off=0x%llx  ti=0x%llx", moduleBase, ti_off, ti);
+    uint64_t ti      = ReadAddr<uint64_t>(moduleBase + _d(GL_GAMEFACADE_TI));
     if (!isVaildPtr(ti)) return 0;
-
-    uint64_t st_off  = _d(GL_GAMEFACADE_ST);
-    uint64_t statics = ReadAddr<uint64_t>(ti + st_off);
-    NSLog(@"[FRYZZ] ti=0x%llx  st_off=0x%llx  statics=0x%llx", ti, st_off, statics);
+    uint64_t statics = ReadAddr<uint64_t>(ti + _d(GL_GAMEFACADE_ST));
     if (!isVaildPtr(statics)) return 0;
-
-    uint64_t mg_off  = _d(GL_MATCHGAME_OFF);
-    uint64_t mg      = ReadAddr<uint64_t>(statics + mg_off);
-    NSLog(@"[FRYZZ] statics=0x%llx  mg_off=0x%llx  matchGame=0x%llx", statics, mg_off, mg);
-    return mg;
+    return ReadAddr<uint64_t>(statics + _d(GL_MATCHGAME_OFF));
 }
 
 uint64_t getMatch(uint64_t matchGame) {
