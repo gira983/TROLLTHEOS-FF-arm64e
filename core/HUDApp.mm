@@ -76,18 +76,14 @@ void GSEventRegisterEventCallBack(void (*)(GSEventRef));
 
 #import "TSEventFetcher.h"
 
-// Лог в файл для отладки
+// writeLog отключён — синхронные файловые операции в HID callback вызывают лаги касаний
+// Для отладки используй os_log_debug (только в DEBUG сборке)
 static void writeLog(NSString *msg) {
-    static NSString *path = @"/var/mobile/Library/Caches/hud_debug.log";
-    NSString *line = [NSString stringWithFormat:@"%@\n", msg];
-    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
-    if (!fh) {
-        [@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        fh = [NSFileHandle fileHandleForWritingAtPath:path];
-    }
-    [fh seekToEndOfFile];
-    [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
-    [fh closeFile];
+#if DEBUG
+    os_log_debug(OS_LOG_DEFAULT, "[HUD] %{public}@", msg);
+#else
+    (void)msg;
+#endif
 }
 
 static __used void _HUDEventCallback(void *target, void *refcon, IOHIDServiceRef service, IOHIDEventRef event)
