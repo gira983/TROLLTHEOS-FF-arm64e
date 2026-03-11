@@ -15,14 +15,7 @@
 #include "KFDMemory.h"
 
 // libkfd — header-only library, включаем один раз здесь
-// Отключаем assert/print/timer чтобы не спамить в продакшне
-#undef  CONFIG_ASSERT
-#undef  CONFIG_PRINT
-#undef  CONFIG_TIMER
-#define CONFIG_ASSERT 0
-#define CONFIG_PRINT  0
-#define CONFIG_TIMER  0
-
+// CONFIG_ASSERT/PRINT/TIMER = 0 по умолчанию (задано через #ifndef в libkfd.h)
 #include "libkfd.h"
 
 #include <sys/sysctl.h>
