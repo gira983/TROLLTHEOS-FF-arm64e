@@ -810,7 +810,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     BOOL isNowEnabled = IsHUDEnabled();
     if (!isNowEnabled) {
         SetHUDEnabled(YES);
-        [self reloadMainButton];
+        [self reloadMainButtonState];
     }
 }
 
@@ -832,7 +832,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
                 [_mainButton setTitle:@"KFD FAIL" forState:UIControlStateNormal];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
                                dispatch_get_main_queue(), ^{
-                    [self reloadMainButton];
+                    [self reloadMainButtonState];
                 });
                 return;
             }
