@@ -7,7 +7,13 @@
 #include <sys/sysctl.h>
 #include <string>
 
-#pragma mark - Get PID
+#pragma mark - Task Method
+
+// Метод получения task порта:
+// 0 = task_for_pid         — прямой, быстрый, легче детектируется
+// 1 = processor_set_tasks  — через список всех tasks, менее заметен (DEFAULT)
+// 2 = pid_iterate          — итерация pid_for_task по всем портам, самый скрытный
+extern int g_taskMethod;
 
 extern mach_port_t get_task;
 extern pid_t Processpid;
@@ -24,6 +30,10 @@ inline bool isVaildPtr(long addr){
 }
 
 pid_t GetGameProcesspid(char* GameProcessName);
+
+// Получить task порт выбранным методом (g_taskMethod)
+mach_port_t AcquireTaskPort(pid_t pid);
+
 vm_map_offset_t GetGameModule_Base(char* GameProcessName);
 
 bool _read(long addr, void *buffer, int len);
@@ -41,10 +51,6 @@ bool WriteAddr(long address, const T &data) {
     return _write(address, reinterpret_cast<const void *>(&data), sizeof(T));
 }
 
-// Сканирует память игрового процесса в диапазоне [rangeStart, rangeEnd),
-// ищет pattern размером patSize байт, записывает найденные адреса в outAddrs.
-// Возвращает количество найденных совпадений.
-// Безопасно вызывать из любого потока — использует глобальный get_task.
 int scanForValue(uint64_t rangeStart, uint64_t rangeEnd,
                  const void *pattern, size_t patSize,
                  uint64_t *outAddrs, int maxResults);
