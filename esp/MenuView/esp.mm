@@ -79,9 +79,6 @@ static const int kMaxESPText = 64; // максимум строк за кадр
 
 uint64_t Moudule_Base = -1;
 
-// Метод получения task порта — объявлен в MemoryUtils.cpp
-extern int g_taskMethod;
-
 // Глобальный ключ для objc_associated object — один адрес для set и get
 static const char kSegHandlerKey = 0;
 
@@ -1138,48 +1135,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [settingTabContainer addSubview:spRow]; cy += 28;
 
     cy += 4;
-    // TASK METHOD — выбор метода получения task порта
-    UIView *cSec0 = [self makeSectionHeaderWithTitle:@"TASK METHOD" atY:cy width:cW];
-    [settingTabContainer addSubview:cSec0]; cy += 16;
-
-    // Описание текущего метода
-    UILabel *taskDesc = [[UILabel alloc] initWithFrame:CGRectMake(10, cy, cW - 20, 22)];
-    taskDesc.text = @"task_for_pid  •  proc_set  •  pid_iter";
-    taskDesc.textColor = COL_DIM;
-    taskDesc.font = [UIFont fontWithName:@"Courier" size:8];
-    taskDesc.numberOfLines = 1;
-    taskDesc.tag = 700;
-    [settingTabContainer addSubview:taskDesc]; cy += 20;
-
-    [self addSegmentTo:settingTabContainer atY:cy title:@"" options:@[@"direct", @"proc_set", @"iterate"] selectedRef:&g_taskMethod tag:30]; cy += 30;
-
-    // При смене метода — переинициализируем task порт сразу
-    // Перехватываем tap сегмента через notification после handleSegmentTapGesture
-    // (сегмент обновляет g_taskMethod, затем вызываем reacquire)
-    [[NSNotificationCenter defaultCenter] addObserverForName:@"TaskMethodChanged"
-                                                      object:nil
-                                                       queue:[NSOperationQueue mainQueue]
-                                                  usingBlock:^(NSNotification *n) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-            extern mach_port_t get_task;
-            extern pid_t Processpid;
-            extern mach_port_t AcquireTaskPort(pid_t);
-            if (Processpid > 0) {
-                mach_port_t newTask = AcquireTaskPort(Processpid);
-                if (newTask != MACH_PORT_NULL) get_task = newTask;
-            }
-        });
-    }];
-
-    // Метка с пояснением выбранного метода
-    UILabel *taskNote = [[UILabel alloc] initWithFrame:CGRectMake(10, cy, cW - 20, 28)];
-    taskNote.text = @"proc_set — рекомендуется\ndirect — только для теста";
-    taskNote.textColor = COL_DIM;
-    taskNote.font = [UIFont fontWithName:@"Courier" size:7.5];
-    taskNote.numberOfLines = 2;
-    [settingTabContainer addSubview:taskNote]; cy += 32;
-
-    cy += 4;
     UIView *cSec2 = [self makeSectionHeaderWithTitle:@"PRIVACY" atY:cy width:cW];
     [settingTabContainer addSubview:cSec2]; cy += 18;
     UIView *spfRow = [self makeCheckRowWithTitle:@"Stream Proof" badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleStreamerMode:)];
@@ -1462,14 +1417,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
     void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, &kSegHandlerKey);
-    if (handler) {
-        handler(t);
-        // Если это сегмент TASK METHOD (tag=30) — переинициализируем task порт
-        UIView *seg = t.view;
-        if (seg && seg.tag == 3000) { // baseTag*100 = 30*100 = 3000
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"TaskMethodChanged" object:nil];
-        }
-    }
+    if (handler) handler(t);
 }
 
 - (void)fovChanged:(UISlider *)sender { aimFov = sender.value; }
