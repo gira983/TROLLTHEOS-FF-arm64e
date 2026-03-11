@@ -65,10 +65,12 @@ void physpuppet_run(struct kfd* kfd)
         /*
          * STEP 5:
          *
-         * Destroy the vm_named_entry. The vm_object's ref_count drops to 0 and
-         * therefore is reaped. This will put all of its vm_pages on the free
-         * list without calling pmap_disconnect().
+         * Before destroying the vm_named_entry, remove all pmap mappings from
+         * the virtual address range. This prevents pmap_mark_page_as_ppl_page_internal()
+         * from panicking with "page still has mappings" on T8101 (A14) when
+         * the vm_object is reaped and its pages returned to the free list.
          */
+        assert_mach(vm_protect(mach_task_self(), address, physpuppet_vme_size, false, VM_PROT_NONE));
         assert_mach(mach_port_deallocate(mach_task_self(), named_entry));
         kfd->puaf.puaf_pages_uaddr[i] = address + physpuppet_vme_offset;
 
