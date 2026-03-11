@@ -16,7 +16,7 @@ void perf_kread(struct kfd* kfd, u64 kaddr, void* uaddr, u64 size)
     assert(kfd->perf.shared_page.kaddr);
 
     volatile struct perfmon_config* config = (volatile struct perfmon_config*)(kfd->perf.shared_page.uaddr);
-    *config = (volatile struct perfmon_config){};
+    memset((void*)config, 0, sizeof(struct perfmon_config));
     config->pc_spec.ps_events = (struct perfmon_event*)(kaddr);
     config->pc_spec.ps_event_count = (u16)(size);
 
@@ -25,7 +25,7 @@ void perf_kread(struct kfd* kfd, u64 kaddr, void* uaddr, u64 size)
     spec_buffer.ps_event_count = (u16)(size);
     assert_bsd(ioctl(kfd->perf.dev.fd, PERFMON_CTL_SPECIFY, &spec_buffer));
 
-    *config = (volatile struct perfmon_config){};
+    memset((void*)config, 0, sizeof(struct perfmon_config));
 }
 
 void perf_kwrite(struct kfd* kfd, void* uaddr, u64 kaddr, u64 size)
@@ -42,9 +42,9 @@ void perf_kwrite(struct kfd* kfd, void* uaddr, u64 kaddr, u64 size)
     u64 event_kaddr = kfd->perf.shared_page.kaddr + sizeof(*config) + sizeof(*source);
 
     for (u64 i = 0; i < (size / sizeof(u64)); i++) {
-        *config = (volatile struct perfmon_config){};
-        *source = (volatile struct perfmon_source){};
-        *event = (volatile struct perfmon_event){};
+        memset((void*)config, 0, sizeof(struct perfmon_config));
+        memset((void*)source, 0, sizeof(struct perfmon_source));
+        memset((void*)event, 0, sizeof(struct perfmon_event));
 
         config->pc_source = (struct perfmon_source*)(source_kaddr);
         config->pc_spec.ps_events = (struct perfmon_event*)(event_kaddr);
@@ -59,9 +59,9 @@ void perf_kwrite(struct kfd* kfd, void* uaddr, u64 kaddr, u64 size)
         assert_bsd(ioctl(kfd->perf.dev.fd, PERFMON_CTL_ADD_EVENT, &event_buffer));
     }
 
-    *config = (volatile struct perfmon_config){};
-    *source = (volatile struct perfmon_source){};
-    *event = (volatile struct perfmon_event){};
+    memset((void*)config, 0, sizeof(struct perfmon_config));
+    memset((void*)source, 0, sizeof(struct perfmon_source));
+    memset((void*)event, 0, sizeof(struct perfmon_event));
 }
 
 void perf_init(struct kfd* kfd)
@@ -235,7 +235,7 @@ u64 phystokv(struct kfd* kfd, u64 pa)
     const u64 gVirtBase = kfd->perf.gVirtBase;
     const u64 gPhysBase = kfd->perf.gPhysBase;
     const u64 gPhysSize = kfd->perf.gPhysSize;
-    const struct ptov_table_entry* ptov_table = &kfd->perf.ptov_table[0];
+    struct ptov_table_entry* ptov_table = &kfd->perf.ptov_table[0];
 
     for (u64 i = 0; (i < PTOV_TABLE_SIZE) && (ptov_table[i].len != 0); i++) {
         if ((pa >= ptov_table[i].pa) && (pa < (ptov_table[i].pa + ptov_table[i].len))) {
