@@ -494,7 +494,17 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         } else {
             self.displayLink.preferredFramesPerSecond = 30;
         }
-        [self.displayLink addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+        // ВАЖНО: вешаем DisplayLink на отдельный фоновый thread а не mainRunLoop
+        // Это освобождает main thread для касаний и убирает лаги UI игры
+        // updateFrame внутри сам делает dispatch_async(main) только для CALayer изменений
+        NSThread *displayLinkThread = [[NSThread alloc] initWithBlock:^{
+            NSRunLoop *rl = [NSRunLoop currentRunLoop];
+            [self.displayLink addToRunLoop:rl forMode:NSDefaultRunLoopMode];
+            [rl run];
+        }];
+        displayLinkThread.name = @"com.fryzz.esp.displaylink";
+        displayLinkThread.qualityOfService = NSQualityOfServiceUserInitiated;
+        [displayLinkThread start];
 
         [self setupFloatingButton];
         [self setupMenuUI];
@@ -1624,21 +1634,28 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (_espBusy) return;
     _espBusy = YES;
 
-    // FOV круг — показываем только если aimbot включён И мы в матче
-    if (isAimbot && isInMatch) {
-        float vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
-        float vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
-        if (vW < 10 || vH < 10) { vW = self.bounds.size.width; vH = self.bounds.size.height; }
-        float cx = vW / 2.0f;
-        float cy = vH / 2.0f;
-        float radius = aimFov;
-        _fovLayer.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
-        _fovLayer.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(cx, cy)
-            radius:radius startAngle:0 endAngle:M_PI*2 clockwise:YES].CGPath;
-        _fovLayer.hidden = NO;
-    } else {
-        _fovLayer.hidden = YES;
-    }
+    // Снапшот значений — читаем атомарно до перехода на background
+    BOOL  _aimOn  = isAimbot;
+    BOOL  _inMatch = isInMatch;
+    float _fov    = aimFov;
+
+    // FOV обновляем на main thread (CALayer не thread-safe)
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (_aimOn && _inMatch) {
+            float vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
+            float vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
+            if (vW < 10 || vH < 10) { vW = self.bounds.size.width; vH = self.bounds.size.height; }
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            _fovLayer.strokeColor = [UIColor colorWithWhite:1.0 alpha:0.4].CGColor;
+            _fovLayer.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(vW/2.f, vH/2.f)
+                radius:_fov startAngle:0 endAngle:M_PI*2 clockwise:YES].CGPath;
+            _fovLayer.hidden = NO;
+            [CATransaction commit];
+        } else {
+            _fovLayer.hidden = YES;
+        }
+    });
 
     // Весь тяжёлый расчёт — на background queue
     // memory reads, WorldToScreen, CGPath построение — всё там
