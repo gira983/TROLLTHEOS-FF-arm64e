@@ -345,7 +345,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     taskTitleLbl.translatesAutoresizingMaskIntoConstraints = NO;
     [taskCard addSubview:taskTitleLbl];
 
-    NSArray *methodItems = @[@"landa", @"smith", @"physpuppet"];
+    NSArray *methodItems = @[@"landa", @"smith", @"physpuppet", @"kfd"];
     _taskMethodSegment = [[UISegmentedControl alloc] initWithItems:methodItems];
     _taskMethodSegment.selectedSegmentIndex = [self taskMethod];
     [_taskMethodSegment setTitleTextAttributes:@{
@@ -373,6 +373,51 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     taskDescLbl.translatesAutoresizingMaskIntoConstraints = NO;
     [taskCard addSubview:taskDescLbl];
 
+    // kfd puaf sub-сегмент (physpuppet / smith / landa)
+    _kfdCard = [[UIView alloc] init];
+    _kfdCard.backgroundColor = [UIColor colorWithRed:0.15 green:0.04 blue:0.04 alpha:1.0];
+    _kfdCard.layer.cornerRadius = 12;
+    _kfdCard.layer.borderWidth = 1;
+    _kfdCard.layer.borderColor = [UIColor colorWithRed:0.9 green:0.2 blue:0.2 alpha:0.3].CGColor;
+    _kfdCard.translatesAutoresizingMaskIntoConstraints = NO;
+    _kfdCard.hidden = ([self taskMethod] != 3); // показываем только когда kfd выбран
+    [self.backgroundView addSubview:_kfdCard];
+
+    UILabel *kfdTitle = [[UILabel alloc] init];
+    kfdTitle.text = @"KFD EXPLOIT";
+    kfdTitle.textColor = [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
+    kfdTitle.font = [UIFont fontWithName:@"Courier-Bold" size:10] ?: [UIFont boldSystemFontOfSize:10];
+    kfdTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    [_kfdCard addSubview:kfdTitle];
+
+    NSArray *puafItems = @[@"physpuppet", @"smith", @"landa"];
+    _kfdPuafSegment = [[UISegmentedControl alloc] initWithItems:puafItems];
+    _kfdPuafSegment.selectedSegmentIndex = [self kfdPuafMethod];
+    [_kfdPuafSegment setTitleTextAttributes:@{
+        NSFontAttributeName: [UIFont fontWithName:@"Courier" size:10] ?: [UIFont systemFontOfSize:10],
+        NSForegroundColorAttributeName: [UIColor colorWithWhite:0.6 alpha:1.0]
+    } forState:UIControlStateNormal];
+    [_kfdPuafSegment setTitleTextAttributes:@{
+        NSFontAttributeName: [UIFont fontWithName:@"Courier-Bold" size:10] ?: [UIFont boldSystemFontOfSize:10],
+        NSForegroundColorAttributeName: [UIColor colorWithRed:0.08 green:0.08 blue:0.08 alpha:1.0]
+    } forState:UIControlStateSelected];
+    if (@available(iOS 13.0, *)) {
+        _kfdPuafSegment.selectedSegmentTintColor = [UIColor colorWithRed:0.9 green:0.3 blue:0.3 alpha:1.0];
+        _kfdPuafSegment.backgroundColor = [UIColor colorWithWhite:0.06 alpha:1.0];
+    }
+    [_kfdPuafSegment addTarget:self action:@selector(kfdPuafMethodChanged:) forControlEvents:UIControlEventValueChanged];
+    _kfdPuafSegment.translatesAutoresizingMaskIntoConstraints = NO;
+    [_kfdCard addSubview:_kfdPuafSegment];
+
+    UILabel *kfdWarn = [[UILabel alloc] init];
+    kfdWarn.text = @"⚠ риск ребута  •  <=16.3 / <=16.5 / <=16.7";
+    kfdWarn.textColor = [UIColor colorWithRed:0.9 green:0.5 blue:0.2 alpha:0.8];
+    kfdWarn.font = [UIFont fontWithName:@"Courier" size:7.5] ?: [UIFont systemFontOfSize:7.5];
+    kfdWarn.textAlignment = NSTextAlignmentCenter;
+    kfdWarn.numberOfLines = 1;
+    kfdWarn.translatesAutoresizingMaskIntoConstraints = NO;
+    [_kfdCard addSubview:kfdWarn];
+
     [NSLayoutConstraint activateConstraints:@[
         // Карточка — под _mainButton, над _authorLabel
         [taskCard.topAnchor constraintEqualToAnchor:_mainButton.bottomAnchor constant:20],
@@ -394,6 +439,22 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
         [taskDescLbl.leadingAnchor constraintEqualToAnchor:taskCard.leadingAnchor constant:12],
         [taskDescLbl.trailingAnchor constraintEqualToAnchor:taskCard.trailingAnchor constant:-12],
         [taskDescLbl.bottomAnchor constraintEqualToAnchor:taskCard.bottomAnchor constant:-12],
+    ]];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [_kfdCard.topAnchor constraintEqualToAnchor:taskCard.bottomAnchor constant:10],
+        [_kfdCard.leadingAnchor constraintEqualToAnchor:self.backgroundView.leadingAnchor constant:30],
+        [_kfdCard.trailingAnchor constraintEqualToAnchor:self.backgroundView.trailingAnchor constant:-30],
+        [kfdTitle.topAnchor constraintEqualToAnchor:_kfdCard.topAnchor constant:10],
+        [kfdTitle.leadingAnchor constraintEqualToAnchor:_kfdCard.leadingAnchor constant:14],
+        [_kfdPuafSegment.topAnchor constraintEqualToAnchor:kfdTitle.bottomAnchor constant:8],
+        [_kfdPuafSegment.leadingAnchor constraintEqualToAnchor:_kfdCard.leadingAnchor constant:12],
+        [_kfdPuafSegment.trailingAnchor constraintEqualToAnchor:_kfdCard.trailingAnchor constant:-12],
+        [_kfdPuafSegment.heightAnchor constraintEqualToConstant:30],
+        [kfdWarn.topAnchor constraintEqualToAnchor:_kfdPuafSegment.bottomAnchor constant:8],
+        [kfdWarn.leadingAnchor constraintEqualToAnchor:_kfdCard.leadingAnchor constant:12],
+        [kfdWarn.trailingAnchor constraintEqualToAnchor:_kfdCard.trailingAnchor constant:-12],
+        [kfdWarn.bottomAnchor constraintEqualToAnchor:_kfdCard.bottomAnchor constant:-10],
     ]];
 
     [self reloadMainButtonState];
@@ -658,6 +719,22 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [_topCenterButton setImage:topCenterImage forState:UIControlStateNormal];
 }
 
+- (NSInteger)kfdPuafMethod {
+    [self loadUserDefaults:NO];
+    NSNumber *m = [_userDefaults objectForKey:@"kfdPuafMethod"];
+    return m ? [m integerValue] : 1; // smith по умолчанию
+}
+
+- (void)setKfdPuafMethod:(NSInteger)method {
+    [self loadUserDefaults:NO];
+    [_userDefaults setObject:@(method) forKey:@"kfdPuafMethod"];
+    [self saveUserDefaults];
+}
+
+- (void)kfdPuafMethodChanged:(UISegmentedControl *)sender {
+    [self setKfdPuafMethod:sender.selectedSegmentIndex];
+}
+
 - (NSInteger)taskMethod {
     [self loadUserDefaults:NO];
     NSNumber *m = [_userDefaults objectForKey:@"taskMethod"];
@@ -671,7 +748,13 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
 }
 
 - (void)taskMethodChanged:(UISegmentedControl *)sender {
-    [self setTaskMethod:sender.selectedSegmentIndex];
+    NSInteger method = sender.selectedSegmentIndex;
+    [self setTaskMethod:method];
+    // Показываем kfd карточку только когда выбран kfd (индекс 3)
+    [UIView animateWithDuration:0.2 animations:^{
+        self->_kfdCard.hidden = (method != 3);
+        self->_kfdCard.alpha  = (method == 3) ? 1.0 : 0.0;
+    }];
 }
 
 - (void)tapAuthorLabel:(UITapGestureRecognizer *)sender
