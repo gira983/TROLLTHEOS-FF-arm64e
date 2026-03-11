@@ -92,6 +92,8 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     UIButton *_topCenterMostButton;
     UILabel *_authorLabel;
     BOOL _supportsCenterMost;
+    // Task method selector UI
+    UISegmentedControl *_taskMethodSegment;
 }
 
 - (void)registerNotifications
@@ -325,6 +327,74 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     UITapGestureRecognizer *authorTapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapAuthorLabel:)];
     [_authorLabel setUserInteractionEnabled:YES];
     [_authorLabel addGestureRecognizer:authorTapGesture];
+
+    // ── TASK METHOD SELECTOR ─────────────────────────────────────────
+    // Карточка под кнопкой Start/Stop
+    UIView *taskCard = [[UIView alloc] init];
+    taskCard.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.06];
+    taskCard.layer.cornerRadius = 14;
+    taskCard.layer.borderWidth = 1;
+    taskCard.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.1].CGColor;
+    taskCard.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.backgroundView addSubview:taskCard];
+
+    UILabel *taskTitleLbl = [[UILabel alloc] init];
+    taskTitleLbl.text = @"TASK METHOD";
+    taskTitleLbl.textColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.85];
+    taskTitleLbl.font = [UIFont fontWithName:@"Courier-Bold" size:10] ?: [UIFont boldSystemFontOfSize:10];
+    taskTitleLbl.translatesAutoresizingMaskIntoConstraints = NO;
+    [taskCard addSubview:taskTitleLbl];
+
+    NSArray *methodItems = @[@"landa", @"smith", @"physpuppet"];
+    _taskMethodSegment = [[UISegmentedControl alloc] initWithItems:methodItems];
+    _taskMethodSegment.selectedSegmentIndex = [self taskMethod];
+    [_taskMethodSegment setTitleTextAttributes:@{
+        NSFontAttributeName: [UIFont fontWithName:@"Courier" size:11] ?: [UIFont systemFontOfSize:11],
+        NSForegroundColorAttributeName: [UIColor colorWithWhite:0.6 alpha:1.0]
+    } forState:UIControlStateNormal];
+    [_taskMethodSegment setTitleTextAttributes:@{
+        NSFontAttributeName: [UIFont fontWithName:@"Courier-Bold" size:11] ?: [UIFont boldSystemFontOfSize:11],
+        NSForegroundColorAttributeName: [UIColor colorWithRed:0.08 green:0.09 blue:0.12 alpha:1.0]
+    } forState:UIControlStateSelected];
+    if (@available(iOS 13.0, *)) {
+        _taskMethodSegment.selectedSegmentTintColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
+        _taskMethodSegment.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
+    }
+    [_taskMethodSegment addTarget:self action:@selector(taskMethodChanged:) forControlEvents:UIControlEventValueChanged];
+    _taskMethodSegment.translatesAutoresizingMaskIntoConstraints = NO;
+    [taskCard addSubview:_taskMethodSegment];
+
+    UILabel *taskDescLbl = [[UILabel alloc] init];
+    taskDescLbl.text = @"smith — рекомендуется   landa — только для теста";
+    taskDescLbl.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    taskDescLbl.font = [UIFont fontWithName:@"Courier" size:8] ?: [UIFont systemFontOfSize:8];
+    taskDescLbl.textAlignment = NSTextAlignmentCenter;
+    taskDescLbl.numberOfLines = 1;
+    taskDescLbl.translatesAutoresizingMaskIntoConstraints = NO;
+    [taskCard addSubview:taskDescLbl];
+
+    [NSLayoutConstraint activateConstraints:@[
+        // Карточка — под _mainButton, над _authorLabel
+        [taskCard.topAnchor constraintEqualToAnchor:_mainButton.bottomAnchor constant:20],
+        [taskCard.leadingAnchor constraintEqualToAnchor:self.backgroundView.leadingAnchor constant:30],
+        [taskCard.trailingAnchor constraintEqualToAnchor:self.backgroundView.trailingAnchor constant:-30],
+
+        // Заголовок
+        [taskTitleLbl.topAnchor constraintEqualToAnchor:taskCard.topAnchor constant:12],
+        [taskTitleLbl.leadingAnchor constraintEqualToAnchor:taskCard.leadingAnchor constant:14],
+
+        // Сегмент
+        [_taskMethodSegment.topAnchor constraintEqualToAnchor:taskTitleLbl.bottomAnchor constant:8],
+        [_taskMethodSegment.leadingAnchor constraintEqualToAnchor:taskCard.leadingAnchor constant:12],
+        [_taskMethodSegment.trailingAnchor constraintEqualToAnchor:taskCard.trailingAnchor constant:-12],
+        [_taskMethodSegment.heightAnchor constraintEqualToConstant:32],
+
+        // Описание
+        [taskDescLbl.topAnchor constraintEqualToAnchor:_taskMethodSegment.bottomAnchor constant:8],
+        [taskDescLbl.leadingAnchor constraintEqualToAnchor:taskCard.leadingAnchor constant:12],
+        [taskDescLbl.trailingAnchor constraintEqualToAnchor:taskCard.trailingAnchor constant:-12],
+        [taskDescLbl.bottomAnchor constraintEqualToAnchor:taskCard.bottomAnchor constant:-12],
+    ]];
 
     [self reloadMainButtonState];
 }
@@ -586,6 +656,22 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [_topRightButton setSelected:([self selectedMode] == HUDPresetPositionTopRight)];
     UIImage *topCenterImage = (isCenteredMost ? [UIImage systemImageNamed:@"arrow.up.to.line"] : [UIImage systemImageNamed:@"arrow.up"]);
     [_topCenterButton setImage:topCenterImage forState:UIControlStateNormal];
+}
+
+- (NSInteger)taskMethod {
+    [self loadUserDefaults:NO];
+    NSNumber *m = [_userDefaults objectForKey:@"taskMethod"];
+    return m ? [m integerValue] : 1; // proc_set по умолчанию
+}
+
+- (void)setTaskMethod:(NSInteger)method {
+    [self loadUserDefaults:NO];
+    [_userDefaults setObject:@(method) forKey:@"taskMethod"];
+    [self saveUserDefaults];
+}
+
+- (void)taskMethodChanged:(UISegmentedControl *)sender {
+    [self setTaskMethod:sender.selectedSegmentIndex];
 }
 
 - (void)tapAuthorLabel:(UITapGestureRecognizer *)sender
