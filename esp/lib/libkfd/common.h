@@ -114,6 +114,7 @@ typedef uintptr_t usize;
 
 #if CONFIG_ASSERT
 
+#undef assert
 #define assert(condition)                                               \
     do {                                                                \
         if (!(condition)) {                                             \
