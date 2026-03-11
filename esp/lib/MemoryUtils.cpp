@@ -1,10 +1,124 @@
 #import "MemoryUtils.h"
 
-// Глобальный task port игрового процесса (инициализируется в GetGameModule_Base)
-mach_port_t get_task = MACH_PORT_NULL;
-pid_t Processpid = 0;
+// Глобальный task port игрового процесса
+mach_port_t get_task  = MACH_PORT_NULL;
+pid_t       Processpid = 0;
 
-// Получить PID по имени процесса через sysctl
+// Текущий метод получения task порта (0/1/2)
+// Меняется из UI (Config таб → TASK METHOD сегмент)
+int g_taskMethod = 1; // по умолчанию processor_set_tasks
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Метод 0: task_for_pid — прямой вызов
+// Самый простой, требует task_for_pid-allow entitlement.
+// Хорошо известен античиту — используй только для теста.
+// ─────────────────────────────────────────────────────────────────────────────
+static mach_port_t Method0_TaskForPid(pid_t targetPid) {
+    mach_port_t task = MACH_PORT_NULL;
+    kern_return_t kr = task_for_pid(mach_task_self(), targetPid, &task);
+    if (kr != KERN_SUCCESS) return MACH_PORT_NULL;
+    return task;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Метод 1: processor_set_tasks — получаем список всех tasks через processor set
+// Не вызывает task_for_pid напрямую. Требует com.apple.system-task-ports.
+// Рекомендуемый метод — уже доказал работу на TrollStore.
+// ─────────────────────────────────────────────────────────────────────────────
+static mach_port_t Method1_ProcessorSetTasks(pid_t targetPid) {
+    host_t host = mach_host_self();
+
+    processor_set_name_t psDefault;
+    if (processor_set_default(host, &psDefault) != KERN_SUCCESS)
+        return MACH_PORT_NULL;
+
+    processor_set_t psPriv;
+    if (host_processor_set_priv(host, psDefault, &psPriv) != KERN_SUCCESS) {
+        mach_port_deallocate(mach_task_self(), psDefault);
+        return MACH_PORT_NULL;
+    }
+
+    task_array_t tasks;
+    mach_msg_type_number_t taskCount = 0;
+    if (processor_set_tasks(psPriv, &tasks, &taskCount) != KERN_SUCCESS) {
+        mach_port_deallocate(mach_task_self(), psPriv);
+        mach_port_deallocate(mach_task_self(), psDefault);
+        return MACH_PORT_NULL;
+    }
+
+    mach_port_t result = MACH_PORT_NULL;
+    for (mach_msg_type_number_t i = 0; i < taskCount; i++) {
+        pid_t pid = -1;
+        pid_for_task(tasks[i], &pid);
+        if (pid == targetPid) {
+            result = tasks[i];
+        } else {
+            mach_port_deallocate(mach_task_self(), tasks[i]);
+        }
+    }
+
+    vm_deallocate(mach_task_self(), (vm_address_t)tasks, taskCount * sizeof(task_t));
+    mach_port_deallocate(mach_task_self(), psPriv);
+    mach_port_deallocate(mach_task_self(), psDefault);
+
+    return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Метод 2: pid_iterate — перебираем порты Mach через mach_port_names,
+// вызываем pid_for_task на каждом пока не найдём нужный PID.
+// Не использует ни task_for_pid ни processor_set — самый скрытный.
+// Медленнее, но вызывается только один раз при старте.
+// ─────────────────────────────────────────────────────────────────────────────
+static mach_port_t Method2_PidIterate(pid_t targetPid) {
+    mach_port_name_array_t names = nullptr;
+    mach_port_type_array_t types = nullptr;
+    mach_msg_type_number_t nameCount = 0, typeCount = 0;
+
+    kern_return_t kr = mach_port_names(mach_task_self(), &names, &nameCount, &types, &typeCount);
+    if (kr != KERN_SUCCESS) return MACH_PORT_NULL;
+
+    mach_port_t result = MACH_PORT_NULL;
+
+    for (mach_msg_type_number_t i = 0; i < nameCount; i++) {
+        if (!(types[i] & MACH_PORT_TYPE_SEND)) continue;
+
+        pid_t pid = -1;
+        kern_return_t pkr = pid_for_task(names[i], &pid);
+        if (pkr == KERN_SUCCESS && pid == targetPid) {
+            mach_port_mod_refs(mach_task_self(), names[i], MACH_PORT_RIGHT_SEND, +1);
+            result = names[i];
+            break;
+        }
+    }
+
+    vm_deallocate(mach_task_self(), (vm_address_t)names, nameCount * sizeof(mach_port_name_t));
+    vm_deallocate(mach_task_self(), (vm_address_t)types, typeCount * sizeof(mach_port_type_t));
+
+    return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Универсальная функция — выбирает метод по g_taskMethod
+// Fallback по цепочке если выбранный не сработал
+// ─────────────────────────────────────────────────────────────────────────────
+mach_port_t AcquireTaskPort(pid_t pid) {
+    mach_port_t task = MACH_PORT_NULL;
+
+    if      (g_taskMethod == 0) task = Method0_TaskForPid(pid);
+    else if (g_taskMethod == 1) task = Method1_ProcessorSetTasks(pid);
+    else if (g_taskMethod == 2) task = Method2_PidIterate(pid);
+
+    if (task == MACH_PORT_NULL && g_taskMethod != 1) task = Method1_ProcessorSetTasks(pid);
+    if (task == MACH_PORT_NULL && g_taskMethod != 0) task = Method0_TaskForPid(pid);
+    if (task == MACH_PORT_NULL && g_taskMethod != 2) task = Method2_PidIterate(pid);
+
+    return task;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PID по имени процесса
+// ─────────────────────────────────────────────────────────────────────────────
 pid_t GetGameProcesspid(char* GameProcessName) {
     size_t length = 0;
     static const int name[] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
@@ -30,144 +144,78 @@ pid_t GetGameProcesspid(char* GameProcessName) {
     return -1;
 }
 
-// Получить task port через processor_set_tasks — не детектируется как task_for_pid
-// Требует entitlement: com.apple.system-task-ports (уже в ent.plist)
-static mach_port_t GetTaskViaProcessorSet(pid_t targetPid) {
-    host_t host = mach_host_self();
-
-    // Получаем default processor set
-    processor_set_name_t psDefault;
-    if (processor_set_default(host, &psDefault) != KERN_SUCCESS)
-        return MACH_PORT_NULL;
-
-    // Получаем привилегированный порт processor set
-    processor_set_t psPriv;
-    if (host_processor_set_priv(host, psDefault, &psPriv) != KERN_SUCCESS) {
-        mach_port_deallocate(mach_task_self(), psDefault);
-        return MACH_PORT_NULL;
-    }
-
-    // Получаем список всех tasks в системе
-    task_array_t tasks;
-    mach_msg_type_number_t taskCount = 0;
-    if (processor_set_tasks(psPriv, &tasks, &taskCount) != KERN_SUCCESS) {
-        mach_port_deallocate(mach_task_self(), psPriv);
-        mach_port_deallocate(mach_task_self(), psDefault);
-        return MACH_PORT_NULL;
-    }
-
-    mach_port_t result = MACH_PORT_NULL;
-    for (mach_msg_type_number_t i = 0; i < taskCount; i++) {
-        pid_t pid = -1;
-        pid_for_task(tasks[i], &pid);  // обратный lookup — менее подозрительно
-        if (pid == targetPid) {
-            result = tasks[i];
-        } else {
-            // Освобождаем все task ports кроме нашего
-            mach_port_deallocate(mach_task_self(), tasks[i]);
-        }
-    }
-
-    vm_deallocate(mach_task_self(), (vm_address_t)tasks, taskCount * sizeof(task_t));
-    mach_port_deallocate(mach_task_self(), psPriv);
-    mach_port_deallocate(mach_task_self(), psDefault);
-
-    return result;
-}
-
+// ─────────────────────────────────────────────────────────────────────────────
+// Base address
+// ─────────────────────────────────────────────────────────────────────────────
 vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
-    vm_map_offset_t vmoffset = 0;
-    vm_map_size_t vmsize = 0;
-    uint32_t nesting_depth = 0;
-    struct vm_region_submap_info_64 vbr;
-    mach_msg_type_number_t vbrcount = 16;
-
     pid_t pid = GetGameProcesspid(GameProcessName);
     if (pid == -1) return 0;
 
-    // Сначала пробуем processor_set_tasks — не детектируется античитом
-    get_task = GetTaskViaProcessorSet(pid);
+    Processpid = pid;
+    get_task   = AcquireTaskPort(pid);
+    if (get_task == MACH_PORT_NULL) return 0;
 
-    // Fallback: task_for_pid если processor_set_tasks не сработал
-    // (например нет прав на com.apple.system-task-ports)
-    if (get_task == MACH_PORT_NULL) {
-        task_for_pid(mach_task_self(), pid, &get_task);
-    }
+    vm_map_offset_t vmoffset  = 0;
+    vm_map_size_t   vmsize    = 0;
+    uint32_t        depth     = 0;
+    struct vm_region_submap_info_64 vbr;
+    mach_msg_type_number_t vbrcount = 16;
 
-    if (get_task != MACH_PORT_NULL) {
-        kern_return_t kr = mach_vm_region_recurse(get_task, &vmoffset, &vmsize,
-            &nesting_depth, (vm_region_recurse_info_t)&vbr, &vbrcount);
-        if (kr == KERN_SUCCESS) {
-            return vmoffset;
-        }
-    }
-
-    return 0;
+    kern_return_t kr = mach_vm_region_recurse(get_task, &vmoffset, &vmsize,
+                                              &depth, (vm_region_recurse_info_t)&vbr, &vbrcount);
+    return (kr == KERN_SUCCESS) ? vmoffset : 0;
 }
 
-bool _read(long addr, void *buffer, int len)
-{
+// ─────────────────────────────────────────────────────────────────────────────
+// Read / Write
+// ─────────────────────────────────────────────────────────────────────────────
+bool _read(long addr, void *buffer, int len) {
     if (!isVaildPtr(addr)) return false;
     vm_size_t size = 0;
-    kern_return_t error = vm_read_overwrite(get_task, (vm_address_t)addr, len, (vm_address_t)buffer, &size);
-    if(error != KERN_SUCCESS || size != len)
-    {
-        return false;
-    }
-    return true;
+    return vm_read_overwrite(get_task, (vm_address_t)addr, len,
+                             (vm_address_t)buffer, &size) == KERN_SUCCESS
+           && size == (vm_size_t)len;
 }
 
-bool _write(long addr, const void *buffer, int len)
-{
-    if (!isVaildPtr(addr)) return false;
-    if (get_task == MACH_PORT_NULL) return false;
+bool _write(long addr, const void *buffer, int len) {
+    if (!isVaildPtr(addr) || get_task == MACH_PORT_NULL) return false;
 
-    // Проверяем что регион существует и доступен для записи
-    // vm_protect временно делает страницу writable если нужно
     vm_address_t region = (vm_address_t)addr;
     vm_size_t    rsize  = 0;
     vm_region_basic_info_data_64_t info;
     mach_msg_type_number_t infoCnt = VM_REGION_BASIC_INFO_COUNT_64;
     mach_port_t obj = MACH_PORT_NULL;
+
     kern_return_t kr = vm_region_64(get_task, &region, &rsize,
                                     VM_REGION_BASIC_INFO_64,
                                     (vm_region_info_t)&info, &infoCnt, &obj);
-    if (kr != KERN_SUCCESS) return false;  // регион не существует — не пишем
-    // addr должен попасть в найденный регион
-    if ((vm_address_t)addr < region || (vm_address_t)addr + len > region + rsize)
-        return false;
+    if (kr != KERN_SUCCESS) return false;
+    if ((vm_address_t)addr < region || (vm_address_t)addr + len > region + rsize) return false;
 
-    kr = vm_write(get_task,
-                  (vm_address_t)addr,
-                  (vm_offset_t)buffer,
-                  (mach_msg_type_number_t)len);
-    return kr == KERN_SUCCESS;
+    return vm_write(get_task, (vm_address_t)addr,
+                    (vm_offset_t)buffer, (mach_msg_type_number_t)len) == KERN_SUCCESS;
 }
 
-
-// Сканирование памяти чужого процесса по значению — аналог h5gg.searchNumber
-// Читает память кусками по 1MB, ищет паттерн с шагом patSize (выравненный поиск)
+// ─────────────────────────────────────────────────────────────────────────────
+// Value scan
+// ─────────────────────────────────────────────────────────────────────────────
 int scanForValue(uint64_t rangeStart, uint64_t rangeEnd,
                  const void *pattern, size_t patSize,
                  uint64_t *outAddrs, int maxResults) {
     if (get_task == MACH_PORT_NULL || patSize == 0 || !outAddrs || maxResults <= 0)
         return 0;
 
-    const size_t CHUNK = 0x100000; // 1MB
+    const size_t CHUNK = 0x100000;
     uint8_t *buf = (uint8_t *)malloc(CHUNK);
     if (!buf) return 0;
 
     int found = 0;
     for (uint64_t addr = rangeStart; addr < rangeEnd && found < maxResults; addr += CHUNK) {
         vm_size_t actualRead = 0;
-        kern_return_t kr = vm_read_overwrite(get_task,
-                                             (vm_address_t)addr,
-                                             (vm_size_t)CHUNK,
-                                             (vm_address_t)buf,
-                                             &actualRead);
+        kern_return_t kr = vm_read_overwrite(get_task, (vm_address_t)addr,
+                                             (vm_size_t)CHUNK, (vm_address_t)buf, &actualRead);
         if (kr != KERN_SUCCESS || actualRead < patSize) continue;
 
-        // Выравненный поиск по patSize (как h5gg I32/I64 search)
         for (vm_size_t i = 0; i + patSize <= actualRead; i += patSize) {
             if (memcmp(buf + i, pattern, patSize) == 0) {
                 outAddrs[found++] = addr + i;
