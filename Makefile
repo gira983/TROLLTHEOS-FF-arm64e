@@ -14,7 +14,6 @@ Fryzz_USE_MODULES := 0
 Fryzz_FILES += platform_stub.c
 Fryzz_FILES += $(wildcard core/*.mm core/*.m)
 Fryzz_FILES += $(wildcard esp/lib/*.mm) $(wildcard esp/lib/*.cpp) $(wildcard esp/MenuView/*.cpp) $(wildcard esp/MenuView/*.mm)
-Fryzz_FILES += esp/lib/KFDMemory.mm
 
 Fryzz_CFLAGS += -fobjc-arc \
 -Wno-unused-function \
@@ -26,6 +25,7 @@ Fryzz_CFLAGS += -fobjc-arc \
 
 Fryzz_CFLAGS += -Iinclude
 Fryzz_CFLAGS += -Iesp/lib
+Fryzz_CCFLAGS += -Iesp/lib
 Fryzz_CFLAGS += -include hud-prefix.pch
 # Fryzz_CFLAGS += -I/usr/lib/llvm-16/lib/clang/16.0.0/include
 # Fryzz_CFLAGS += -resource-dir /usr/lib/llvm-16/lib/clang/16.0.0
