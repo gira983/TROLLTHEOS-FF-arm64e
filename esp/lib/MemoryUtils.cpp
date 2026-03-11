@@ -152,14 +152,13 @@ mach_port_t AcquireTaskPort(pid_t pid) {
     mach_port_t task = MACH_PORT_NULL;
 
     if (g_taskMethod == 3) {
-        // kfd метод — инициализируем если ещё не запущен
-        if (g_kfdStatus == kKFDStatusNotStarted) {
-            KFDInit((KFDPuafMethod)g_kfdPuafMethod);
-        }
+        // kfd метод — только если уже успешно инициализирован
+        // KFDInit вызывается ОТДЕЛЬНО через KFDInitAsync, не здесь
+        // SIGSEGV внутри kopen нельзя поймать через @try/@catch
         if (g_kfdStatus == kKFDStatusSuccess) {
             task = KFDAcquireTaskPort(pid);
         }
-        // Если kfd не сработал — fallback на smith (Method1)
+        // Если kfd недоступен или не сработал — fallback на smith
         if (task == MACH_PORT_NULL) {
             task = Method1_ProcessorSetTasks(pid);
         }
