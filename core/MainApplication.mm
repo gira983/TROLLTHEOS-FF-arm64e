@@ -8,6 +8,7 @@
 
 OBJC_EXTERN BOOL IsHUDEnabled(void);
 OBJC_EXTERN void SetHUDEnabled(BOOL isEnabled);
+#include "KFDMemory.h"
 
 @interface UIApplication (Private)
 - (void)suspend;
@@ -348,7 +349,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     taskTitleLbl.translatesAutoresizingMaskIntoConstraints = NO;
     [taskCard addSubview:taskTitleLbl];
 
-    NSArray *methodItems = @[@"landa", @"smith", @"physpuppet", @"kfd"];
+    NSArray *methodItems = @[@"direct", @"procset", @"iterate", @"kfd"];
     _taskMethodSegment = [[UISegmentedControl alloc] initWithItems:methodItems];
     _taskMethodSegment.selectedSegmentIndex = [self taskMethod];
     [_taskMethodSegment setTitleTextAttributes:@{
@@ -804,11 +805,43 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [self reloadModeButtonState];
 }
 
+- (void)doStartHUD
+{
+    BOOL isNowEnabled = IsHUDEnabled();
+    if (!isNowEnabled) {
+        SetHUDEnabled(YES);
+        [self reloadMainButton];
+    }
+}
+
 - (void)tapMainButton:(UIButton *)sender
 {
     os_log_debug(OS_LOG_DEFAULT, "- [RootViewController tapMainButton:%{public}@]", sender);
 
     BOOL isNowEnabled = IsHUDEnabled();
+    
+    // Если kfd выбран и HUD ещё не запущен — сначала инициализируем kfd
+    if (!isNowEnabled && [self taskMethod] == 3 && g_kfdStatus != kKFDStatusSuccess) {
+        _mainButton.enabled = NO;
+        [_mainButton setTitle:@"KFD..." forState:UIControlStateNormal];
+        
+        KFDInitAsync((KFDPuafMethod)[self kfdPuafMethod], ^(bool success) {
+            _mainButton.enabled = YES;
+            if (!success) {
+                // kfd не сработал — показываем ошибку, НЕ запускаем HUD
+                [_mainButton setTitle:@"KFD FAIL" forState:UIControlStateNormal];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+                               dispatch_get_main_queue(), ^{
+                    [self reloadMainButton];
+                });
+                return;
+            }
+            // kfd успешен — запускаем HUD
+            [self doStartHUD];
+        });
+        return;
+    }
+    
     SetHUDEnabled(!isNowEnabled);
     isNowEnabled = !isNowEnabled;
 
