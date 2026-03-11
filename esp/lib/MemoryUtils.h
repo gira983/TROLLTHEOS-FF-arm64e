@@ -13,7 +13,13 @@
 // 0 = task_for_pid         — прямой, быстрый, легче детектируется
 // 1 = processor_set_tasks  — через список всех tasks, менее заметен (DEFAULT)
 // 2 = pid_iterate          — итерация pid_for_task по всем портам, самый скрытный
+// 3 = kfd_kernel           — через kernel exploit (kfd), обходит все Mach API
+//                            physpuppet=iOS<=16.3, smith=iOS<=16.5, landa=iOS<=16.7
 extern int g_taskMethod;
+
+// kfd puaf sub-метод (только когда g_taskMethod == 3):
+// 0 = physpuppet, 1 = smith, 2 = landa
+extern int g_kfdPuafMethod;
 
 extern mach_port_t get_task;
 extern pid_t Processpid;
