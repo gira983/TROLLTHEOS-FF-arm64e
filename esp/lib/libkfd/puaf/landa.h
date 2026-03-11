@@ -119,6 +119,14 @@ void landa_run(struct kfd* kfd)
     /*
      * STEP 3:
      *
+     * Before deallocating dst_vme_4, we remove the pmap mappings from dst_vme_3
+     * by setting its protection to NONE. This ensures that when dst_vmo_3 is
+     * reaped, pmap_mark_page_as_ppl_page_internal() won't panic because the
+     * pages still have active mappings (pa still has mappings @ pmap_data.c:1135).
+     */
+    assert_mach(vm_protect(mach_task_self(), vme3_dst_address, landa_vme3_size, false, VM_PROT_NONE));
+
+    /*
      * Deallocate dst_vme_4, which will in turn deallocate the last reference of dst_vmo_3.
      * Therefore, dst_vmo_3 will be reaped and its pages put back on the free list.
      * However, we now have a PUAF on up to X of those pages in the VA range of dst_vme_3.
