@@ -70,6 +70,17 @@ bool kread_sem_open_search(struct kfd* kfd, u64 object_uaddr)
             i32 buffersize = (i32)(sizeof(struct psem_fdinfo));
 
             const u64 shift_amount = 4;
+
+            /*
+             * Temporarily re-enable write access on the PUAF page before
+             * modifying pnode->pinfo. On arm64e the page may have had its
+             * write permission stripped by a concurrent pmap operation
+             * (e.g. from our vm_protect(NONE) fix in landa/physpuppet),
+             * causing KERN_PROTECTION_FAILURE / SIGBUS here.
+             */
+            u64 page_addr = trunc_page((u64)(&pnode[0]));
+            vm_protect(mach_task_self(), page_addr, pages(1), false, VM_PROT_READ | VM_PROT_WRITE);
+
             pnode[0].pinfo += shift_amount;
             assert(syscall(SYS_proc_info, callnum, pid, flavor, arg, buffer, buffersize) == buffersize);
             pnode[0].pinfo -= shift_amount;
