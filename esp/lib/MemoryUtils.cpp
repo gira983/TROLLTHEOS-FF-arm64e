@@ -1,5 +1,5 @@
 #import "MemoryUtils.h"
-#import <Foundation/Foundation.h>
+#include <CoreFoundation/CoreFoundation.h>
 
 // Глобальный task port игрового процесса
 mach_port_t get_task  = MACH_PORT_NULL;
@@ -10,12 +10,34 @@ pid_t       Processpid = 0;
 int g_taskMethod = 1; // proc_set по умолчанию
 
 // Загружаем выбранный метод из plist (записывает лаунчер Fryzzternal)
+// Используем CoreFoundation — работает в чистом C++ файле без ObjC
 static void LoadTaskMethodFromPrefs(void) {
-    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:
-        @"/var/mobile/Library/Preferences/ch.xxtou.hudapp.plist"];
-    if (prefs) {
-        NSNumber *m = prefs[@"taskMethod"];
-        if (m) g_taskMethod = (int)[m integerValue];
+    CFStringRef path = CFSTR("/var/mobile/Library/Preferences/ch.xxtou.hudapp.plist");
+    CFURLRef url = CFURLCreateWithFileSystemPath(kCFAllocatorDefault, path, kCFURLPOSIXPathStyle, false);
+    if (!url) return;
+
+    CFReadStreamRef stream = CFReadStreamCreateWithFile(kCFAllocatorDefault, url);
+    CFRelease(url);
+    if (!stream) return;
+
+    if (CFReadStreamOpen(stream)) {
+        CFPropertyListRef plist = CFPropertyListCreateWithStream(
+            kCFAllocatorDefault, stream, 0,
+            kCFPropertyListImmutable, NULL, NULL);
+        CFReadStreamClose(stream);
+
+        if (plist && CFGetTypeID(plist) == CFDictionaryGetTypeID()) {
+            CFDictionaryRef dict = (CFDictionaryRef)plist;
+            CFNumberRef num = (CFNumberRef)CFDictionaryGetValue(dict, CFSTR("taskMethod"));
+            if (num && CFGetTypeID(num) == CFNumberGetTypeID()) {
+                int val = 1;
+                CFNumberGetValue(num, kCFNumberIntType, &val);
+                g_taskMethod = val;
+            }
+        }
+        if (plist) CFRelease(plist);
+    } else {
+        CFRelease(stream);
     }
 }
 
