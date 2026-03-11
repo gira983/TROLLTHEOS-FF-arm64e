@@ -89,23 +89,40 @@ bool KFDInit(KFDPuafMethod method) {
     u64 kread_method  = kread_sem_open;
     u64 kwrite_method = kwrite_sem_open;
 
-    // Защита от kernel panic — запускаем в отдельном потоке с обработкой исключений
-    // kopen() при ошибке вызывает exit(1) после 30s sleep — нам это не нужно
-    // Поэтому оборачиваем в setjmp/longjmp не выйдет, просто запускаем и ждём
     @try {
-        // 128 страниц — оптимальный баланс надёжности и скорости
-        g_kfdHandle = kopen(128, (u64)method, kread_method, kwrite_method);
+        // 64 страницы — меньше риск OOM, достаточно для наших целей
+        g_kfdHandle = kopen(64, (u64)method, kread_method, kwrite_method);
         if (g_kfdHandle != 0) {
             g_kfdStatus = kKFDStatusSuccess;
             return true;
         }
+    } @catch (NSException *e) {
+        // ObjC исключение
+        (void)e;
     } @catch (...) {
-        // Любое исключение — считаем провалом
+        // C++ исключение
     }
+    // kopen вернул 0 или выбросил — считаем провалом без ребута
 
     g_kfdStatus = kKFDStatusFailed;
     g_kfdHandle = 0;
     return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KFDInitAsync — запускает kopen на отдельном потоке
+// Если SIGSEGV — процесс упадёт, но это произойдёт ДО старта HUD
+// поэтому лаунчер просто покажет ошибку а HUD не запустится
+// ─────────────────────────────────────────────────────────────────────────────
+void KFDInitAsync(KFDPuafMethod method, KFDInitCompletion completion) {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        bool result = KFDInit(method);
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(result);
+            });
+        }
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
