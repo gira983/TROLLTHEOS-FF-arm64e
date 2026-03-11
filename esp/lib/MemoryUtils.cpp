@@ -1,13 +1,20 @@
 #import "MemoryUtils.h"
 #include <CoreFoundation/CoreFoundation.h>
 
+// KFD метод — компилируется как ObjC++ (.mm) через KFDMemory.mm
+// Здесь только extern объявления
+extern "C" {
+#include "KFDMemory.h"
+}
+
 // Глобальный task port игрового процесса
 mach_port_t get_task  = MACH_PORT_NULL;
 pid_t       Processpid = 0;
 
 // Текущий метод получения task порта (0/1/2)
 // Читается из plist при старте, меняется из Config таба в HUD
-int g_taskMethod = 1; // proc_set по умолчанию
+int g_taskMethod    = 1; // proc_set по умолчанию
+int g_kfdPuafMethod = 1; // smith по умолчанию (iOS <= 16.5)
 
 // Загружаем выбранный метод из plist (записывает лаунчер Fryzzternal)
 // Используем CoreFoundation — работает в чистом C++ файле без ObjC
@@ -33,6 +40,12 @@ static void LoadTaskMethodFromPrefs(void) {
                 int val = 1;
                 CFNumberGetValue(num, kCFNumberIntType, &val);
                 g_taskMethod = val;
+            }
+            CFNumberRef puafNum = (CFNumberRef)CFDictionaryGetValue(dict, CFSTR("kfdPuafMethod"));
+            if (puafNum && CFGetTypeID(puafNum) == CFNumberGetTypeID()) {
+                int val = 1;
+                CFNumberGetValue(puafNum, kCFNumberIntType, &val);
+                g_kfdPuafMethod = val;
             }
         }
         if (plist) CFRelease(plist);
@@ -137,6 +150,21 @@ static mach_port_t Method2_PidIterate(pid_t targetPid) {
 // ─────────────────────────────────────────────────────────────────────────────
 mach_port_t AcquireTaskPort(pid_t pid) {
     mach_port_t task = MACH_PORT_NULL;
+
+    if (g_taskMethod == 3) {
+        // kfd метод — инициализируем если ещё не запущен
+        if (g_kfdStatus == kKFDStatusNotStarted) {
+            KFDInit((KFDPuafMethod)g_kfdPuafMethod);
+        }
+        if (g_kfdStatus == kKFDStatusSuccess) {
+            task = KFDAcquireTaskPort(pid);
+        }
+        // Если kfd не сработал — fallback на smith (Method1)
+        if (task == MACH_PORT_NULL) {
+            task = Method1_ProcessorSetTasks(pid);
+        }
+        return task;
+    }
 
     if      (g_taskMethod == 0) task = Method0_TaskForPid(pid);
     else if (g_taskMethod == 1) task = Method1_ProcessorSetTasks(pid);
