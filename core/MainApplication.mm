@@ -94,6 +94,9 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     BOOL _supportsCenterMost;
     // Task method selector UI
     UISegmentedControl *_taskMethodSegment;
+    // kfd puaf sub-метод
+    UIView             *_kfdCard;
+    UISegmentedControl *_kfdPuafSegment;
 }
 
 - (void)registerNotifications
