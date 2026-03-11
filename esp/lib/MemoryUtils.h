@@ -10,11 +10,11 @@
 #pragma mark - Task Method
 
 // Метод получения task порта:
-// 0 = task_for_pid         — прямой, быстрый, легче детектируется
-// 1 = processor_set_tasks  — через список всех tasks, менее заметен (DEFAULT)
-// 2 = pid_iterate          — итерация pid_for_task по всем портам, самый скрытный
-// 3 = kfd_kernel           — через kernel exploit (kfd), обходит все Mach API
-//                            physpuppet=iOS<=16.3, smith=iOS<=16.5, landa=iOS<=16.7
+// 0 = direct   (task_for_pid)        — прямой, быстрый, легче детектируется
+// 1 = procset  (processor_set_tasks) — через список всех tasks, менее заметен (DEFAULT)
+// 2 = iterate  (mach_port_names)     — итерация pid_for_task по всем портам, скрытный
+// 3 = kfd      (kernel exploit)      — обходит все Mach API
+//                                      physpuppet=iOS<=16.3, smith=iOS<=16.5, landa=iOS<=16.7
 extern int g_taskMethod;
 
 // kfd puaf sub-метод (только когда g_taskMethod == 3):
