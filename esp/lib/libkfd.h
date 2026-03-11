@@ -75,6 +75,12 @@ struct info {
     } kaddr;
 };
 
+struct ptov_table_entry {
+    u64 pa;
+    u64 va;
+    u64 len;
+};
+
 struct perf {
     u64 kernel_slide;
     u64 gVirtBase;
@@ -84,11 +90,7 @@ struct perf {
         u64 pa;
         u64 va;
     } ttbr[2];
-    struct ptov_table_entry {
-        u64 pa;
-        u64 va;
-        u64 len;
-    } ptov_table[8];
+    struct ptov_table_entry ptov_table[8];
     struct {
         u64 kaddr;
         u64 paddr;
