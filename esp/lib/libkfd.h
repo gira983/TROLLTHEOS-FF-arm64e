@@ -8,9 +8,15 @@
 /*
  * The global configuration parameters of libkfd.
  */
-#define CONFIG_ASSERT 1
-#define CONFIG_PRINT 1
-#define CONFIG_TIMER 1
+#ifndef CONFIG_ASSERT
+#define CONFIG_ASSERT 0
+#endif
+#ifndef CONFIG_PRINT
+#define CONFIG_PRINT 0
+#endif
+#ifndef CONFIG_TIMER
+#define CONFIG_TIMER 0
+#endif
 
 #include "libkfd/common.h"
 
