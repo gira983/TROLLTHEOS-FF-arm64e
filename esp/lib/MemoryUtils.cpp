@@ -1,12 +1,23 @@
 #import "MemoryUtils.h"
+#import <Foundation/Foundation.h>
 
 // Глобальный task port игрового процесса
 mach_port_t get_task  = MACH_PORT_NULL;
 pid_t       Processpid = 0;
 
 // Текущий метод получения task порта (0/1/2)
-// Меняется из UI (Config таб → TASK METHOD сегмент)
-int g_taskMethod = 1; // по умолчанию processor_set_tasks
+// Читается из plist при старте, меняется из Config таба в HUD
+int g_taskMethod = 1; // proc_set по умолчанию
+
+// Загружаем выбранный метод из plist (записывает лаунчер Fryzzternal)
+static void LoadTaskMethodFromPrefs(void) {
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:
+        @"/var/mobile/Library/Preferences/ch.xxtou.hudapp.plist"];
+    if (prefs) {
+        NSNumber *m = prefs[@"taskMethod"];
+        if (m) g_taskMethod = (int)[m integerValue];
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Метод 0: task_for_pid — прямой вызов
@@ -148,6 +159,9 @@ pid_t GetGameProcesspid(char* GameProcessName) {
 // Base address
 // ─────────────────────────────────────────────────────────────────────────────
 vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
+    // Читаем выбранный метод из настроек лаунчера
+    LoadTaskMethodFromPrefs();
+
     pid_t pid = GetGameProcesspid(GameProcessName);
     if (pid == -1) return 0;
 
