@@ -96,7 +96,9 @@ static int  lineOrigin = 1;    // 0 = Top, 1 = Center, 2 = Bottom
 static bool  isAimbot      = NO;
 static float aimFov        = 150.0f;
 static bool  isInMatch     = NO;    // детекция матча — обновляется в renderESP
-static float espDistance   = 400.0f; // дальность ESP (слайдер в Extra)
+// Жёсткие пороги дальности (как в старой версии)
+#define kESPMaxDistance    400.0f   // максимум для aimbot-проверки
+#define kESPDetailDistance 220.0f   // максимум для рендера скелета/бокса/имён
 static float aimDistance   = 200.0f;
 
 
@@ -1092,11 +1094,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addSliderTo:extraTabContainer label:@"FOV RADIUS" atY:ey width:eW minVal:10 maxVal:400 value:aimFov format:@"%.0f" onChanged:^(float v){ aimFov = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM DISTANCE" atY:ey width:eW minVal:10 maxVal:500 value:aimDistance format:@"%.0fm" onChanged:^(float v){ aimDistance = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM SPEED" atY:ey width:eW minVal:0.05 maxVal:1.0 value:aimSpeed format:@"%.2f" onChanged:^(float v){ aimSpeed = v; }]; ey += 54;
-    // Разделитель
-    UIView *espSep = [[UIView alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 1)];
-    espSep.backgroundColor = COL_LINE;
-    [extraTabContainer addSubview:espSep]; ey += 8;
-    [self addSliderTo:extraTabContainer label:@"ESP DISTANCE" atY:ey width:eW minVal:50 maxVal:1000 value:espDistance format:@"%.0fm" onChanged:^(float v){ espDistance = v; }];
+
 
     // ══ CONFIG TAB ════════════════════════════════════════════════════
     settingTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
@@ -1789,8 +1787,8 @@ bool get_IsFiring(uint64_t player) {
         Vector3 HeadPos = getPositionExt(headNode);
 
         float dis = Vector3::Distance(myLoc, HeadPos);
-        // Фильтрация по слайдеру дальности ESP
-        if (dis > espDistance) continue;
+        // Жёсткий порог дальности ESP (400м — aimbot, 220м — рендер)
+        if (dis > kESPMaxDistance) continue;
 
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
@@ -1825,6 +1823,9 @@ bool get_IsFiring(uint64_t player) {
         float boxW = boxH * 0.45f;
         float bx   = s_HeadTop.x - boxW * 0.5f;
         float by   = s_HeadTop.y;
+
+        // Жёсткий порог для рендера деталей (бокс/скелет/имена/hp) — как в старой версии
+        if (dis > kESPDetailDistance) continue;
 
         // ── Цвет по дистанции ────────────────────────────────────────
         // <40м красный → <100м жёлтый → белый
