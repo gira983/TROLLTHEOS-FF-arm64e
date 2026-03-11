@@ -51,6 +51,8 @@ bool kread_sem_open_search(struct kfd* kfd, u64 object_uaddr)
     struct psem_fdinfo* sem_data = (struct psem_fdinfo*)(&fds[kfd->kread.krkw_maximum_id + 1]);
 
     if ((pnode[0].pinfo > PAC_MASK) &&
+        (pnode[0].pinfo != 0) &&
+        ((pnode[0].pinfo & 0x0000007FFFFFFFFFull) != 0) &&
         (pnode[1].pinfo == pnode[0].pinfo) &&
         (pnode[2].pinfo == pnode[0].pinfo) &&
         (pnode[3].pinfo == pnode[0].pinfo) &&
