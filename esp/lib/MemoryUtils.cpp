@@ -175,19 +175,15 @@ static mach_port_t Method2_PidIterate(pid_t targetPid) {
 mach_port_t AcquireTaskPort(pid_t pid) {
     InitFunctionPointers();
     mach_port_t task = MACH_PORT_NULL;
-    if (g_taskMethod == 3) {
-        if (g_kfdStatus == kKFDStatusSuccess)
-            task = KFDAcquireTaskPort(pid);
-        if (task == MACH_PORT_NULL) task = Method1_ProcessorSetTasks(pid);
-        if (task == MACH_PORT_NULL) task = Method0_TaskForPid(pid);
-        return task;
-    }
+    // Method indices: 0=direct, 1=procset (recommended), 2=iterate (most stealthy)
+    // Fallback chain ensures we always get a task port
     if      (g_taskMethod == 0) task = Method0_TaskForPid(pid);
-    else if (g_taskMethod == 1) task = Method1_ProcessorSetTasks(pid);
     else if (g_taskMethod == 2) task = Method2_PidIterate(pid);
+    else                        task = Method1_ProcessorSetTasks(pid); // default: procset
+
+    // Fallback: if chosen method failed, try procset then direct
     if (task == MACH_PORT_NULL && g_taskMethod != 1) task = Method1_ProcessorSetTasks(pid);
-    if (task == MACH_PORT_NULL && g_taskMethod != 0) task = Method0_TaskForPid(pid);
-    if (task == MACH_PORT_NULL && g_taskMethod != 2) task = Method2_PidIterate(pid);
+    if (task == MACH_PORT_NULL)                      task = Method0_TaskForPid(pid);
     return task;
 }
 
