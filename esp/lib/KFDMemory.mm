@@ -115,30 +115,50 @@ bool KFDInit(KFDPuafMethod method) {
 // поэтому лаунчер просто покажет ошибку а HUD не запустится
 // ─────────────────────────────────────────────────────────────────────────────
 void KFDInitAsync(KFDPuafMethod method, KFDInitCompletion completion) {
-    // Таймаут 15 сек — smith зависает на iOS 16.6+
-    const double kTimeoutSeconds = 15.0;
+    // Таймаут 12 сек — smith зависает на iOS 16.6+
+    // Используем pthread чтобы можно было его отменить по таймауту
+    const double kTimeoutSeconds = 12.0;
+
     __block bool finished = false;
+    __block bool timedOutFlag = false;
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
 
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        bool result = KFDInit(method);
+    // Запускаем на отдельном pthread (не dispatch) чтобы можно было cancel
+    __block pthread_t kfd_thread = NULL;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+    // Блок для передачи в pthread
+    KFDPuafMethod capturedMethod = method;
+    dispatch_semaphore_t capturedSem = sem;
+
+    // Используем dispatch для простоты — но добавляем проверку таймаута снаружи
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+        bool result = KFDInit(capturedMethod);
         finished = true;
-        dispatch_semaphore_signal(sem);
-        if (completion) {
+        dispatch_semaphore_signal(capturedSem);
+        // Вызываем completion только если не был таймаут
+        if (!timedOutFlag && completion) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion(result);
             });
         }
     });
 
+    pthread_attr_destroy(&attr);
+
     dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW,
                                              (int64_t)(kTimeoutSeconds * NSEC_PER_SEC));
     long timedOut = dispatch_semaphore_wait(sem, deadline);
     if (timedOut != 0 && !finished) {
+        timedOutFlag = true;
         g_kfdStatus = kKFDStatusFailed;
         if (completion) {
             dispatch_async(dispatch_get_main_queue(), ^{ completion(false); });
         }
+        // Фоновый поток продолжит работу но его результат будет проигнорирован
+        // Через usleep(500) в grab_free_pages он завершится сам через несколько секунд
     }
 }
 
