@@ -21,8 +21,12 @@ jobs:
 
       - name: Download iOS SDK
         run: |
-          curl -L "https://github.com/theos/sdks/archive/refs/heads/master.tar.gz" -o sdks.tar.gz
-          tar -xzf sdks.tar.gz --strip=1 -C $HOME/theos/sdks/ '*/iPhoneOS16.5.sdk'
+          # Используем git sparse-checkout — надёжнее чем tar.gz с master
+          git clone --depth=1 --filter=blob:none --sparse \
+            https://github.com/theos/sdks.git /tmp/theos-sdks
+          cd /tmp/theos-sdks
+          git sparse-checkout set iPhoneOS16.5.sdk
+          cp -r iPhoneOS16.5.sdk $HOME/theos/sdks/
 
       - name: Build
         run: |
