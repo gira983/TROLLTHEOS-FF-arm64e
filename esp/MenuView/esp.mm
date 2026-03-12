@@ -198,18 +198,25 @@ static bool g_speedSearchDone = NO;   // true after searchSpeed() found addresse
 @end
 
 // (PassThroughScrollView удалён — AIM таб больше не использует ScrollView)
-// ExpandedHitView: передаёт hitTest subviews даже если они выходят за bounds контейнера.
+// ExpandedHitView: passes hitTest to subviews even if they exceed container bounds.
+// Uses standard UIKit hitTest to avoid mutation-during-iteration crashes with UIScrollView.
 @interface ExpandedHitView : UIView
 @end
 @implementation ExpandedHitView
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     if (self.hidden || !self.userInteractionEnabled || self.alpha < 0.01) return nil;
-    for (UIView *sub in [self.subviews reverseObjectEnumerator]) {
+    // Use UIKit's standard traversal — safe with UIScrollView subviews
+    UIView *hit = [super hitTest:point withEvent:event];
+    if (hit) return hit;
+    // Fallback: check subviews that may extend outside our bounds
+    NSArray *subs = [self.subviews copy]; // snapshot — safe from mutation
+    for (UIView *sub in subs.reverseObjectEnumerator) {
+        if (sub.hidden || !sub.userInteractionEnabled) continue;
         CGPoint local = [self convertPoint:point toView:sub];
-        UIView *hit = [sub hitTest:local withEvent:event];
-        if (hit) return hit;
+        UIView *h = [sub hitTest:local withEvent:event];
+        if (h) return h;
     }
-    return [self pointInside:point withEvent:event] ? self : nil;
+    return nil;
 }
 @end
 
@@ -431,6 +438,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     // Dedicated full-screen layer for ESP drawing — always landscape bounds
     CALayer *_espLayer;
+    // Cached viewport size — updated on orientation change (avoids per-frame main sync)
+    float _espVW, _espVH;
     // Background ESP compute queue — считаем paths не на main thread
     dispatch_queue_t _espQueue;
     // Atomic flag — не запускаем новый расчёт пока предыдущий не кончил
@@ -448,6 +457,17 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         _espQueue = dispatch_queue_create("esp.render", DISPATCH_QUEUE_SERIAL);
         dispatch_set_target_queue(_espQueue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
         _espBusy = NO;
+
+        // Init viewport size from screen
+        CGSize sc = UIScreen.mainScreen.bounds.size;
+        _espVW = (float)MAX(sc.width, sc.height);
+        _espVH = (float)MIN(sc.width, sc.height);
+
+        // Update viewport + _espLayer.frame on orientation change (no per-frame sync)
+        [[NSNotificationCenter defaultCenter] addObserver:self
+            selector:@selector(_onOrientationChange:)
+            name:UIApplicationDidChangeStatusBarOrientationNotification
+            object:nil];
 
         // === ESP слои — создаются один раз ===
         // _espLayer — dedicated container layer, always sized to landscape screen.
@@ -1709,12 +1729,13 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {}
 
-// Delegate — containerPan не перехватывает слайдеры
+// Gesture delegate — containerPan yields to UIScrollView, HUDSlider, CustomSwitch
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr shouldReceiveTouch:(UITouch *)touch {
     UIView *v = touch.view;
     while (v != nil) {
-        if ([v isKindOfClass:[HUDSlider class]]) return NO;
+        if ([v isKindOfClass:[HUDSlider class]])  return NO;
         if ([v isKindOfClass:[CustomSwitch class]]) return NO;
+        if ([v isKindOfClass:[UIScrollView class]]) return NO; // don't steal scroll touches
         if (v == menuContainer) break;
         v = v.superview;
     }
@@ -1722,11 +1743,13 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gr shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
-    // Если один из них — слайдерный pan — containerPan уступает
-    UIView *otherView = other.view;
-    while (otherView) {
-        if ([otherView isKindOfClass:[HUDSlider class]]) return NO;
-        otherView = otherView.superview;
+    // Always yield to UIScrollView pan (extraScroll)
+    if ([other.view isKindOfClass:[UIScrollView class]]) return YES;
+    // Yield to HUDSlider pan
+    UIView *ov = other.view;
+    while (ov) {
+        if ([ov isKindOfClass:[HUDSlider class]]) return YES;
+        ov = ov.superview;
     }
     return NO;
 }
@@ -1871,6 +1894,17 @@ bool get_IsFiring(uint64_t player) {
     return t;
 }
 
+- (void)_onOrientationChange:(NSNotification *)n {
+    CGSize sc = UIScreen.mainScreen.bounds.size;
+    float fw = (float)MAX(sc.width, sc.height);
+    float fh = (float)MIN(sc.width, sc.height);
+    _espVW = fw; _espVH = fh;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    _espLayer.frame = CGRectMake(0, 0, fw, fh);
+    [CATransaction commit];
+}
+
 - (void)renderESP {
     if (Moudule_Base == -1) return;
 
@@ -1906,24 +1940,10 @@ bool get_IsFiring(uint64_t player) {
 
     float *matrix = GetViewMatrix(camera);
 
-    // Viewport: read UIScreen size and force landscape (W > H).
-    // Then update _espLayer.frame on main thread so all shape layers
-    // are correctly anchored at {0,0} in landscape screen space.
-    __block CGSize _sz = CGSizeZero;
-    dispatch_sync(dispatch_get_main_queue(), ^{
-        _sz = UIScreen.mainScreen.bounds.size;
-        float fw = (float)_sz.width, fh = (float)_sz.height;
-        if (fw < fh) { float t = fw; fw = fh; fh = t; }
-        if (fw > 100) {
-            [CATransaction begin];
-            [CATransaction setDisableActions:YES];
-            self->_espLayer.frame = CGRectMake(0, 0, fw, fh);
-            [CATransaction commit];
-        }
-    });
-    float vW = (float)_sz.width;
-    float vH = (float)_sz.height;
-    if (vW < 100 || vH < 100) { vW = 844.f; vH = 390.f; }
+    // Viewport: use cached screen size (updated on orientation change, not every frame).
+    // _espVW/_espVH are updated by orientationDidChange notification — no main thread sync needed.
+    float vW = _espVW > 100.f ? _espVW : 844.f;
+    float vH = _espVH > 100.f ? _espVH : 390.f;
     if (vW < vH) { float tmp = vW; vW = vH; vH = tmp; }
     CGPoint center = CGPointMake(vW * 0.5f, vH * 0.5f);
 
