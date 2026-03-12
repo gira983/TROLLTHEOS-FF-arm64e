@@ -115,14 +115,31 @@ bool KFDInit(KFDPuafMethod method) {
 // поэтому лаунчер просто покажет ошибку а HUD не запустится
 // ─────────────────────────────────────────────────────────────────────────────
 void KFDInitAsync(KFDPuafMethod method, KFDInitCompletion completion) {
+    // Таймаут 15 сек — smith зависает на iOS 16.6+
+    const double kTimeoutSeconds = 15.0;
+    __block bool finished = false;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         bool result = KFDInit(method);
+        finished = true;
+        dispatch_semaphore_signal(sem);
         if (completion) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion(result);
             });
         }
     });
+
+    dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW,
+                                             (int64_t)(kTimeoutSeconds * NSEC_PER_SEC));
+    long timedOut = dispatch_semaphore_wait(sem, deadline);
+    if (timedOut != 0 && !finished) {
+        g_kfdStatus = kKFDStatusFailed;
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{ completion(false); });
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -185,8 +202,7 @@ mach_port_t KFDAcquireTaskPort(pid_t targetPid) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// KFDRead — читаем память целевого процесса напрямую через kfd
-// Обходим vm_read_overwrite полностью
+// KFDRead — читаем kernel virtual address напрямую через kfd
 // ─────────────────────────────────────────────────────────────────────────────
 bool KFDRead(uint64_t addr, void *buffer, size_t size) {
     if (g_kfdStatus != kKFDStatusSuccess || !g_kfdHandle) return false;
@@ -198,6 +214,173 @@ bool KFDRead(uint64_t addr, void *buffer, size_t size) {
     } @catch (...) {
         return false;
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KFDFindGameProc — находим proc и pmap целевого процесса через allproc
+// ─────────────────────────────────────────────────────────────────────────────
+static bool KFDFindGameProc(pid_t targetPid, uint64_t *out_proc, uint64_t *out_pmap) {
+    if (g_kfdStatus != kKFDStatusSuccess || !g_kfdHandle) return false;
+
+    struct kfd *kfd = (struct kfd *)g_kfdHandle;
+    if (!kfd->info.kaddr.current_proc) return false;
+
+    u64 proc_kaddr = kfd->info.kaddr.current_proc;
+
+    for (int iter = 0; iter < 1024; iter++) {
+        i32 pid = 0;
+        kread(g_kfdHandle, proc_kaddr + dynamic_info(proc__p_pid), &pid, sizeof(pid));
+
+        if (pid == targetPid) {
+            if (out_proc) *out_proc = proc_kaddr;
+            if (out_pmap) {
+                // task = proc + proc__object_size
+                u64 task_kaddr = proc_kaddr + dynamic_info(proc__object_size);
+                // vm_map = task + task__map
+                u64 signed_map = 0;
+                kread(g_kfdHandle, task_kaddr + dynamic_info(task__map), &signed_map, sizeof(signed_map));
+                u64 map_kaddr = UNSIGN_PTR(signed_map);
+                // pmap = vm_map.pmap
+                u64 signed_pmap = 0;
+                kread(g_kfdHandle, map_kaddr + offsetof(struct _vm_map, pmap), &signed_pmap, sizeof(signed_pmap));
+                *out_pmap = UNSIGN_PTR(signed_pmap);
+            }
+            return true;
+        }
+
+        u64 next = 0;
+        kread(g_kfdHandle, proc_kaddr + dynamic_info(proc__p_list__le_prev), &next, sizeof(next));
+        next = UNSIGN_PTR(next);
+        if (!next || next == proc_kaddr) break;
+        proc_kaddr = next;
+    }
+    return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KFDReadGameMemory — читаем user-space VA целевого процесса через его pmap
+// Не использует task port, vm_read_overwrite или любые Mach API
+// Полностью через kernel page tables
+// ─────────────────────────────────────────────────────────────────────────────
+bool KFDReadGameMemory(pid_t targetPid, uint64_t gameVA, void *buffer, size_t size) {
+    if (g_kfdStatus != kKFDStatusSuccess || !g_kfdHandle) return false;
+    if (!gameVA || !buffer || !size) return false;
+
+    struct kfd *kfd = (struct kfd *)g_kfdHandle;
+
+    // Ищем pmap игры (кэшируется снаружи — первый вызов медленный)
+    uint64_t game_pmap = 0;
+    if (!KFDFindGameProc(targetPid, nullptr, &game_pmap) || !game_pmap)
+        return false;
+
+    // Читаем побайтово по страницам через page walk игрового pmap
+    // Каждые 16KB — новый page table walk
+    const u64 PAGE_SIZE = 0x4000; // arm64 16K pages
+    uint8_t *dst = (uint8_t *)buffer;
+    u64 remaining = size;
+    u64 va = gameVA;
+
+    // Временно подменяем TTBR0 на pmap игры для vtophys
+    // Сохраняем оригинальный pmap нашего процесса
+    u64 saved_pmap_va = kfd->perf.ttbr[0].va;
+    u64 saved_pmap_pa = kfd->perf.ttbr[0].pa;
+
+    // Читаем tte (page table base) из pmap игры
+    u64 game_tte = 0;
+    kread(g_kfdHandle, game_pmap + offsetof(struct pmap, tte), &game_tte, sizeof(game_tte));
+    u64 game_ttep = 0;
+    kread(g_kfdHandle, game_pmap + offsetof(struct pmap, ttep), &game_ttep, sizeof(game_ttep));
+
+    // Подменяем TTBR0 на page tables игры
+    kfd->perf.ttbr[0].va = game_tte;
+    kfd->perf.ttbr[0].pa = game_ttep;
+
+    bool success = true;
+    while (remaining > 0) {
+        u64 page_offset = va & (PAGE_SIZE - 1);
+        u64 chunk = PAGE_SIZE - page_offset;
+        if (chunk > remaining) chunk = remaining;
+
+        // Транслируем VA игры в PA через её page tables
+        u64 pa = vtophys(kfd, va);
+        if (!pa) {
+            success = false;
+            break;
+        }
+
+        // PA → kernel VA → читаем через perf_kread
+        u64 kva = phystokv(kfd, pa);
+        if (!kva) {
+            success = false;
+            break;
+        }
+
+        kread(g_kfdHandle, kva, dst, chunk);
+        dst += chunk;
+        va += chunk;
+        remaining -= chunk;
+    }
+
+    // Восстанавливаем наш pmap
+    kfd->perf.ttbr[0].va = saved_pmap_va;
+    kfd->perf.ttbr[0].pa = saved_pmap_pa;
+
+    return success;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KFDWriteGameMemory — пишем в user-space VA целевого процесса через его pmap
+// ─────────────────────────────────────────────────────────────────────────────
+bool KFDWriteGameMemory(pid_t targetPid, uint64_t gameVA, const void *buffer, size_t size) {
+    if (g_kfdStatus != kKFDStatusSuccess || !g_kfdHandle) return false;
+    if (!gameVA || !buffer || !size || (size % 8 != 0)) return false;
+
+    struct kfd *kfd = (struct kfd *)g_kfdHandle;
+
+    uint64_t game_pmap = 0;
+    if (!KFDFindGameProc(targetPid, nullptr, &game_pmap) || !game_pmap)
+        return false;
+
+    u64 saved_pmap_va = kfd->perf.ttbr[0].va;
+    u64 saved_pmap_pa = kfd->perf.ttbr[0].pa;
+
+    u64 game_tte = 0;
+    kread(g_kfdHandle, game_pmap + offsetof(struct pmap, tte), &game_tte, sizeof(game_tte));
+    u64 game_ttep = 0;
+    kread(g_kfdHandle, game_pmap + offsetof(struct pmap, ttep), &game_ttep, sizeof(game_ttep));
+
+    kfd->perf.ttbr[0].va = game_tte;
+    kfd->perf.ttbr[0].pa = game_ttep;
+
+    const u64 PAGE_SIZE = 0x4000;
+    const uint8_t *src = (const uint8_t *)buffer;
+    u64 remaining = size;
+    u64 va = gameVA;
+    bool success = true;
+
+    while (remaining > 0) {
+        u64 page_offset = va & (PAGE_SIZE - 1);
+        u64 chunk = PAGE_SIZE - page_offset;
+        if (chunk > remaining) chunk = remaining;
+        // выравниваем chunk до 8 байт для kwrite
+        chunk = chunk & ~7ULL;
+        if (chunk == 0) { va++; remaining--; src++; continue; }
+
+        u64 pa = vtophys(kfd, va);
+        if (!pa) { success = false; break; }
+        u64 kva = phystokv(kfd, pa);
+        if (!kva) { success = false; break; }
+
+        kwrite(g_kfdHandle, (void*)src, kva, chunk);
+        src += chunk;
+        va += chunk;
+        remaining -= chunk;
+    }
+
+    kfd->perf.ttbr[0].va = saved_pmap_va;
+    kfd->perf.ttbr[0].pa = saved_pmap_pa;
+
+    return success;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
