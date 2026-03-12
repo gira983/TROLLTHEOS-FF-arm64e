@@ -1,5 +1,27 @@
 #import "MemoryUtils.h"
 #include <CoreFoundation/CoreFoundation.h>
+#include <stdio.h>
+#include <time.h>
+
+// ─── Лог в файл ───────────────────────────────────────────────────────────────
+#define KFD_LOG_PATH "/var/mobile/kfd_debug.log"
+
+static void kfd_log(const char *fmt, ...) {
+    FILE *f = fopen(KFD_LOG_PATH, "a");
+    if (!f) return;
+    // Время
+    time_t t = time(NULL);
+    struct tm *tm = localtime(&t);
+    fprintf(f, "[%02d:%02d:%02d] ", tm->tm_hour, tm->tm_min, tm->tm_sec);
+    // Сообщение
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(f, fmt, args);
+    va_end(args);
+    fprintf(f, "\n");
+    fclose(f);
+}
+// ──────────────────────────────────────────────────────────────────────────────
 
 // KFD метод — компилируется как ObjC++ (.mm) через KFDMemory.mm
 // Здесь только extern объявления
@@ -157,12 +179,12 @@ mach_port_t AcquireTaskPort(pid_t pid) {
         // SIGSEGV внутри kopen нельзя поймать через @try/@catch
         if (g_kfdStatus == kKFDStatusSuccess) {
             task = KFDAcquireTaskPort(pid);
-            fprintf(stderr, "[KFD-DBG] KFDAcquireTaskPort returned 0x%x\n", task);
+            kfd_log("[KFD-DBG] KFDAcquireTaskPort returned 0x%x", task);
         }
         // Если kfd недоступен или не сработал — fallback на smith
         if (task == MACH_PORT_NULL) {
             task = Method1_ProcessorSetTasks(pid);
-            fprintf(stderr, "[KFD-DBG] Method1_ProcessorSetTasks fallback returned 0x%x\n", task);
+            kfd_log("[KFD-DBG] Method1_ProcessorSetTasks fallback returned 0x%x", task);
         }
         return task;
     }
@@ -213,16 +235,16 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
     // Читаем выбранный метод из настроек лаунчера
     LoadTaskMethodFromPrefs();
 
-    fprintf(stderr, "[KFD-DBG] GetGameModule_Base: taskMethod=%d kfdStatus=%d kfdHandle=%llu\n",
+    kfd_log("[KFD-DBG] GetGameModule_Base: taskMethod=%d kfdStatus=%d kfdHandle=%llu",
             g_taskMethod, (int)g_kfdStatus, (unsigned long long)g_kfdHandle);
 
     pid_t pid = GetGameProcesspid(GameProcessName);
-    fprintf(stderr, "[KFD-DBG] target pid=%d\n", pid);
+    kfd_log("[KFD-DBG] target pid=%d", pid);
     if (pid == -1) return 0;
 
     Processpid = pid;
     get_task   = AcquireTaskPort(pid);
-    fprintf(stderr, "[KFD-DBG] get_task=0x%x\n", get_task);
+    kfd_log("[KFD-DBG] get_task=0x%x", get_task);
     if (get_task == MACH_PORT_NULL) return 0;
 
     vm_map_offset_t vmoffset  = 0;
