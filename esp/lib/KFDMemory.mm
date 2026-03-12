@@ -308,6 +308,14 @@ bool KFDReadGameMemory(pid_t targetPid, uint64_t gameVA, void *buffer, size_t si
     if (!KFDFindGameProc(targetPid, nullptr, &game_pmap) || !game_pmap)
         return false;
 
+    // Лог первого успешного вызова
+    static bool s_logged_stealth = false;
+    if (!s_logged_stealth) {
+        s_logged_stealth = true;
+        FILE *f = fopen("/var/mobile/kfd_debug.log", "a");
+        if (f) { fprintf(f, "[STEALTH] KFDReadGameMemory active, pmap=0x%llx\n", (unsigned long long)game_pmap); fclose(f); }
+    }
+
     // Читаем побайтово по страницам через page walk игрового pmap
     // Каждые 16KB — новый page table walk
     const u64 PAGE_SIZE = 0x4000; // arm64 16K pages
