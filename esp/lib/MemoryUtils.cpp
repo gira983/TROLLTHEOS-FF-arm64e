@@ -278,6 +278,14 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
 bool _read(long addr, void *buffer, int len) {
     if (!isVaildPtr(addr)) return false;
 
+    // Диагностика — один раз
+    static bool s_read_logged = false;
+    if (!s_read_logged) {
+        s_read_logged = true;
+        kfd_log("[READ-DBG] _read first call: kfdStatus=%d kfdHandle=%llu Processpid=%d addr=0x%lx",
+                (int)g_kfdStatus, (unsigned long long)g_kfdHandle, (int)Processpid, addr);
+    }
+
     // Stealth path: kfd page table walk без Mach API
     if (g_kfdStatus == kKFDStatusSuccess && g_kfdHandle && Processpid > 0) {
         if (KFDReadGameMemory(Processpid, (uint64_t)addr, buffer, (size_t)len))
