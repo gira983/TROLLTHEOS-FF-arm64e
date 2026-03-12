@@ -126,6 +126,16 @@ void kread_sem_open_find_proc(struct kfd* kfd)
         sizeof(u64),
         (vm_address_t)&pinfo,
         &out_size);
+
+    FILE *_dbg = fopen("/var/mobile/kfd_debug.log", "a");
+    if (_dbg) {
+        fprintf(_dbg, "[FIND_PROC] object_uaddr=0x%llx pinfo=0x%llx kr=%d our_pid=%d
+",
+                (unsigned long long)kfd->kread.krkw_object_uaddr,
+                (unsigned long long)pinfo, kr, kfd->info.env.pid);
+        fclose(_dbg);
+    }
+
     if (kr != KERN_SUCCESS || !pinfo) return;
 
     u64 pseminfo_kaddr = UNSIGN_PTR(pinfo);
@@ -136,29 +146,50 @@ void kread_sem_open_find_proc(struct kfd* kfd)
           pseminfo_kaddr + offsetof(struct pseminfo, psem_semobject),
           &semaphore_kaddr, sizeof(semaphore_kaddr));
     semaphore_kaddr = UNSIGN_PTR(semaphore_kaddr);
-    if (!semaphore_kaddr) return;
 
     u64 task_kaddr = 0;
     kread((u64)(kfd),
           semaphore_kaddr + offsetof(struct semaphore, owner),
           &task_kaddr, sizeof(task_kaddr));
     task_kaddr = UNSIGN_PTR(task_kaddr);
+
+    FILE *_dbg2 = fopen("/var/mobile/kfd_debug.log", "a");
+    if (_dbg2) {
+        fprintf(_dbg2, "[FIND_PROC] pseminfo=0x%llx semaphore=0x%llx task=0x%llx
+",
+                (unsigned long long)pseminfo_kaddr,
+                (unsigned long long)semaphore_kaddr,
+                (unsigned long long)task_kaddr);
+        fclose(_dbg2);
+    }
+
     if (!task_kaddr) return;
 
     u64 proc_kaddr = task_kaddr - dynamic_info(proc__object_size);
     kfd->info.kaddr.kernel_proc = proc_kaddr;
 
-    /*
-     * Go backwards from kernel_proc to find current_proc.
-     * Bounded loop — на arm64e битый указатель может зациклить while(true).
-     */
     for (u64 iter = 0; iter < 1024; iter++) {
         i32 pid = 0;
         kread((u64)(kfd),
               proc_kaddr + dynamic_info(proc__p_pid),
               &pid, sizeof(pid));
+
+        if (iter < 5) {
+            FILE *_dbg3 = fopen("/var/mobile/kfd_debug.log", "a");
+            if (_dbg3) {
+                fprintf(_dbg3, "[FIND_PROC] iter=%llu proc=0x%llx pid=%d
+",
+                        (unsigned long long)iter,
+                        (unsigned long long)proc_kaddr, pid);
+                fclose(_dbg3);
+            }
+        }
+
         if (pid == kfd->info.env.pid) {
             kfd->info.kaddr.current_proc = proc_kaddr;
+            FILE *_dbg4 = fopen("/var/mobile/kfd_debug.log", "a");
+            if (_dbg4) { fprintf(_dbg4, "[FIND_PROC] FOUND current_proc=0x%llx
+", (unsigned long long)proc_kaddr); fclose(_dbg4); }
             break;
         }
 
