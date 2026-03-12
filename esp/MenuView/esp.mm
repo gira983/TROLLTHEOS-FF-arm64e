@@ -416,7 +416,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     CAShapeLayer *_boxLayer;
     CAShapeLayer *_lineLayer;
     CAShapeLayer *_fovLayer;
-    // (no additional ivars needed for value-scan features)
+    // Aim sensitivity sliders — kept as ivars so toggleAimbot can reset them
+    HUDSlider *_sensXSlider;
+    HUDSlider *_sensYSlider;
+    UILabel   *_sensXLabel;
+    UILabel   *_sensYLabel;
     CAShapeLayer *_hpBgLayer;
     CAShapeLayer *_hpFillGreen;   // ratio > 0.6
     CAShapeLayer *_hpFillYellow;  // 0.3-0.6
@@ -1112,9 +1116,44 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addSliderTo:extraTabContainer label:@"FOV RADIUS" atY:ey width:eW minVal:10 maxVal:400 value:aimFov format:@"%.0f" onChanged:^(float v){ aimFov = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM DISTANCE" atY:ey width:eW minVal:10 maxVal:500 value:aimDistance format:@"%.0fm" onChanged:^(float v){ aimDistance = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM SPEED" atY:ey width:eW minVal:0.05 maxVal:1.0 value:aimSpeed format:@"%.2f" onChanged:^(float v){ aimSpeed = v; }]; ey += 54;
-    // Aim axis sensitivity — позволяет корректировать смещение прицела по X и Y
-    [self addSliderTo:extraTabContainer label:@"AIM SENS X" atY:ey width:eW minVal:0.1 maxVal:3.0 value:aimSensX format:@"%.2f" onChanged:^(float v){ aimSensX = v; }]; ey += 54;
-    [self addSliderTo:extraTabContainer label:@"AIM SENS Y" atY:ey width:eW minVal:0.1 maxVal:3.0 value:aimSensY format:@"%.2f" onChanged:^(float v){ aimSensY = v; }]; ey += 54;
+    // AIM SENS X — saved as ivar so toggleAimbot can reset it
+    {
+        UIView *sec = [self makeSectionHeaderWithTitle:@"AIM SENS X" atY:ey width:eW];
+        [extraTabContainer addSubview:sec]; ey += 18;
+        _sensXLabel = [[UILabel alloc] initWithFrame:CGRectMake(eW - 50, ey - 18, 44, 14)];
+        _sensXLabel.text = [NSString stringWithFormat:@"%.2f", aimSensX];
+        _sensXLabel.textColor = COL_ACC;
+        _sensXLabel.font = [UIFont fontWithName:@"Courier" size:9];
+        _sensXLabel.textAlignment = NSTextAlignmentRight;
+        [extraTabContainer addSubview:_sensXLabel];
+        _sensXSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 32)];
+        _sensXSlider.minimumValue = 0.1f; _sensXSlider.maximumValue = 3.0f;
+        _sensXSlider.value = aimSensX;
+        _sensXSlider.minimumTrackTintColor = COL_ACC;
+        _sensXSlider.thumbTintColor = [UIColor colorWithRed:0.88 green:0.88 blue:0.95 alpha:1.0];
+        UILabel * __unsafe_unretained xRef = _sensXLabel;
+        _sensXSlider.onValueChanged = ^(float v){ aimSensX = v; xRef.text = [NSString stringWithFormat:@"%.2f", v]; };
+        [extraTabContainer addSubview:_sensXSlider]; ey += 54;
+    }
+    // AIM SENS Y
+    {
+        UIView *sec = [self makeSectionHeaderWithTitle:@"AIM SENS Y" atY:ey width:eW];
+        [extraTabContainer addSubview:sec]; ey += 18;
+        _sensYLabel = [[UILabel alloc] initWithFrame:CGRectMake(eW - 50, ey - 18, 44, 14)];
+        _sensYLabel.text = [NSString stringWithFormat:@"%.2f", aimSensY];
+        _sensYLabel.textColor = COL_ACC;
+        _sensYLabel.font = [UIFont fontWithName:@"Courier" size:9];
+        _sensYLabel.textAlignment = NSTextAlignmentRight;
+        [extraTabContainer addSubview:_sensYLabel];
+        _sensYSlider = [[HUDSlider alloc] initWithFrame:CGRectMake(10, ey, eW - 20, 32)];
+        _sensYSlider.minimumValue = 0.1f; _sensYSlider.maximumValue = 3.0f;
+        _sensYSlider.value = aimSensY;
+        _sensYSlider.minimumTrackTintColor = COL_ACC;
+        _sensYSlider.thumbTintColor = [UIColor colorWithRed:0.88 green:0.88 blue:0.95 alpha:1.0];
+        UILabel * __unsafe_unretained yRef = _sensYLabel;
+        _sensYSlider.onValueChanged = ^(float v){ aimSensY = v; yRef.text = [NSString stringWithFormat:@"%.2f", v]; };
+        [extraTabContainer addSubview:_sensYSlider]; ey += 54;
+    }
 
 
     // ══ CONFIG TAB ════════════════════════════════════════════════════
@@ -1152,13 +1191,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIColor *scanColor = [UIColor colorWithRed:0.18 green:0.78 blue:0.71 alpha:1.0];
     UIView *nrRow = [self makeCheckRowWithTitle:@"No Recoil" badge:@"LOOP" badgeColor:loopColor atY:cy width:cW initialValue:NO action:@selector(toggleNoRecoil:)];
     [settingTabContainer addSubview:nrRow]; cy += 28;
-    // Speed: три кнопки — Search (при старте игры), Activate (в матче), Reset (выход)
-    UIView *spSearch = [self makeButtonRowWithTitle:@"SEARCH SPEED" badge:@"INIT" badgeColor:[UIColor colorWithRed:0.3 green:0.7 blue:1.0 alpha:1.0] atY:cy width:cW action:@selector(searchSpeed)]; cy += 44;
-    UIView *spActivate = [self makeButtonRowWithTitle:@"ACTIVATE SPEED" badge:@"GO" badgeColor:[UIColor colorWithRed:0.2 green:0.9 blue:0.3 alpha:1.0] atY:cy width:cW action:@selector(activateSpeed)]; cy += 44;
-    UIView *spReset = [self makeButtonRowWithTitle:@"RESET SPEED" badge:@"RST" badgeColor:[UIColor colorWithRed:1.0 green:0.4 blue:0.2 alpha:1.0] atY:cy width:cW action:@selector(resetSpeed)];
-    [settingTabContainer addSubview:spSearch];
-    [settingTabContainer addSubview:spActivate];
-    [settingTabContainer addSubview:spReset]; cy += 44; cy += 8;
+    // Speed — single toggle button
+    // First ON: searches addresses then patches. Subsequent ON: reuses cached addresses.
+    // OFF: restores original values. Cache cleared on game restart automatically.
+    UIView *spRow = [self makeCheckRowWithTitle:@"Speed" badge:@"SCAN" badgeColor:[UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0] atY:cy width:cW initialValue:NO action:@selector(toggleSpeed:)];
+    [settingTabContainer addSubview:spRow]; cy += 44;
 
     cy += 4;
     UIView *cSec2 = [self makeSectionHeaderWithTitle:@"PRIVACY" atY:cy width:cW];
@@ -1372,7 +1409,18 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleName:(CustomSwitch *)sender { isName = sender.isOn; previewNameLabel.hidden = !isName; }
 - (void)toggleDist:(CustomSwitch *)sender { isDis = sender.isOn; previewDistLabel.hidden = !isDis; }
 - (void)toggleLine:(CustomSwitch *)sender { isLine = sender.isOn; }
-- (void)toggleAimbot:(CustomSwitch *)sender    { isAimbot    = sender.isOn; }
+- (void)toggleAimbot:(CustomSwitch *)sender {
+    isAimbot = sender.isOn;
+    // Reset aim sensitivity sliders to 1.0 on every toggle (ON or OFF)
+    aimSensX = 1.0f;
+    aimSensY = 1.0f;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (_sensXSlider) { _sensXSlider.value = 1.0f; }
+        if (_sensYSlider) { _sensYSlider.value = 1.0f; }
+        if (_sensXLabel)  { _sensXLabel.text = @"1.00"; }
+        if (_sensYLabel)  { _sensYLabel.text = @"1.00"; }
+    });
+}
 
 
 - (void)toggleStreamerMode:(CustomSwitch *)sender {
@@ -1418,94 +1466,70 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     }
 }
 
-// ── Speed — 3-step: searchSpeed → activateSpeed → resetSpeed ────────
-// Step 1: Call ONCE after first entering the game (lobby screen).
-//         Scans for original speed value and caches addresses.
-//         Search value: I64 = 4397530849764387586 ([0.033, 0.033] as two F32)
-- (void)searchSpeed {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        const int MAX = 4096;
-        int64_t search = 4397530849764387586LL;  // original: [0.033f, 0.033f]
-        uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
-        int count = scanForValue(0x100000000, 0x200000000,
-                                 &search, sizeof(search), addrs, MAX);
-        // Cache found addresses for activate/reset
-        NSMutableArray *arr = [NSMutableArray arrayWithCapacity:count];
-        for (int i = 0; i < count; i++)
-            [arr addObject:@(addrs[i])];
-        free(addrs);
+// ── Speed — smart single toggle ──────────────────────────────────────
+// ON (first time): searches for speed value addresses, then patches them.
+// ON (subsequent): reuses cached addresses — no re-scan needed.
+//   Cache survives match start/end but is cleared if game restarts (addresses invalid).
+// OFF: restores original values. Cache kept so next ON is instant.
+- (void)toggleSpeed:(CustomSwitch *)sender {
+    isSpeedActive = sender.isOn;
 
-        g_speedAddrs = arr;
-        g_speedSearchDone = (count > 0);
-        dispatch_async(dispatch_get_main_queue(), ^{
-            // Visual feedback: flash the button green if found
-            NSLog(@"[Speed] searchSpeed: found %d addresses", count);
-        });
-    });
-}
-
-// Step 2: Call IN MATCH to apply speed patch.
-//         Uses cached addresses from searchSpeed.
-//         Patch value: I64 = 4366458311853765201 (~1.77x faster)
-- (void)activateSpeed {
-    if (!g_speedSearchDone || !g_speedAddrs || g_speedAddrs.count == 0) {
-        // No cached addresses — run search first then patch
+    if (isSpeedActive) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            const int MAX = 4096;
-            int64_t search = 4397530849764387586LL;
-            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
-            int count = scanForValue(0x100000000, 0x200000000,
-                                     &search, sizeof(search), addrs, MAX);
-            NSMutableArray *arr = [NSMutableArray arrayWithCapacity:count];
-            for (int i = 0; i < count; i++) [arr addObject:@(addrs[i])];
+            const int MAX      = 4096;
+            int64_t origVal    = 4397530849764387586LL;  // [0.033f, 0.033f] — original speed
+            int64_t patchVal   = 4366458311853765201LL;  // [0.0186f, 0.0186f] — ~1.77x faster
+            uint64_t *addrs    = (uint64_t *)malloc(MAX * sizeof(uint64_t));
+
+            BOOL needSearch = (!g_speedSearchDone || !g_speedAddrs || g_speedAddrs.count == 0);
+
+            if (needSearch) {
+                // First activation OR cache was cleared (game restart)
+                // Scan for original value in game module region
+                int count = scanForValue(0x100000000, 0x200000000,
+                                         &origVal, sizeof(origVal), addrs, MAX);
+                if (count == 0) {
+                    // Not in lobby/match yet — nothing found
+                    free(addrs);
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        sender.on = NO;
+                        isSpeedActive = NO;
+                    });
+                    return;
+                }
+                NSMutableArray *arr = [NSMutableArray arrayWithCapacity:count];
+                for (int i = 0; i < count; i++) [arr addObject:@(addrs[i])];
+                g_speedAddrs     = arr;
+                g_speedSearchDone = YES;
+                NSLog(@"[Speed] searched: found %d addrs", count);
+            } else {
+                NSLog(@"[Speed] activate: using %lu cached addrs", (unsigned long)g_speedAddrs.count);
+            }
+
             free(addrs);
-            g_speedAddrs = arr;
-            g_speedSearchDone = (count > 0);
-            int64_t patch = 4366458311853765201LL;
+
+            // Patch all cached addresses
             for (NSNumber *n in g_speedAddrs)
-                WriteAddr<int64_t>((long)n.unsignedLongLongValue, patch);
-            NSLog(@"[Speed] activateSpeed (with search): patched %lu addrs", (unsigned long)g_speedAddrs.count);
+                WriteAddr<int64_t>((long)n.unsignedLongLongValue, patchVal);
         });
-        return;
+
+    } else {
+        // OFF — restore original values to cached addresses
+        if (g_speedAddrs && g_speedAddrs.count > 0) {
+            int64_t origVal = 4397530849764387586LL;
+            for (NSNumber *n in g_speedAddrs)
+                WriteAddr<int64_t>((long)n.unsignedLongLongValue, origVal);
+            NSLog(@"[Speed] reset: restored %lu addrs", (unsigned long)g_speedAddrs.count);
+            // Keep cache — next ON will be instant (no re-scan)
+            // Cache will auto-invalidate if game restarts (addresses become invalid)
+        }
     }
-    // Use cached addresses directly
-    int64_t patch = 4366458311853765201LL;
-    for (NSNumber *n in g_speedAddrs)
-        WriteAddr<int64_t>((long)n.unsignedLongLongValue, patch);
-    isSpeedActive = YES;
-    NSLog(@"[Speed] activateSpeed: patched %lu cached addrs", (unsigned long)g_speedAddrs.count);
 }
 
-// Step 3: Call AFTER EXITING MATCH to restore original values.
-//         Must be called before next match — otherwise activateSpeed
-//         won't find the original value to patch.
-- (void)resetSpeed {
-    if (!g_speedAddrs || g_speedAddrs.count == 0) {
-        // Re-scan for original value — activateSpeed might not have been called
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            const int MAX = 4096;
-            int64_t search = 4397530849764387586LL;
-            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
-            int count = scanForValue(0x100000000, 0x200000000,
-                                     &search, sizeof(search), addrs, MAX);
-            free(addrs);
-            // Already original — nothing to reset
-            NSLog(@"[Speed] resetSpeed: nothing to reset (count=%d)", count);
-        });
-        isSpeedActive = NO;
-        g_speedSearchDone = NO;
-        return;
-    }
-    // Restore original value to cached addresses
-    int64_t orig = 4397530849764387586LL;
-    for (NSNumber *n in g_speedAddrs)
-        WriteAddr<int64_t>((long)n.unsignedLongLongValue, orig);
-    isSpeedActive = NO;
-    g_speedSearchDone = NO;
-    NSUInteger resetCount = g_speedAddrs.count;
-    g_speedAddrs = nil;  // clear cache — must searchSpeed again next match
-    NSLog(@"[Speed] resetSpeed: restored %lu addrs", (unsigned long)resetCount);
-}
+// Kept for compatibility — not used in UI but may be called externally
+- (void)searchSpeed  { /* no-op: search is now done automatically in toggleSpeed */ }
+- (void)activateSpeed { /* no-op */ }
+- (void)resetSpeed   { /* no-op */ }
 
 // One-shot action button row (no toggle, just fires action on tap)
 - (UIView *)makeButtonRowWithTitle:(NSString *)title badge:(NSString *)badge
@@ -1851,27 +1875,20 @@ bool get_IsFiring(uint64_t player) {
     // Защита от мусорного значения
     if (totalCount <= 0 || totalCount > 64) totalCount = 64;
 
-    // Read view matrix AFTER getting camera — ensures we use the freshest matrix
-    // for the current frame, reducing visual lag during fast camera rotation
     float *matrix = GetViewMatrix(camera);
 
-    // Use UIScreen bounds for viewport — guaranteed correct after rotation
-    // self.bounds and superview.bounds can lag 1 frame behind on rotation
-    __block CGSize screenSize = CGSizeZero;
-    if ([NSThread isMainThread]) {
-        screenSize = [UIScreen mainScreen].bounds.size;
-    } else {
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            screenSize = [UIScreen mainScreen].bounds.size;
-        });
-    }
-    float vW = (float)screenSize.width;
-    float vH = (float)screenSize.height;
-    // Fallback if screen size is invalid
+    // Viewport size — read from self.bounds which is set correctly by HUDMainApplication
+    // via autoresizingMask. No dispatch_sync needed — renderESP runs on _espQueue (bg thread)
+    // and self.bounds is updated atomically by UIKit before the next frame is drawn.
+    float vW = (float)self.bounds.size.width;
+    float vH = (float)self.bounds.size.height;
+    // Fallback: if our frame is zero (not yet laid out), use superview
     if (vW < 100 || vH < 100) {
-        vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
-        vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
+        vW = self.superview ? (float)self.superview.bounds.size.width  : 812.f;
+        vH = self.superview ? (float)self.superview.bounds.size.height : 375.f;
     }
+    // Swap W/H if landscape and they appear portrait (rotation not yet applied to frame)
+    if (vW < vH) { float tmp = vW; vW = vH; vH = tmp; }
     CGPoint center = CGPointMake(vW * 0.5f, vH * 0.5f);
 
     // Paths по цветовым зонам: Near(<40м) Mid(<100м) Far(>=100м) Knocked
