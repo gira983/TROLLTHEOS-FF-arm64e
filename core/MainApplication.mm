@@ -810,7 +810,25 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     BOOL isNowEnabled = IsHUDEnabled();
     if (!isNowEnabled) {
         SetHUDEnabled(YES);
-        [self reloadMainButtonState];
+
+        // Ждём NOTIFY_LAUNCHED_HUD так же как tapMainButton — иначе PID файл
+        // ещё не записан и IsHUDEnabled() вернёт NO → кнопка остаётся "Start"
+        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+        int token;
+        notify_register_dispatch(NOTIFY_LAUNCHED_HUD, &token, dispatch_get_main_queue(), ^(int token) {
+            notify_cancel(token);
+            dispatch_semaphore_signal(semaphore);
+        });
+
+        [self.backgroundView setUserInteractionEnabled:NO];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)));
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self reloadMainButtonState];
+                [self.backgroundView setUserInteractionEnabled:YES];
+            });
+        });
     }
 }
 
