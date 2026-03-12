@@ -73,9 +73,14 @@ static bool IsKFDSupported(void) {
 // ─────────────────────────────────────────────────────────────────────────────
 bool KFDInit(KFDPuafMethod method) {
     if (g_kfdStatus == kKFDStatusSuccess) return true;
-    if (g_kfdStatus == kKFDStatusFailed)  return false;
+    // Не блокируем повторный запуск после Failed/Unsupported —
+    // пользователь мог переключить метод (например с smith на landa)
+    // kKFDStatusRunning блокируем чтобы не запускать параллельно
+    if (g_kfdStatus == kKFDStatusRunning)  return false;
 
+    // Сбрасываем предыдущий провал — новый метод может сработать
     g_kfdStatus = kKFDStatusRunning;
+    g_kfdHandle = 0;
 
     // Проверяем поддержку текущей iOS
     if (!IsKFDSupported()) {
