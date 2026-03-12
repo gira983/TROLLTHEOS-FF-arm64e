@@ -97,8 +97,9 @@ static bool  isAimbot      = NO;
 static float aimFov        = 150.0f;
 static bool  isInMatch     = NO;    // детекция матча — обновляется в renderESP
 // Жёсткие пороги дальности (как в старой версии)
-#define kESPMaxDistance    400.0f   // максимум для aimbot-проверки
-#define kESPDetailDistance 220.0f   // максимум для рендера скелета/бокса/имён
+#define kESPMaxDistance    400.0f   // max distance for aimbot check
+#define kESPDetailDistance 300.0f   // max distance for skeleton/box/name render
+#define kESPDotDistance    300.0f   // beyond this: show dot marker only
 static float aimDistance   = 200.0f;
 
 
@@ -109,12 +110,18 @@ static int  aimMode = 1;           // 0 = Closest to Player, 1 = Closest to Cros
 static int  aimTrigger = 1;        // 0 = Always, 1 = Only Shooting, 2 = Only Aiming
 static int  aimTarget = 0;         // 0 = Head, 1 = Neck, 2 = Hip
 static float aimSpeed = 1.0f;      // Aim smoothing 0.05 - 1.0
+static float aimSensX = 1.0f;     // Aim axis X sensitivity multiplier
+static float aimSensY = 1.0f;     // Aim axis Y sensitivity multiplier
 static bool isStreamerMode = NO;   // Stream Proof
 
 // ── No Recoil (value scan, loop) ─────────────────────────────────────
 static bool isNoRecoil   = NO;
 // ── Speed (value scan, loop) ─────────────────────────────────────────
 static bool isSpeedActive = NO;
+// Speed scan state — addresses found during searchSpeed()
+// Must persist across match start/end to allow activate/reset
+static NSMutableArray<NSNumber*> *g_speedAddrs = nil;
+static bool g_speedSearchDone = NO;   // true after searchSpeed() found addresses
 
 @interface CustomSwitch : UIControl
 @property (nonatomic, assign, getter=isOn) BOOL on;
@@ -448,36 +455,37 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             return sl;
         };
 
-        // Кости по зонам
-        _boneNear    = makeShape([UIColor colorWithRed:1.f green:0.2f blue:0.2f alpha:0.9f], 1.2f, YES);
-        _boneMid     = makeShape([UIColor colorWithRed:1.f green:0.85f blue:0.f alpha:0.9f], 1.1f, YES);
-        _boneFar     = makeShape([UIColor colorWithWhite:1.f alpha:0.75f],                    1.0f, YES);
-        _boneKnocked = makeShape([UIColor colorWithRed:0.6f green:0.4f blue:1.f alpha:0.7f], 0.9f, YES);
-        _boneLayer   = _boneFar; // алиас для совместимости
+        // Skeleton — white, clean (matches reference screenshot)
+        // All distance zones same color; knocked = grey-purple
+        _boneNear    = makeShape([UIColor colorWithWhite:1.f alpha:0.95f], 1.2f, YES);
+        _boneMid     = makeShape([UIColor colorWithWhite:1.f alpha:0.90f], 1.1f, YES);
+        _boneFar     = makeShape([UIColor colorWithWhite:1.f alpha:0.80f], 1.0f, YES);
+        _boneKnocked = makeShape([UIColor colorWithRed:0.7f green:0.5f blue:1.f alpha:0.75f], 0.9f, YES);
+        _boneLayer   = _boneFar;
 
-        // Боксы по зонам
-        _boxNear    = makeShape([UIColor colorWithRed:1.f green:0.2f blue:0.2f alpha:0.95f], 1.6f, NO);
-        _boxMid     = makeShape([UIColor colorWithRed:1.f green:0.85f blue:0.f alpha:0.95f], 1.5f, NO);
-        _boxFar     = makeShape([UIColor colorWithWhite:1.f alpha:0.9f],                     1.4f, NO);
-        _boxKnocked = makeShape([UIColor colorWithRed:0.6f green:0.4f blue:1.f alpha:0.75f],1.2f, NO);
-        _boxLayer   = _boxFar; // алиас
+        // Corner-bracket box — white, thin (matches reference)
+        _boxNear    = makeShape([UIColor colorWithWhite:1.f alpha:0.98f], 1.5f, NO);
+        _boxMid     = makeShape([UIColor colorWithWhite:1.f alpha:0.90f], 1.4f, NO);
+        _boxFar     = makeShape([UIColor colorWithWhite:1.f alpha:0.80f], 1.2f, NO);
+        _boxKnocked = makeShape([UIColor colorWithRed:0.7f green:0.5f blue:1.f alpha:0.80f], 1.1f, NO);
+        _boxLayer   = _boxFar;
 
-        // Линии ESP по зонам
-        _lineNear = makeShape([UIColor colorWithRed:1.f green:0.2f blue:0.2f alpha:0.55f], 0.9f, NO);
-        _lineMid  = makeShape([UIColor colorWithRed:1.f green:0.85f blue:0.f alpha:0.5f],  0.8f, NO);
-        _lineFar  = makeShape([UIColor colorWithWhite:0.8f alpha:0.4f],                    0.7f, NO);
-        _lineLayer = _lineFar; // алиас
+        // ESP lines — white, semi-transparent (matches reference)
+        _lineNear = makeShape([UIColor colorWithWhite:1.f alpha:0.55f], 0.9f, NO);
+        _lineMid  = makeShape([UIColor colorWithWhite:1.f alpha:0.45f], 0.8f, NO);
+        _lineFar  = makeShape([UIColor colorWithWhite:1.f alpha:0.30f], 0.6f, NO);
+        _lineLayer = _lineFar;
 
         // HP полоски
         _hpBgLayer = makeShape(nil, 0, NO);
-        _hpBgLayer.fillColor = [UIColor colorWithWhite:0.1 alpha:0.6].CGColor;
+        _hpBgLayer.fillColor = [UIColor colorWithWhite:0.0f alpha:0.55f].CGColor;
+        // HP bar always green (matches reference — clean single color)
         _hpFillGreen = makeShape(nil, 0, NO);
-        _hpFillGreen.fillColor  = [UIColor colorWithRed:0.15 green:0.9 blue:0.35 alpha:1.0].CGColor;
-        _hpFillYellow = makeShape(nil, 0, NO);
-        _hpFillYellow.fillColor = [UIColor colorWithRed:1.0  green:0.75 blue:0.0  alpha:1.0].CGColor;
-        _hpFillRed = makeShape(nil, 0, NO);
-        _hpFillRed.fillColor    = [UIColor colorWithRed:1.0  green:0.2  blue:0.2  alpha:1.0].CGColor;
-        _hpFillLayer = _hpFillGreen; // алиас
+        _hpFillGreen.fillColor  = [UIColor colorWithRed:0.1f green:0.85f blue:0.3f alpha:1.0f].CGColor;
+        // Yellow and red kept as aliases pointing to green for simplicity
+        _hpFillYellow = _hpFillGreen;
+        _hpFillRed    = _hpFillGreen;
+        _hpFillLayer  = _hpFillGreen;
 
         // FOV круг
         _fovLayer = makeShape([UIColor colorWithWhite:1.0 alpha:0.4], 1.0f, NO);
@@ -1104,6 +1112,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addSliderTo:extraTabContainer label:@"FOV RADIUS" atY:ey width:eW minVal:10 maxVal:400 value:aimFov format:@"%.0f" onChanged:^(float v){ aimFov = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM DISTANCE" atY:ey width:eW minVal:10 maxVal:500 value:aimDistance format:@"%.0fm" onChanged:^(float v){ aimDistance = v; }]; ey += 54;
     [self addSliderTo:extraTabContainer label:@"AIM SPEED" atY:ey width:eW minVal:0.05 maxVal:1.0 value:aimSpeed format:@"%.2f" onChanged:^(float v){ aimSpeed = v; }]; ey += 54;
+    // Aim axis sensitivity — позволяет корректировать смещение прицела по X и Y
+    [self addSliderTo:extraTabContainer label:@"AIM SENS X" atY:ey width:eW minVal:0.1 maxVal:3.0 value:aimSensX format:@"%.2f" onChanged:^(float v){ aimSensX = v; }]; ey += 54;
+    [self addSliderTo:extraTabContainer label:@"AIM SENS Y" atY:ey width:eW minVal:0.1 maxVal:3.0 value:aimSensY format:@"%.2f" onChanged:^(float v){ aimSensY = v; }]; ey += 54;
 
 
     // ══ CONFIG TAB ════════════════════════════════════════════════════
@@ -1141,7 +1152,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIColor *scanColor = [UIColor colorWithRed:0.18 green:0.78 blue:0.71 alpha:1.0];
     UIView *nrRow = [self makeCheckRowWithTitle:@"No Recoil" badge:@"LOOP" badgeColor:loopColor atY:cy width:cW initialValue:NO action:@selector(toggleNoRecoil:)];
     [settingTabContainer addSubview:nrRow]; cy += 28;
-    UIView *spRow = [self makeCheckRowWithTitle:@"Speed" badge:@"SCAN" badgeColor:scanColor atY:cy width:cW initialValue:NO action:@selector(toggleSpeed:)];
+    // Speed: три кнопки — Search (при старте игры), Activate (в матче), Reset (выход)
+    UIView *spSearch = [self makeButtonRowWithTitle:@"SEARCH SPEED" badge:@"INIT" badgeColor:[UIColor colorWithRed:0.3 green:0.7 blue:1.0 alpha:1.0] atY:cy width:cW action:@selector(searchSpeed)]; cy += 44;
+    UIView *spActivate = [self makeButtonRowWithTitle:@"ACTIVATE SPEED" badge:@"GO" badgeColor:[UIColor colorWithRed:0.2 green:0.9 blue:0.3 alpha:1.0] atY:cy width:cW action:@selector(activateSpeed)]; cy += 44;
+    UIView *spReset = [self makeButtonRowWithTitle:@"RESET SPEED" badge:@"RST" badgeColor:[UIColor colorWithRed:1.0 green:0.4 blue:0.2 alpha:1.0] atY:cy width:cW action:@selector(resetSpeed)];
     [settingTabContainer addSubview:spRow]; cy += 28;
 
     cy += 4;
@@ -1402,27 +1416,93 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     }
 }
 
-// ── Speed — loop каждые 2 сек, ловит новые оружия/регионы ───────────
-// scan: I64=4397530849764387586 → patch: 4366458311853765201
-- (void)toggleSpeed:(CustomSwitch *)sender {
-    isSpeedActive = sender.isOn;
-    if (isSpeedActive) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            const int MAX   = 4096;
-            int64_t search  = 4397530849764387586LL;
-            int64_t patch   = 4366458311853765201LL;
-            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
-            while (isSpeedActive) {
-                int count = scanForValue(0x100000000, 0x200000000,
-                                         &search, sizeof(search), addrs, MAX);
-                for (int i = 0; i < count; i++)
-                    WriteAddr<int64_t>((long)addrs[i], patch);
-                for (int s = 0; s < 20 && isSpeedActive; s++)
-                    [NSThread sleepForTimeInterval:0.1];
-            }
-            free(addrs);
+// ── Speed — 3-step: searchSpeed → activateSpeed → resetSpeed ────────
+// Step 1: Call ONCE after first entering the game (lobby screen).
+//         Scans for original speed value and caches addresses.
+//         Search value: I64 = 4397530849764387586 ([0.033, 0.033] as two F32)
+- (void)searchSpeed {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        const int MAX = 4096;
+        int64_t search = 4397530849764387586LL;  // original: [0.033f, 0.033f]
+        uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
+        int count = scanForValue(0x100000000, 0x200000000,
+                                 &search, sizeof(search), addrs, MAX);
+        // Cache found addresses for activate/reset
+        NSMutableArray *arr = [NSMutableArray arrayWithCapacity:count];
+        for (int i = 0; i < count; i++)
+            [arr addObject:@(addrs[i])];
+        free(addrs);
+
+        g_speedAddrs = arr;
+        g_speedSearchDone = (count > 0);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // Visual feedback: flash the button green if found
+            NSLog(@"[Speed] searchSpeed: found %d addresses", count);
         });
+    });
+}
+
+// Step 2: Call IN MATCH to apply speed patch.
+//         Uses cached addresses from searchSpeed.
+//         Patch value: I64 = 4366458311853765201 (~1.77x faster)
+- (void)activateSpeed {
+    if (!g_speedSearchDone || !g_speedAddrs || g_speedAddrs.count == 0) {
+        // No cached addresses — run search first then patch
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            const int MAX = 4096;
+            int64_t search = 4397530849764387586LL;
+            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
+            int count = scanForValue(0x100000000, 0x200000000,
+                                     &search, sizeof(search), addrs, MAX);
+            NSMutableArray *arr = [NSMutableArray arrayWithCapacity:count];
+            for (int i = 0; i < count; i++) [arr addObject:@(addrs[i])];
+            free(addrs);
+            g_speedAddrs = arr;
+            g_speedSearchDone = (count > 0);
+            int64_t patch = 4366458311853765201LL;
+            for (NSNumber *n in g_speedAddrs)
+                WriteAddr<int64_t>((long)n.unsignedLongLongValue, patch);
+            NSLog(@"[Speed] activateSpeed (with search): patched %lu addrs", (unsigned long)g_speedAddrs.count);
+        });
+        return;
     }
+    // Use cached addresses directly
+    int64_t patch = 4366458311853765201LL;
+    for (NSNumber *n in g_speedAddrs)
+        WriteAddr<int64_t>((long)n.unsignedLongLongValue, patch);
+    isSpeedActive = YES;
+    NSLog(@"[Speed] activateSpeed: patched %lu cached addrs", (unsigned long)g_speedAddrs.count);
+}
+
+// Step 3: Call AFTER EXITING MATCH to restore original values.
+//         Must be called before next match — otherwise activateSpeed
+//         won't find the original value to patch.
+- (void)resetSpeed {
+    if (!g_speedAddrs || g_speedAddrs.count == 0) {
+        // Re-scan for original value — activateSpeed might not have been called
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            const int MAX = 4096;
+            int64_t search = 4397530849764387586LL;
+            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
+            int count = scanForValue(0x100000000, 0x200000000,
+                                     &search, sizeof(search), addrs, MAX);
+            free(addrs);
+            // Already original — nothing to reset
+            NSLog(@"[Speed] resetSpeed: nothing to reset (count=%d)", count);
+        });
+        isSpeedActive = NO;
+        g_speedSearchDone = NO;
+        return;
+    }
+    // Restore original value to cached addresses
+    int64_t orig = 4397530849764387586LL;
+    for (NSNumber *n in g_speedAddrs)
+        WriteAddr<int64_t>((long)n.unsignedLongLongValue, orig);
+    isSpeedActive = NO;
+    g_speedSearchDone = NO;
+    NSUInteger resetCount = g_speedAddrs.count;
+    g_speedAddrs = nil;  // clear cache — must searchSpeed again next match
+    NSLog(@"[Speed] resetSpeed: restored %lu addrs", (unsigned long)resetCount);
 }
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
@@ -1665,8 +1745,14 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     });
 }
 
+// Returns aim rotation adjusted by per-axis sensitivity
+// aimSensX scales horizontal (yaw) component, aimSensY scales vertical (pitch)
 Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 myLoc) {
-    return Quaternion::LookRotation((targetLocation + Vector3(0, y_bias, 0)) - myLoc, Vector3(0, 1, 0));
+    Vector3 dir = (targetLocation + Vector3(0, y_bias, 0)) - myLoc;
+    // Apply axis sensitivity: scale X (horizontal) and Y (vertical) components
+    dir.x *= aimSensX;
+    dir.y *= aimSensY;
+    return Quaternion::LookRotation(dir, Vector3(0, 1, 0));
 }
 
 void set_aim(uint64_t player, Quaternion rotation) {
@@ -1733,14 +1819,26 @@ bool get_IsFiring(uint64_t player) {
     // Защита от мусорного значения
     if (totalCount <= 0 || totalCount > 64) totalCount = 64;
 
+    // Read view matrix AFTER getting camera — ensures we use the freshest matrix
+    // for the current frame, reducing visual lag during fast camera rotation
     float *matrix = GetViewMatrix(camera);
-    // Берём РЕАЛЬНЫЙ размер отображения — self.bounds меняется с поворотом
-    // superview (_blurView) имеет autoresizingMask и правильный bounds после поворота
-    float vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
-    float vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
-    if (vW < 10 || vH < 10) {
-        vW = (float)self.bounds.size.width;
-        vH = (float)self.bounds.size.height;
+
+    // Use UIScreen bounds for viewport — guaranteed correct after rotation
+    // self.bounds and superview.bounds can lag 1 frame behind on rotation
+    __block CGSize screenSize = CGSizeZero;
+    if ([NSThread isMainThread]) {
+        screenSize = [UIScreen mainScreen].bounds.size;
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            screenSize = [UIScreen mainScreen].bounds.size;
+        });
+    }
+    float vW = (float)screenSize.width;
+    float vH = (float)screenSize.height;
+    // Fallback if screen size is invalid
+    if (vW < 100 || vH < 100) {
+        vW = self.superview ? (float)self.superview.bounds.size.width  : (float)self.bounds.size.width;
+        vH = self.superview ? (float)self.superview.bounds.size.height : (float)self.bounds.size.height;
     }
     CGPoint center = CGPointMake(vW * 0.5f, vH * 0.5f);
 
@@ -1835,27 +1933,27 @@ bool get_IsFiring(uint64_t player) {
             s_HeadTop.y < -200 || s_HeadTop.y > vH+200) continue;
 
         float boxH = fabsf(s_HeadTop.y - s_Toe.y);
-        if (boxH < 6.0f) continue;   // слишком маленький — за горизонтом
-        float boxW = boxH * 0.45f;
+        // If player is tiny on screen (far away) — still show dot + distance label
+        // but skip heavy skeleton/box rendering
+        bool isTiny = (boxH < 6.0f);
+        float boxW = isTiny ? 6.0f : boxH * 0.45f;
         float bx   = s_HeadTop.x - boxW * 0.5f;
         float by   = s_HeadTop.y;
 
-        // Жёсткий порог для рендера деталей (бокс/скелет/имена/hp) — как в старой версии
+        // Skip full detail rendering beyond kESPDetailDistance
         if (dis > kESPDetailDistance) continue;
 
-        // ── Цвет по дистанции ────────────────────────────────────────
-        // <40м красный → <100м жёлтый → белый
-        // Нокнутый всегда серо-фиолетовый
+        // Distance label color: green(close) → yellow(mid) → red(far)
+        // Knocked = purple. Matches reference design.
         float acR, acG, acB;
-        if (isKnocked) { acR=0.6f; acG=0.4f; acB=1.f; }       // фиолетовый = нокнут
-        else if (dis < 40.f)  { acR=1.f; acG=0.2f; acB=0.2f; }  // красный
-        else if (dis < 100.f) { acR=1.f; acG=0.85f; acB=0.f;  }  // жёлтый
-        else if (dis < 250.f) { acR=1.f; acG=1.f;  acB=1.f;  }   // белый
-        else                  { acR=0.5f;acG=0.8f; acB=1.f;  }   // голубой = далеко
-        float acA = isKnocked ? 0.65f : 0.92f; // нокнутые чуть прозрачнее
+        if (isKnocked)        { acR=0.7f; acG=0.5f; acB=1.f;  }  // purple = knocked
+        else if (dis < 40.f)  { acR=0.1f; acG=0.9f; acB=0.3f; }  // green  = close
+        else if (dis < 100.f) { acR=1.f;  acG=0.85f;acB=0.f;  }  // yellow = medium
+        else                  { acR=1.f;  acG=0.2f; acB=0.2f; }  // red    = far
+        float acA = isKnocked ? 0.75f : 0.95f;
 
-        // ── SKELETON (только ≤ 150м — дальше незаметно, но жрёт ресурсы) ──
-        if (isBone && dis <= 150.f) {
+        // ── SKELETON — skip for tiny/far players ──────────────────────
+        if (isBone && dis <= 150.f && !isTiny) {
             uint64_t hipNode = getHip(PawnObject);
             Vector3 HipPos  = isVaildPtr(hipNode) ? getPositionExt(hipNode) : HeadPos;
             Vector3 s_Hip   = WorldToScreen(HipPos,  matrix, vW, vH);
@@ -1869,30 +1967,49 @@ bool get_IsFiring(uint64_t player) {
             Vector3 s_LA = WorldToScreen(getPositionExt(getLeftAnkle(PawnObject)),     matrix, vW, vH);
             Vector3 s_RA = WorldToScreen(getPositionExt(getRightAnkle(PawnObject)),    matrix, vW, vH);
 
-            // Голова→таз
             CGMutablePathRef bp = BONE_PATH;
+
+            // Head circle (matches reference design)
+            float headR = MAX(2.5f, boxH * 0.07f);
+            CGPathAddEllipseInRect(bp, nil,
+                CGRectMake(s_Head.x - headR, s_Head.y - headR, headR*2, headR*2));
+
+            // Spine: Head → Neck(midpoint) → Hip
+            float neckX = s_Head.x + (s_Hip.x - s_Head.x) * 0.28f;
+            float neckY = s_Head.y + (s_Hip.y - s_Head.y) * 0.28f;
             CGPathMoveToPoint(bp,nil,s_Head.x,s_Head.y);
+            CGPathAddLineToPoint(bp,nil,neckX,neckY);
             CGPathAddLineToPoint(bp,nil,s_Hip.x,s_Hip.y);
-            // Плечи
+
+            // Shoulders (T-pose cross)
             CGPathMoveToPoint(bp,nil,s_LS.x,s_LS.y);
-            CGPathAddLineToPoint(bp,nil,s_RS.x,s_RS.y);
-            // Левая рука
+            CGPathAddLineToPoint(bp,nil,neckX,neckY);  // LS → Neck
+            CGPathAddLineToPoint(bp,nil,s_RS.x,s_RS.y); // Neck → RS
+
+            // Left arm: LS → LE → LH
             CGPathMoveToPoint(bp,nil,s_LS.x,s_LS.y);
             CGPathAddLineToPoint(bp,nil,s_LE.x,s_LE.y);
             CGPathAddLineToPoint(bp,nil,s_LH.x,s_LH.y);
-            // Правая рука
+
+            // Right arm: RS → RE → RH
             CGPathMoveToPoint(bp,nil,s_RS.x,s_RS.y);
             CGPathAddLineToPoint(bp,nil,s_RE.x,s_RE.y);
             CGPathAddLineToPoint(bp,nil,s_RH.x,s_RH.y);
-            // Ноги
+
+            // Legs: Hip → LA, Hip → RA
             CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
             CGPathAddLineToPoint(bp,nil,s_LA.x,s_LA.y);
             CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
             CGPathAddLineToPoint(bp,nil,s_RA.x,s_RA.y);
         }
 
-        // ── BOX: corner brackets ─────────────────────────────────────
-        if (isBox) {
+        // ── BOX: corner brackets (skip for tiny/far, draw dot instead) ──
+        if (isBox && isTiny) {
+            // Tiny dot marker for far enemies
+            float dotR = 3.5f;
+            CGMutablePathRef xp = BOX_PATH;
+            CGPathAddEllipseInRect(xp, nil, CGRectMake(s_Head.x-dotR, s_Head.y-dotR, dotR*2, dotR*2));
+        } else if (isBox) {
             float cL = MIN(boxW, boxH) * 0.22f;
             CGMutablePathRef xp = BOX_PATH;
             // TL
@@ -1911,10 +2028,10 @@ bool get_IsFiring(uint64_t player) {
             CGPathMoveToPoint(xp,nil,bx+boxW-cL,by+boxH);
             CGPathAddLineToPoint(xp,nil,bx+boxW,by+boxH);
             CGPathAddLineToPoint(xp,nil,bx+boxW,by+boxH-cL);
-        }
+        } // end box corner-bracket
 
-        // ── HP BAR ───────────────────────────────────────────────────
-        if (isHealth) {
+        // ── HP BAR (skip for tiny far enemies) ─────────────────────────
+        if (isHealth && !isTiny) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
                 float ratio  = fmaxf(0.f, fminf(1.f, (float)CurHP / MaxHP));
@@ -1930,34 +2047,36 @@ bool get_IsFiring(uint64_t player) {
                     CGPathAddRect(fillPath, nil, CGRectMake(hpBX, hpBY+boxH-fillH, hpBW, fillH));
 
                 // HP текст — только текущее HP, без MaxHP
-                float hr=(ratio>0.6f)?0.15f:1.f, hg=(ratio>0.6f)?0.9f:(ratio>0.3f?0.75f:0.2f), hb=(ratio>0.6f)?0.35f:(ratio>0.3f?0.f:0.2f);
+                // HP number — white, above bar, 11pt (matches reference)
                 char hpBuf[32];
                 if (isKnocked) snprintf(hpBuf,sizeof(hpBuf),"KO");
                 else           snprintf(hpBuf,sizeof(hpBuf),"%d",CurHP);
-                float tW = 24.f;
-                addText(hpBuf, hpBX + hpBW*0.5f - tW*0.5f, hpBY-10.f, tW, 10.f, 9.f, hr,hg,hb,1.f, 0.f, 1);
+                float tW = 28.f;
+                addText(hpBuf, hpBX + hpBW*0.5f - tW*0.5f, hpBY-12.f, tW, 11.f, 11.f, 1.f,1.f,1.f,1.f, 0.f, 1);
             }
         }
 
-        // ── NAME ─────────────────────────────────────────────────────
-        if (isName) {
+        // ── NAME (skip for tiny far enemies) ────────────────────────
+        if (isName && !isTiny) {
             NSString *name = GetNickName(PawnObject);
             const char *ns = (name && name.length) ? [name UTF8String] : "?";
-            float nW = MAX(boxW, 60.f);
-            float nY = by - 12.f - (isHealth ? 10.f : 0.f);
+            // Name above box — white bold, subtle dark bg for readability
+            float nW = MAX(boxW, 70.f);
+            float nY = by - 13.f - (isHealth ? 12.f : 0.f);
             char nb[48]; strncpy(nb, ns, 47); nb[47]=0;
-            addText(nb, bx+(boxW-nW)*0.5f, nY, nW, 11.f, 10.f, 1.f,1.f,1.f,1.f, 0.5f, 1);
+            addText(nb, bx+(boxW-nW)*0.5f, nY, nW, 12.f, 11.f, 1.f,1.f,1.f,1.f, 0.45f, 1);
         }
 
-        // ── DISTANCE ─────────────────────────────────────────────────
-        if (isDis) {
+        // ── DISTANCE (always shown for tiny/far enemies) ───────────
+        if (isDis || isTiny) {
+            // Distance label — colored by range, uppercase M suffix (matches reference: "12M")
             char db[24];
-            if (isKnocked) snprintf(db,sizeof(db),"KO %.0fm",dis);
-            else           snprintf(db,sizeof(db),"%.0fm",dis);
-            // Ширина — минимум 50pt чтобы текст не обрезался
-            float distW = MAX(boxW, 50.f);
-            float distX = bx + (boxW - distW) * 0.5f; // центрируем относительно бокса
-            addText(db, distX, by+boxH+2.f, distW, 11.f, 9.f, acR,acG,acB,acA, 0.f, 1);
+            if (isKnocked)     snprintf(db,sizeof(db),"KO %.0fM",dis);
+            else if (dis < 1)  snprintf(db,sizeof(db),"<1M");
+            else               snprintf(db,sizeof(db),"%.0fM",dis);
+            float distW = MAX(boxW, 55.f);
+            float distX = bx + (boxW - distW) * 0.5f;
+            addText(db, distX, by+boxH+3.f, distW, 12.f, 11.f, acR,acG,acB,acA, 0.f, 1);
         }
 
         // ── ESP LINE ─────────────────────────────────────────────────
@@ -2016,9 +2135,18 @@ bool get_IsFiring(uint64_t player) {
         _lineFar.path  = b_line ? lineFarPath  : nil;
         // HP
         _hpBgLayer.path      = b_hp ? hpBgPath         : nil;
-        _hpFillGreen.path    = b_hp ? hpFillGreenPath   : nil;
-        _hpFillYellow.path   = b_hp ? hpFillYellowPath  : nil;
-        _hpFillRed.path      = b_hp ? hpFillRedPath     : nil;
+        // HP fill — single green layer (yellow/red are aliases pointing to same layer)
+        // Merge all HP fill paths into one for single color bar
+        if (b_hp) {
+            CGMutablePathRef mergedHP = CGPathCreateMutableCopy(hpFillGreenPath);
+            CGPathAddPath(mergedHP, nil, hpFillYellowPath);
+            CGPathAddPath(mergedHP, nil, hpFillRedPath);
+            _hpFillGreen.path = mergedHP;
+            CGPathRelease(mergedHP);
+        } else {
+            _hpFillGreen.path = nil;
+        }
+        // Yellow/Red aliases — already point to same layer, skip redundant assignments
 
         // Текст
         for (CATextLayer *t in _textPool) t.hidden = YES;
@@ -2047,7 +2175,10 @@ bool get_IsFiring(uint64_t player) {
         CGPathRelease(lineNearPath);    CGPathRelease(lineMidPath);
         CGPathRelease(lineFarPath);
         CGPathRelease(hpBgPath);
-        CGPathRelease(hpFillGreenPath); CGPathRelease(hpFillYellowPath);
+        // Release all HP paths (green/yellow/red are separate CGPath objects
+        // even though yellow/red layers alias to green)
+        CGPathRelease(hpFillGreenPath);
+        CGPathRelease(hpFillYellowPath);
         CGPathRelease(hpFillRedPath);
 
         // No Recoil работает на background queue — main thread ничего не рендерит
