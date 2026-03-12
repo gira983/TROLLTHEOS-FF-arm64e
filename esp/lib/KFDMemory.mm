@@ -258,6 +258,19 @@ static bool KFDFindGameProc(pid_t targetPid, uint64_t *out_proc, uint64_t *out_p
     }
 
     struct kfd *kfd = (struct kfd *)g_kfdHandle;
+    {
+        static bool s_proc_logged = false;
+        if (!s_proc_logged) {
+            s_proc_logged = true;
+            FILE *f = fopen("/var/mobile/kfd_debug.log", "a");
+            if (f) {
+                fprintf(f, "[FINDPROC] current_proc=0x%llx kfd=0x%llx\n",
+                        (unsigned long long)kfd->info.kaddr.current_proc,
+                        (unsigned long long)g_kfdHandle);
+                fclose(f);
+            }
+        }
+    }
     if (!kfd->info.kaddr.current_proc) return false;
 
     // Диагностика: логируем первые PIDs из allproc
