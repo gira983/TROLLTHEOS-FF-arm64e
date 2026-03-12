@@ -56,9 +56,16 @@ void KFDInitAsync(KFDPuafMethod method, KFDInitCompletion completion);
 // Читает allproc в ядре, находит proc по pid, извлекает task->itk_sself
 mach_port_t KFDAcquireTaskPort(pid_t targetPid);
 
-// Читать память целевого процесса через kfd (kread по virtual address)
-// Безопаснее vm_read — не проходит через Mach trap
+// Читать kernel virtual address напрямую через kfd
 bool KFDRead(uint64_t addr, void *buffer, size_t size);
+
+// Читать user-space VA целевого процесса через его pmap (page tables)
+// Не использует task port, vm_read или любые Mach API — полный стелс
+bool KFDReadGameMemory(pid_t targetPid, uint64_t gameVA, void *buffer, size_t size);
+
+// Писать в user-space VA целевого процесса через его pmap
+// size должен быть кратен 8
+bool KFDWriteGameMemory(pid_t targetPid, uint64_t gameVA, const void *buffer, size_t size);
 
 // Закрыть kfd сессию (kclose)
 void KFDClose(void);
