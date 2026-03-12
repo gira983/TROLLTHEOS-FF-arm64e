@@ -215,6 +215,10 @@ static bool g_speedSearchDone = NO;   // true after searchSpeed() found addresse
 
 
 @interface MenuView () <UIGestureRecognizerDelegate>
+- (UIView *)makeButtonRowWithTitle:(NSString *)title badge:(NSString *)badge
+                        badgeColor:(UIColor *)badgeColor
+                               atY:(CGFloat)y width:(CGFloat)w
+                            action:(SEL)action;
 @property (nonatomic, strong) CADisplayLink *displayLink;
 @property (nonatomic, strong) NSMutableArray<CALayer *> *drawingLayers;
 - (void)renderESP;
@@ -1156,7 +1160,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *spSearch = [self makeButtonRowWithTitle:@"SEARCH SPEED" badge:@"INIT" badgeColor:[UIColor colorWithRed:0.3 green:0.7 blue:1.0 alpha:1.0] atY:cy width:cW action:@selector(searchSpeed)]; cy += 44;
     UIView *spActivate = [self makeButtonRowWithTitle:@"ACTIVATE SPEED" badge:@"GO" badgeColor:[UIColor colorWithRed:0.2 green:0.9 blue:0.3 alpha:1.0] atY:cy width:cW action:@selector(activateSpeed)]; cy += 44;
     UIView *spReset = [self makeButtonRowWithTitle:@"RESET SPEED" badge:@"RST" badgeColor:[UIColor colorWithRed:1.0 green:0.4 blue:0.2 alpha:1.0] atY:cy width:cW action:@selector(resetSpeed)];
-    [settingTabContainer addSubview:spRow]; cy += 28;
+    [settingTabContainer addSubview:spSearch];
+    [settingTabContainer addSubview:spActivate];
+    [settingTabContainer addSubview:spReset]; cy += 44; cy += 8;
 
     cy += 4;
     UIView *cSec2 = [self makeSectionHeaderWithTitle:@"PRIVACY" atY:cy width:cW];
