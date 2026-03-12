@@ -135,7 +135,11 @@ void krkw_helper_grab_free_pages(struct kfd* kfd)
 
     const u64 copy_pages = (kfd->info.copy.size / pages(1));
     const u64 grabbed_puaf_pages_goal = (kfd->puaf.number_of_puaf_pages / 4);
-    const u64 grabbed_free_pages_max = 400000;
+    /*
+     * Reduce max from 400000 to 50000 to avoid hanging for minutes when
+     * PUAF pages are not reachable (e.g. smith on arm64e with PPL reclaim).
+     */
+    const u64 grabbed_free_pages_max = 50000;
 
     for (u64 grabbed_free_pages = copy_pages; grabbed_free_pages < grabbed_free_pages_max; grabbed_free_pages += copy_pages) {
         assert_mach(vm_copy(mach_task_self(), kfd->info.copy.src_uaddr, kfd->info.copy.size, kfd->info.copy.dst_uaddr));
