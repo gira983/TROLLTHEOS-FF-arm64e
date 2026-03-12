@@ -139,6 +139,8 @@ void krkw_helper_grab_free_pages(struct kfd* kfd)
 
     for (u64 grabbed_free_pages = copy_pages; grabbed_free_pages < grabbed_free_pages_max; grabbed_free_pages += copy_pages) {
         assert_mach(vm_copy(mach_task_self(), kfd->info.copy.src_uaddr, kfd->info.copy.size, kfd->info.copy.dst_uaddr));
+        // arm64e: throttle чтобы не превысить wakeup лимит ОС (150/сек)
+        usleep(500);
 
         u64 grabbed_puaf_pages = 0;
         for (u64 i = 0; i < kfd->puaf.number_of_puaf_pages; i++) {
