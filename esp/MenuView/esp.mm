@@ -429,6 +429,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     NSMutableArray<CATextLayer *> *_textPool;
     NSInteger _textPoolIndex;
 
+    // Dedicated full-screen layer for ESP drawing — always landscape bounds
+    CALayer *_espLayer;
     // Background ESP compute queue — считаем paths не на main thread
     dispatch_queue_t _espQueue;
     // Atomic flag — не запускаем новый расчёт пока предыдущий не кончил
@@ -448,14 +450,21 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         _espBusy = NO;
 
         // === ESP слои — создаются один раз ===
-        // Хелпер создания шейп-слоя
+        // _espLayer — dedicated container layer, always sized to landscape screen.
+        // All shape layers go into _espLayer, NOT self.layer, to avoid coordinate mismatch
+        // caused by MenuView's portrait frame vs landscape drawing coordinates.
+        _espLayer = [CALayer layer];
+        _espLayer.frame = CGRectMake(0, 0, 844, 390); // will be updated in renderESP
+        _espLayer.backgroundColor = [UIColor clearColor].CGColor;
+        [self.layer addSublayer:_espLayer];
+
         auto makeShape = [self](UIColor *stroke, CGFloat lw, BOOL round) -> CAShapeLayer * {
             CAShapeLayer *sl = [CAShapeLayer layer];
             sl.fillColor   = nil;
             sl.strokeColor = stroke.CGColor;
             sl.lineWidth   = lw;
             sl.lineCap     = round ? kCALineCapRound : kCALineCapSquare;
-            [self.layer addSublayer:sl];
+            [self->_espLayer addSublayer:sl];
             return sl;
         };
 
@@ -1087,10 +1096,20 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:@[@"Always", @"Shooting"] selectedRef:&aimTrigger tag:12];
 
     // ══ EXTRA TAB ═════════════════════════════════════════════════════
-    extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
+    // Wrap extraTabContainer in a scroll view so sliders don't clip when content > tabH
+    UIScrollView *extraScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
+    extraScroll.backgroundColor = COL_BG1;
+    extraScroll.hidden = YES;
+    extraScroll.showsVerticalScrollIndicator = NO;
+    extraScroll.clipsToBounds = YES;
+    [menuContainer addSubview:extraScroll];
+
+    extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(0, 0, tabW, tabH * 3)];
     extraTabContainer.backgroundColor = COL_BG1;
-    extraTabContainer.hidden = YES;
-    [menuContainer addSubview:extraTabContainer];
+    [extraScroll addSubview:extraTabContainer];
+
+    // Keep reference to scroll for hidden toggle
+    objc_setAssociatedObject(extraTabContainer, (void*)0xE5C, extraScroll, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     CGFloat eW = tabW;
     CGFloat ey = 0;
@@ -1247,11 +1266,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)switchToTab:(NSInteger)tabIndex {
     mainTabContainer.hidden = YES;
     aimTabContainer.hidden = YES;
-    extraTabContainer.hidden = YES;
+    // extraTabContainer is inside extraScroll — hide the scroll view
+    [objc_getAssociatedObject(extraTabContainer, (void*)0xE5C) setHidden:YES];
+    extraTabContainer.userInteractionEnabled = NO;
     settingTabContainer.hidden = YES;
     mainTabContainer.userInteractionEnabled = NO;
     aimTabContainer.userInteractionEnabled = NO;
-    extraTabContainer.userInteractionEnabled = NO;
     settingTabContainer.userInteractionEnabled = NO;
     
     for (UIView *sub in _sidebar.subviews) {
@@ -1292,11 +1312,20 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             aimTabContainer.hidden = NO;
             aimTabContainer.userInteractionEnabled = YES;
             break;
-        case 2:
-            extraTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
-            extraTabContainer.hidden = NO;
+        case 2: {
+            // Show extraScroll (parent of extraTabContainer)
+            UIScrollView *es = objc_getAssociatedObject(extraTabContainer, (void*)0xE5C);
+            es.frame = CGRectMake(tabX, tabY, tabW, tabH);
+            es.hidden = NO;
+            // Update scroll content size to fit all sliders
+            CGFloat contentH = extraTabContainer.subviews.count > 0
+                ? CGRectGetMaxY([[extraTabContainer.subviews lastObject] frame]) + 12
+                : tabH;
+            extraTabContainer.frame = CGRectMake(0, 0, tabW, MAX(contentH, tabH));
+            es.contentSize = CGSizeMake(tabW, MAX(contentH, tabH));
             extraTabContainer.userInteractionEnabled = YES;
             break;
+        }
         case 3:
             settingTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
             settingTabContainer.hidden = NO;
@@ -1836,7 +1865,7 @@ bool get_IsFiring(uint64_t player) {
     t.allowsFontSubpixelQuantization = YES;
     // Используем bold системный шрифт для чёткости ESP текста
     t.font = (__bridge CFTypeRef)[UIFont boldSystemFontOfSize:10].fontName;
-    [self.layer addSublayer:t];
+    [_espLayer addSublayer:t];
     [_textPool addObject:t];
     _textPoolIndex++;
     return t;
@@ -1877,17 +1906,24 @@ bool get_IsFiring(uint64_t player) {
 
     float *matrix = GetViewMatrix(camera);
 
-    // Viewport size — read from self.bounds which is set correctly by HUDMainApplication
-    // via autoresizingMask. No dispatch_sync needed — renderESP runs on _espQueue (bg thread)
-    // and self.bounds is updated atomically by UIKit before the next frame is drawn.
-    float vW = (float)self.bounds.size.width;
-    float vH = (float)self.bounds.size.height;
-    // Fallback: if our frame is zero (not yet laid out), use superview
-    if (vW < 100 || vH < 100) {
-        vW = self.superview ? (float)self.superview.bounds.size.width  : 812.f;
-        vH = self.superview ? (float)self.superview.bounds.size.height : 375.f;
-    }
-    // Swap W/H if landscape and they appear portrait (rotation not yet applied to frame)
+    // Viewport: read UIScreen size and force landscape (W > H).
+    // Then update _espLayer.frame on main thread so all shape layers
+    // are correctly anchored at {0,0} in landscape screen space.
+    __block CGSize _sz = CGSizeZero;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        _sz = UIScreen.mainScreen.bounds.size;
+        float fw = (float)_sz.width, fh = (float)_sz.height;
+        if (fw < fh) { float t = fw; fw = fh; fh = t; }
+        if (fw > 100) {
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            self->_espLayer.frame = CGRectMake(0, 0, fw, fh);
+            [CATransaction commit];
+        }
+    });
+    float vW = (float)_sz.width;
+    float vH = (float)_sz.height;
+    if (vW < 100 || vH < 100) { vW = 844.f; vH = 390.f; }
     if (vW < vH) { float tmp = vW; vW = vH; vH = tmp; }
     CGPoint center = CGPointMake(vW * 0.5f, vH * 0.5f);
 
