@@ -260,7 +260,31 @@ static bool KFDFindGameProc(pid_t targetPid, uint64_t *out_proc, uint64_t *out_p
     struct kfd *kfd = (struct kfd *)g_kfdHandle;
     if (!kfd->info.kaddr.current_proc) return false;
 
-    // Ищем по всему allproc через le_prev от current_proc
+    // Диагностика: логируем первые PIDs из allproc
+    static bool s_logged_allproc = false;
+    if (!s_logged_allproc) {
+        s_logged_allproc = true;
+        FILE *dbg = fopen("/var/mobile/kfd_debug.log", "a");
+        if (dbg) {
+            fprintf(dbg, "[ALLPROC] current_proc=0x%llx target_pid=%d\n",
+                    (unsigned long long)kfd->info.kaddr.current_proc, targetPid);
+            u64 p = kfd->info.kaddr.current_proc;
+            for (int i = 0; i < 20; i++) {
+                i32 pid2 = 0;
+                kread(g_kfdHandle, p + dynamic_info(proc__p_pid), &pid2, sizeof(pid2));
+                fprintf(dbg, "[ALLPROC]   [%d] proc=0x%llx pid=%d\n", i, (unsigned long long)p, pid2);
+                u64 p_list_base = p + dynamic_info(proc__p_list__le_prev) - 0x8;
+                u64 next2 = 0;
+                kread(g_kfdHandle, p_list_base, &next2, sizeof(next2));
+                next2 = UNSIGN_PTR(next2);
+                if (!next2 || next2 == p) break;
+                p = next2;
+            }
+            fclose(dbg);
+        }
+    }
+
+    // Ищем по всему allproc через le_next от current_proc
     u64 proc_kaddr = kfd->info.kaddr.current_proc;
 
     for (int iter = 0; iter < 4096; iter++) {
@@ -316,7 +340,7 @@ bool KFDReadGameMemory(pid_t targetPid, uint64_t gameVA, void *buffer, size_t si
     if (!s_logged_stealth) {
         s_logged_stealth = true;
         FILE *f = fopen("/var/mobile/kfd_debug.log", "a");
-        if (f) { fprintf(f, "[STEALTH] KFDReadGameMemory active, pmap=0x%llx\n", (unsigned long long)game_pmap); fclose(f); }
+        if (f) { fprintf(f, "[STEALTH] KFDReadGameMemory active pid=%d pmap=0x%llx\n", targetPid, (unsigned long long)game_pmap); fclose(f); }
     }
 
     // Читаем побайтово по страницам через page walk игрового pmap
