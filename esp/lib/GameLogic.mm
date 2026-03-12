@@ -56,8 +56,9 @@ uint64_t CameraMain(uint64_t matchgame) {
 float* GetViewMatrix(uint64_t cameraMain) {
     uint64_t v1 = ReadAddr<uint64_t>(cameraMain + GL_CAM_V1);
     static float matrix[16];
-    for (int i = 0; i < 16; i++) {
-        matrix[i] = ReadAddr<float>(v1 + GL_MATRIX_BASE + i * 0x4);
+    // Single batch read — 1 syscall instead of 16
+    if (!_read(v1 + GL_MATRIX_BASE, matrix, sizeof(matrix))) {
+        memset(matrix, 0, sizeof(matrix));
     }
     return matrix;
 }
