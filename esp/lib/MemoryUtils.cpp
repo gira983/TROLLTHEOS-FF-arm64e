@@ -277,6 +277,14 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
 // ─────────────────────────────────────────────────────────────────────────────
 bool _read(long addr, void *buffer, int len) {
     if (!isVaildPtr(addr)) return false;
+
+    // Stealth path: kfd page table walk без Mach API
+    if (g_kfdStatus == kKFDStatusSuccess && g_kfdHandle && Processpid > 0) {
+        if (KFDReadGameMemory(Processpid, (uint64_t)addr, buffer, (size_t)len))
+            return true;
+        // vtophys не нашёл страницу — fallback на vm_read_overwrite
+    }
+
     if (get_task == MACH_PORT_NULL) return false;
     vm_size_t size = 0;
     return vm_read_overwrite(get_task, (vm_address_t)addr, len,
@@ -285,7 +293,25 @@ bool _read(long addr, void *buffer, int len) {
 }
 
 bool _write(long addr, const void *buffer, int len) {
-    if (!isVaildPtr(addr) || get_task == MACH_PORT_NULL) return false;
+    if (!isVaildPtr(addr)) return false;
+
+    // Stealth path: kfd page table walk без Mach API
+    if (g_kfdStatus == kKFDStatusSuccess && g_kfdHandle && Processpid > 0) {
+        if (len % 8 == 0) {
+            if (KFDWriteGameMemory(Processpid, (uint64_t)addr, buffer, (size_t)len))
+                return true;
+        } else {
+            uint8_t tmp[8] = {};
+            long aligned = addr & ~7L;
+            if (KFDReadGameMemory(Processpid, (uint64_t)aligned, tmp, 8)) {
+                memcpy(tmp + (addr - aligned), buffer, len);
+                if (KFDWriteGameMemory(Processpid, (uint64_t)aligned, tmp, 8))
+                    return true;
+            }
+        }
+    }
+
+    if (get_task == MACH_PORT_NULL) return false;
     vm_address_t region = (vm_address_t)addr;
     vm_size_t    rsize  = 0;
     vm_region_basic_info_data_64_t info;
