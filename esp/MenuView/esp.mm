@@ -215,10 +215,6 @@ static bool g_speedSearchDone = NO;   // true after searchSpeed() found addresse
 
 
 @interface MenuView () <UIGestureRecognizerDelegate>
-- (UIView *)makeButtonRowWithTitle:(NSString *)title badge:(NSString *)badge
-                        badgeColor:(UIColor *)badgeColor
-                               atY:(CGFloat)y width:(CGFloat)w
-                            action:(SEL)action;
 @property (nonatomic, strong) CADisplayLink *displayLink;
 @property (nonatomic, strong) NSMutableArray<CALayer *> *drawingLayers;
 - (void)renderESP;
@@ -1509,6 +1505,36 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     NSUInteger resetCount = g_speedAddrs.count;
     g_speedAddrs = nil;  // clear cache — must searchSpeed again next match
     NSLog(@"[Speed] resetSpeed: restored %lu addrs", (unsigned long)resetCount);
+}
+
+// One-shot action button row (no toggle, just fires action on tap)
+- (UIView *)makeButtonRowWithTitle:(NSString *)title badge:(NSString *)badge
+                        badgeColor:(UIColor *)badgeColor
+                               atY:(CGFloat)y width:(CGFloat)w
+                            action:(SEL)action {
+    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(0, y, w, 40)];
+    row.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.04];
+    row.layer.cornerRadius = 8;
+
+    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(12, 0, w - 90, 40)];
+    lbl.text = title;
+    lbl.textColor = [UIColor whiteColor];
+    lbl.font = [UIFont boldSystemFontOfSize:11];
+    [row addSubview:lbl];
+
+    UIButton *btn = [[UIButton alloc] initWithFrame:CGRectMake(w - 76, 8, 64, 24)];
+    [btn setTitle:badge forState:UIControlStateNormal];
+    btn.titleLabel.font = [UIFont boldSystemFontOfSize:10];
+    btn.backgroundColor = badgeColor;
+    btn.layer.cornerRadius = 5;
+    [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    [btn addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    [row addSubview:btn];
+
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:action];
+    [row addGestureRecognizer:tap];
+
+    return row;
 }
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
