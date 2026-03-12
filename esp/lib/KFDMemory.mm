@@ -283,8 +283,11 @@ static bool KFDFindGameProc(pid_t targetPid, uint64_t *out_proc, uint64_t *out_p
             return true;
         }
 
+        // le_next = p_list + 0x0, le_prev = p_list + 0x8
+        // Идём вперёд (le_next) — игра запущена после нашего процесса
         u64 next = 0;
-        kread(g_kfdHandle, proc_kaddr + dynamic_info(proc__p_list__le_prev), &next, sizeof(next));
+        u64 p_list_base = proc_kaddr + dynamic_info(proc__p_list__le_prev) - 0x8;
+        kread(g_kfdHandle, p_list_base, &next, sizeof(next));
         next = UNSIGN_PTR(next);
         if (!next || next == proc_kaddr) break;
         proc_kaddr = next;
