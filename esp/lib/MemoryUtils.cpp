@@ -157,10 +157,12 @@ mach_port_t AcquireTaskPort(pid_t pid) {
         // SIGSEGV внутри kopen нельзя поймать через @try/@catch
         if (g_kfdStatus == kKFDStatusSuccess) {
             task = KFDAcquireTaskPort(pid);
+            NSLog(@"[KFD-DBG] KFDAcquireTaskPort returned 0x%x", task);
         }
         // Если kfd недоступен или не сработал — fallback на smith
         if (task == MACH_PORT_NULL) {
             task = Method1_ProcessorSetTasks(pid);
+            NSLog(@"[KFD-DBG] Method1_ProcessorSetTasks fallback returned 0x%x", task);
         }
         return task;
     }
@@ -211,11 +213,16 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
     // Читаем выбранный метод из настроек лаунчера
     LoadTaskMethodFromPrefs();
 
+    NSLog(@"[KFD-DBG] GetGameModule_Base: taskMethod=%d kfdStatus=%d kfdHandle=%llu",
+          g_taskMethod, (int)g_kfdStatus, (unsigned long long)g_kfdHandle);
+
     pid_t pid = GetGameProcesspid(GameProcessName);
+    NSLog(@"[KFD-DBG] target pid=%d", pid);
     if (pid == -1) return 0;
 
     Processpid = pid;
     get_task   = AcquireTaskPort(pid);
+    NSLog(@"[KFD-DBG] get_task=0x%x", get_task);
     if (get_task == MACH_PORT_NULL) return 0;
 
     vm_map_offset_t vmoffset  = 0;
