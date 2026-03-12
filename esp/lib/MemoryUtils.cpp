@@ -174,17 +174,31 @@ mach_port_t AcquireTaskPort(pid_t pid) {
     mach_port_t task = MACH_PORT_NULL;
 
     if (g_taskMethod == 3) {
-        // kfd метод — только если уже успешно инициализирован
-        // KFDInit вызывается ОТДЕЛЬНО через KFDInitAsync, не здесь
-        // SIGSEGV внутри kopen нельзя поймать через @try/@catch
+        // HUD процесс: g_kfdStatus всегда NotStarted (разные процессы)
+        // Запускаем kopen прямо здесь если ещё не запущен
+        if (g_kfdStatus != kKFDStatusSuccess) {
+            kfd_log("[KFD-DBG] HUD: running KFDInit with puafMethod=%d", g_kfdPuafMethod);
+            KFDInit((KFDPuafMethod)g_kfdPuafMethod);
+            kfd_log("[KFD-DBG] HUD: KFDInit done, kfdStatus=%d kfdHandle=%llu",
+                    (int)g_kfdStatus, (unsigned long long)g_kfdHandle);
+        }
+
         if (g_kfdStatus == kKFDStatusSuccess) {
             task = KFDAcquireTaskPort(pid);
             kfd_log("[KFD-DBG] KFDAcquireTaskPort returned 0x%x", task);
         }
-        // Если kfd недоступен или не сработал — fallback на smith
+        // Если kfd не дал task — пробуем все fallback методы
+        if (task == MACH_PORT_NULL) {
+            task = Method2_PidIterate(pid);
+            kfd_log("[KFD-DBG] Method2_PidIterate fallback returned 0x%x", task);
+        }
         if (task == MACH_PORT_NULL) {
             task = Method1_ProcessorSetTasks(pid);
             kfd_log("[KFD-DBG] Method1_ProcessorSetTasks fallback returned 0x%x", task);
+        }
+        if (task == MACH_PORT_NULL) {
+            task = Method0_TaskForPid(pid);
+            kfd_log("[KFD-DBG] Method0_TaskForPid fallback returned 0x%x", task);
         }
         return task;
     }
