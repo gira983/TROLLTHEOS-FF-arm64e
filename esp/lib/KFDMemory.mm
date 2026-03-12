@@ -260,42 +260,34 @@ static bool KFDFindGameProc(pid_t targetPid, uint64_t *out_proc, uint64_t *out_p
     struct kfd *kfd = (struct kfd *)g_kfdHandle;
     if (!kfd->info.kaddr.current_proc) return false;
 
-    // Ищем в обе стороны по allproc
-    // Сначала вперёд (le_next), потом назад (le_prev) от current_proc
-    u64 start = kfd->info.kaddr.current_proc;
+    // Ищем по всему allproc через le_prev от current_proc
+    u64 proc_kaddr = kfd->info.kaddr.current_proc;
 
-    for (int dir = 0; dir < 2; dir++) {
-        u64 proc_kaddr = start;
-        for (int iter = 0; iter < 2048; iter++) {
-            i32 pid = 0;
-            kread(g_kfdHandle, proc_kaddr + dynamic_info(proc__p_pid), &pid, sizeof(pid));
+    for (int iter = 0; iter < 4096; iter++) {
+        i32 pid = 0;
+        kread(g_kfdHandle, proc_kaddr + dynamic_info(proc__p_pid), &pid, sizeof(pid));
 
-            if (pid == targetPid) {
-                if (out_proc) *out_proc = proc_kaddr;
-                if (out_pmap) {
-                    u64 task_kaddr = proc_kaddr + dynamic_info(proc__object_size);
-                    u64 signed_map = 0;
-                    kread(g_kfdHandle, task_kaddr + dynamic_info(task__map), &signed_map, sizeof(signed_map));
-                    u64 map_kaddr = UNSIGN_PTR(signed_map);
-                    u64 signed_pmap = 0;
-                    kread(g_kfdHandle, map_kaddr + offsetof(struct _vm_map, pmap), &signed_pmap, sizeof(signed_pmap));
-                    *out_pmap = UNSIGN_PTR(signed_pmap);
-                    // Кэшируем
-                    s_cached_game_pmap = *out_pmap;
-                    s_cached_game_pid  = targetPid;
-                }
-                return true;
+        if (pid == targetPid) {
+            if (out_proc) *out_proc = proc_kaddr;
+            if (out_pmap) {
+                u64 task_kaddr = proc_kaddr + dynamic_info(proc__object_size);
+                u64 signed_map = 0;
+                kread(g_kfdHandle, task_kaddr + dynamic_info(task__map), &signed_map, sizeof(signed_map));
+                u64 map_kaddr = UNSIGN_PTR(signed_map);
+                u64 signed_pmap = 0;
+                kread(g_kfdHandle, map_kaddr + offsetof(struct _vm_map, pmap), &signed_pmap, sizeof(signed_pmap));
+                *out_pmap = UNSIGN_PTR(signed_pmap);
+                s_cached_game_pmap = *out_pmap;
+                s_cached_game_pid  = targetPid;
             }
-
-            u64 offset = (dir == 0)
-                ? dynamic_info(proc__p_list__le_next)
-                : dynamic_info(proc__p_list__le_prev);
-            u64 next = 0;
-            kread(g_kfdHandle, proc_kaddr + offset, &next, sizeof(next));
-            next = UNSIGN_PTR(next);
-            if (!next || next == proc_kaddr || next == start) break;
-            proc_kaddr = next;
+            return true;
         }
+
+        u64 next = 0;
+        kread(g_kfdHandle, proc_kaddr + dynamic_info(proc__p_list__le_prev), &next, sizeof(next));
+        next = UNSIGN_PTR(next);
+        if (!next || next == proc_kaddr) break;
+        proc_kaddr = next;
     }
     return false;
 }
