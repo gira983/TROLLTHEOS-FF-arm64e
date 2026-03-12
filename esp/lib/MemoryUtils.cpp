@@ -239,20 +239,10 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName) {
 // ─────────────────────────────────────────────────────────────────────────────
 bool _read(long addr, void *buffer, int len) {
     if (!isVaildPtr(addr) || !fn_vm_read_overwrite) return false;
-
-    // Читаем за один вызов — минимум syscall'ов
     vm_size_t size = 0;
     kern_return_t kr = fn_vm_read_overwrite(get_task, (vm_address_t)addr, (vm_size_t)len,
                                              (vm_address_t)buffer, &size);
-    if (kr != KERN_SUCCESS || size != (vm_size_t)len) return false;
-
-    // Случайный jitter 0-30 мкс — нарушает детерминированный timing паттерн
-    uint32_t jitter = ((uint32_t)_get_ns() ^ (uint32_t)(uintptr_t)buffer) & 0x1F;
-    if (jitter > 0) {
-        struct timespec ts = { 0, (long)(jitter * 1000) };
-        nanosleep(&ts, nullptr);
-    }
-    return true;
+    return (kr == KERN_SUCCESS && size == (vm_size_t)len);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
