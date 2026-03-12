@@ -54,10 +54,41 @@ bool kread_sem_open_search(struct kfd* kfd, u64 object_uaddr)
         sizeof(pnodes),
         (vm_address_t)pnodes,
         &out_size);
+
+    /* Логируем первый вызов чтобы проверить что читается */
+    static int _search_log_count = 0;
+    if (_search_log_count < 3) {
+        _search_log_count++;
+        FILE *_sf = fopen("/var/mobile/kfd_debug.log", "a");
+        if (_sf) {
+            fprintf(_sf, "[SEARCH] kr=%d out=%llu pinfo[0]=0x%llx pad[0]=%llu
+",
+                    kr, (unsigned long long)out_size,
+                    (unsigned long long)pnodes[0].pinfo,
+                    (unsigned long long)pnodes[0].padding);
+            fclose(_sf);
+        }
+    }
+
     if (kr != KERN_SUCCESS || out_size != sizeof(pnodes)) return false;
 
     i32* fds = (i32*)(kfd->kread.krkw_method_data);
     struct psem_fdinfo* sem_data = (struct psem_fdinfo*)(&fds[kfd->kread.krkw_maximum_id + 1]);
+
+    /* Диагностика первых 3 вызовов */
+    static int _search_count = 0;
+    if (_search_count < 3) {
+        _search_count++;
+        FILE *_fs = fopen("/var/mobile/kfd_debug.log", "a");
+        if (_fs) {
+            fprintf(_fs, "[SEARCH] uaddr=0x%llx pinfo[0]=0x%llx pad[0]=%llu
+",
+                    (unsigned long long)object_uaddr,
+                    (unsigned long long)pnodes[0].pinfo,
+                    (unsigned long long)pnodes[0].padding);
+            fclose(_fs);
+        }
+    }
 
     if ((pnodes[0].pinfo > PAC_MASK) &&
         (pnodes[0].pinfo != 0) &&
