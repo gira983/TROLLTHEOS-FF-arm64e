@@ -531,9 +531,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         // 30fps для ESP: плавно и не жрёт FPS игры
         // _espBusy гарантирует что тяжёлый кадр не накапливается
         if (@available(iOS 15.0, *)) {
-            self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(24, 30, 30);
+            self.displayLink.preferredFrameRateRange = CAFrameRateRangeMake(30, 60, 60);
         } else {
-            self.displayLink.preferredFramesPerSecond = 30;
+            self.displayLink.preferredFramesPerSecond = 60;
         }
         // ВАЖНО: вешаем DisplayLink на отдельный фоновый thread а не mainRunLoop
         // Это освобождает main thread для касаний и убирает лаги UI игры
@@ -589,13 +589,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     if (menuContainer && !menuContainer.hidden) {
         CGPoint pInMenu = [self convertPoint:point toView:menuContainer];
         if ([menuContainer pointInside:pInMenu withEvent:event]) {
-#ifdef DEBUG
-            espLog([NSString stringWithFormat:@"[HITTEST] point=(%.0f,%.0f) menuContainer OK", pInMenu.x, pInMenu.y]);
-#endif
-            // Стандартный hitTest UIKit — он правильно найдёт нужный view
+            // Use standard UIKit hitTest — correctly routes to UIScrollView without conflict
             UIView *hit = [menuContainer hitTest:pInMenu withEvent:event];
-            if (hit) return hit;
-            return menuContainer;
+            // Only return menuContainer itself if NO subview claimed the touch
+            // (prevents containerPan from stealing scroll gestures)
+            return hit ? hit : nil;
         }
     }
 
@@ -942,8 +940,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     // Pan на весь menuContainer — можно тащить за любую точку
     UIPanGestureRecognizer *containerPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(handlePan:)];
-    containerPan.cancelsTouchesInView = NO; // не блокировать тапы на кнопки
+    containerPan.cancelsTouchesInView = NO;
     containerPan.delaysTouchesBegan = NO;
+    containerPan.delegate = self;
     [menuContainer addGestureRecognizer:containerPan];
 
     // ── SIDEBAR (СЛЕВА) ───────────────────────────────────────────────
