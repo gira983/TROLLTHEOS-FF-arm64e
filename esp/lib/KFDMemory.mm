@@ -134,100 +134,54 @@ mach_port_t KFDAcquireTaskPort(pid_t targetPid) {
         return MACH_PORT_NULL;
 
     struct kfd *kfd = (struct kfd *)g_kfdHandle;
-
-    // current_proc уже найден в info_run() внутри kopen()
-    // Идём по двусвязному списку allproc вперёд и назад от current_proc
-    // proc->p_list.le_prev (offset 0x0008) — идём назад по списку
-    // proc->p_pid (offset 0x0060) — проверяем PID
-
     if (!kfd->info.kaddr.current_proc) return MACH_PORT_NULL;
 
+    // Ищем proc целевого процесса по allproc начиная от current_proc
+    // Идём по le_prev (назад к kernel_proc), максимум 1024 шага
     u64 proc_kaddr = kfd->info.kaddr.current_proc;
+    u64 target_proc = 0;
 
-    // Ищем в обе стороны — сначала назад (к kernel_proc), потом вперёд
-    // Максимум 512 итераций чтобы не зависнуть
-    for (int iter = 0; iter < 512; iter++) {
-        // Читаем PID этого proc
+    for (int iter = 0; iter < 1024; iter++) {
         i32 pid = 0;
-        kread(g_kfdHandle,
-              proc_kaddr + dynamic_info(proc__p_pid),
-              &pid, sizeof(pid));
+        kread(g_kfdHandle, proc_kaddr + dynamic_info(proc__p_pid), &pid, sizeof(pid));
 
         if (pid == targetPid) {
-            // Нашли proc игры
-            // task = proc + PROC_OBJECT_SIZE
-            u64 task_kaddr = proc_kaddr + PROC_OBJECT_SIZE;
-
-            // Читаем itk_sself — это kern-owned send right на task port
-            // Это kernel virtual address ipc_port структуры
-            u64 itk_sself = 0;
-            kread(g_kfdHandle,
-                  task_kaddr + TASK_ITK_SSELF_OFFSET,
-                  &itk_sself, sizeof(itk_sself));
-
-            if (!itk_sself) return MACH_PORT_NULL;
-
-            // Конвертируем kernel ipc_port address в user-space mach_port_t
-            // через task_for_pid fallback — но теперь мы знаем что процесс существует
-            // и можем использовать обычный processor_set_tasks как подтверждение
-            // Реальный способ: использовать vm_map напрямую для чтения без task port
-            u64 vm_map_kaddr = 0;
-            kread(g_kfdHandle,
-                  task_kaddr + TASK_MAP_OFFSET,
-                  &vm_map_kaddr, sizeof(vm_map_kaddr));
-
-            if (!vm_map_kaddr) return MACH_PORT_NULL;
-
-            // vm_map получен — теперь пробуем получить mach_port через обычный API
-            // kfd подтвердил что процесс живой и его PID корректен
-            // Используем processor_set_tasks — самый надёжный способ
-            host_t host = mach_host_self();
-            processor_set_name_t psDefault;
-            if (processor_set_default(host, &psDefault) != KERN_SUCCESS)
-                return MACH_PORT_NULL;
-
-            processor_set_t psPriv;
-            if (host_processor_set_priv(host, psDefault, &psPriv) != KERN_SUCCESS) {
-                mach_port_deallocate(mach_task_self(), psDefault);
-                return MACH_PORT_NULL;
-            }
-
-            task_array_t tasks;
-            mach_msg_type_number_t taskCount = 0;
-            if (processor_set_tasks(psPriv, &tasks, &taskCount) != KERN_SUCCESS) {
-                mach_port_deallocate(mach_task_self(), psPriv);
-                mach_port_deallocate(mach_task_self(), psDefault);
-                return MACH_PORT_NULL;
-            }
-
-            mach_port_t result = MACH_PORT_NULL;
-            for (mach_msg_type_number_t i = 0; i < taskCount; i++) {
-                pid_t p = -1;
-                pid_for_task(tasks[i], &p);
-                if (p == targetPid) {
-                    result = tasks[i];
-                } else {
-                    mach_port_deallocate(mach_task_self(), tasks[i]);
-                }
-            }
-            vm_deallocate(mach_task_self(), (vm_address_t)tasks,
-                          taskCount * sizeof(task_t));
-            mach_port_deallocate(mach_task_self(), psPriv);
-            mach_port_deallocate(mach_task_self(), psDefault);
-            return result;
+            target_proc = proc_kaddr;
+            break;
         }
 
-        // Переходим к следующему proc (le_prev идёт назад по списку)
         u64 next = 0;
-        kread(g_kfdHandle,
-              proc_kaddr + dynamic_info(proc__p_list__le_prev),
-              &next, sizeof(next));
-
+        kread(g_kfdHandle, proc_kaddr + dynamic_info(proc__p_list__le_prev), &next, sizeof(next));
+        next = UNSIGN_PTR(next);
         if (!next || next == proc_kaddr) break;
         proc_kaddr = next;
     }
 
-    return MACH_PORT_NULL;
+    if (!target_proc) return MACH_PORT_NULL;
+
+    // Нашли proc игры — получаем task port через pid_iterate
+    // pid_iterate не требует com.apple.system-task-ports и работает в любом процессе
+    mach_port_name_array_t names = nullptr;
+    mach_port_type_array_t types = nullptr;
+    mach_msg_type_number_t nameCount = 0, typeCount = 0;
+
+    kern_return_t kr = mach_port_names(mach_task_self(), &names, &nameCount, &types, &typeCount);
+    if (kr != KERN_SUCCESS) return MACH_PORT_NULL;
+
+    mach_port_t result = MACH_PORT_NULL;
+    for (mach_msg_type_number_t i = 0; i < nameCount; i++) {
+        if (!(types[i] & MACH_PORT_TYPE_SEND)) continue;
+        pid_t p = -1;
+        if (pid_for_task(names[i], &p) == KERN_SUCCESS && p == targetPid) {
+            mach_port_mod_refs(mach_task_self(), names[i], MACH_PORT_RIGHT_SEND, +1);
+            result = names[i];
+            break;
+        }
+    }
+
+    vm_deallocate(mach_task_self(), (vm_address_t)names, nameCount * sizeof(mach_port_name_t));
+    vm_deallocate(mach_task_self(), (vm_address_t)types, typeCount * sizeof(mach_port_type_t));
+    return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
