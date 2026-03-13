@@ -1967,7 +1967,7 @@ bool get_IsFiring(uint64_t player) {
     uint64_t camera    = CameraMain(matchGame);
     if (!isVaildPtr(camera)) {
         isInMatch = NO;
-        __atomic_store_n(&_validFrameCount, 0, __ATOMIC_RELAXED); // reset counter
+        OSAtomicAnd32(0, (volatile uint32_t*)&_validFrameCount); // reset counter
         dispatch_async(dispatch_get_main_queue(), ^{
             [CATransaction begin]; [CATransaction setDisableActions:YES];
             _boneLayer.path=nil; _boxLayer.path=nil;
@@ -1979,7 +1979,7 @@ bool get_IsFiring(uint64_t player) {
     }
     // Increment valid frame counter — require 2 consecutive valid frames
     // before activating features (prevents stale pointer false positives)
-    __atomic_add_fetch(&_validFrameCount, 1, __ATOMIC_RELAXED);
+    OSAtomicIncrement32(&_validFrameCount);
     BOOL matchReady = (_validFrameCount >= 2);
     isInMatch = matchReady;
 
@@ -2134,62 +2134,38 @@ bool get_IsFiring(uint64_t player) {
 
             CGMutablePathRef bp = BONE_PATH;
 
-            // HeadNode pivot is at neck base in Unity — shift up by ~12% boxH
-            // so circle sits over the actual head, not floating above it
-            float headDrawY = s_Head.y - boxH * 0.06f;
-            float headR     = MAX(4.f, boxH * 0.13f); // bigger circle = clearer head
-
-            // ── HEAD CIRCLE ───────────────────────────────────────────
+            // Head circle (matches reference design)
+            float headR = MAX(2.5f, boxH * 0.07f);
             CGPathAddEllipseInRect(bp, nil,
-                CGRectMake(s_Head.x - headR, headDrawY - headR, headR*2, headR*2));
+                CGRectMake(s_Head.x - headR, s_Head.y - headR, headR*2, headR*2));
 
-            // ── NECK: bottom of head circle ───────────────────────────
-            float neckX = s_Head.x;
-            float neckY = headDrawY + headR; // bottom of circle
-
-            // ── SPINE: neck → hip ─────────────────────────────────────
-            CGPathMoveToPoint(bp,nil,neckX,neckY);
+            // Spine: Head → Neck(midpoint) → Hip
+            float neckX = s_Head.x + (s_Hip.x - s_Head.x) * 0.28f;
+            float neckY = s_Head.y + (s_Hip.y - s_Head.y) * 0.28f;
+            CGPathMoveToPoint(bp,nil,s_Head.x,s_Head.y);
+            CGPathAddLineToPoint(bp,nil,neckX,neckY);
             CGPathAddLineToPoint(bp,nil,s_Hip.x,s_Hip.y);
 
-            // ── CLAVICLE: neck → LS and neck → RS ────────────────────
-            CGPathMoveToPoint(bp,nil,neckX,neckY);
-            CGPathAddLineToPoint(bp,nil,s_LS.x,s_LS.y);
-            CGPathMoveToPoint(bp,nil,neckX,neckY);
-            CGPathAddLineToPoint(bp,nil,s_RS.x,s_RS.y);
+            // Shoulders (T-pose cross)
+            CGPathMoveToPoint(bp,nil,s_LS.x,s_LS.y);
+            CGPathAddLineToPoint(bp,nil,neckX,neckY);  // LS → Neck
+            CGPathAddLineToPoint(bp,nil,s_RS.x,s_RS.y); // Neck → RS
 
-            // ── LEFT ARM: LS → LE → LH ───────────────────────────────
+            // Left arm: LS → LE → LH
             CGPathMoveToPoint(bp,nil,s_LS.x,s_LS.y);
             CGPathAddLineToPoint(bp,nil,s_LE.x,s_LE.y);
             CGPathAddLineToPoint(bp,nil,s_LH.x,s_LH.y);
 
-            // ── RIGHT ARM: RS → RE → RH ──────────────────────────────
+            // Right arm: RS → RE → RH
             CGPathMoveToPoint(bp,nil,s_RS.x,s_RS.y);
             CGPathAddLineToPoint(bp,nil,s_RE.x,s_RE.y);
             CGPathAddLineToPoint(bp,nil,s_RH.x,s_RH.y);
 
-            // ── PELVIS HORIZONTAL BAR ─────────────────────────────────
-            // Legs connect from the ENDS of the bar, not from the center
-            float shoulderW = fabsf(s_RS.x - s_LS.x);
-            float hipW = MAX(shoulderW * 0.7f, 6.f);
-            float hipLX = s_Hip.x - hipW * 0.5f; // left end
-            float hipRX = s_Hip.x + hipW * 0.5f; // right end
-            CGPathMoveToPoint(bp,nil,hipLX, s_Hip.y);
-            CGPathAddLineToPoint(bp,nil,hipRX, s_Hip.y);
-
-            // ── LEGS: pelvis bar ENDS → Knee → Ankle ─────────────────
-            // Left: from left end of bar
-            float lKneeX = hipLX + (s_LA.x - hipLX) * 0.5f;
-            float lKneeY = s_Hip.y + (s_LA.y - s_Hip.y) * 0.5f;
-            CGPathMoveToPoint(bp,nil,hipLX, s_Hip.y);
-            CGPathAddLineToPoint(bp,nil,lKneeX, lKneeY);
-            CGPathAddLineToPoint(bp,nil,s_LA.x, s_LA.y);
-
-            // Right: from right end of bar
-            float rKneeX = hipRX + (s_RA.x - hipRX) * 0.5f;
-            float rKneeY = s_Hip.y + (s_RA.y - s_Hip.y) * 0.5f;
-            CGPathMoveToPoint(bp,nil,hipRX, s_Hip.y);
-            CGPathAddLineToPoint(bp,nil,rKneeX, rKneeY);
-            CGPathAddLineToPoint(bp,nil,s_RA.x, s_RA.y);
+            // Legs: Hip → LA, Hip → RA
+            CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
+            CGPathAddLineToPoint(bp,nil,s_LA.x,s_LA.y);
+            CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
+            CGPathAddLineToPoint(bp,nil,s_RA.x,s_RA.y);
         }
 
         // ── BOX: corner brackets (skip for tiny/far, draw dot instead) ──
