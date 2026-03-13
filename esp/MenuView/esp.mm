@@ -2134,20 +2134,24 @@ bool get_IsFiring(uint64_t player) {
 
             CGMutablePathRef bp = BONE_PATH;
 
-            // ── HEAD CIRCLE ───────────────────────────────────────────
-            float headR = MAX(3.f, boxH * 0.08f);
-            CGPathAddEllipseInRect(bp, nil,
-                CGRectMake(s_Head.x - headR, s_Head.y - headR, headR*2, headR*2));
+            // HeadNode pivot is at neck base in Unity — shift up by ~12% boxH
+            // so circle sits over the actual head, not floating above it
+            float headDrawY = s_Head.y - boxH * 0.06f;
+            float headR     = MAX(4.f, boxH * 0.13f); // bigger circle = clearer head
 
-            // ── NECK: 25% point from head toward hip ──────────────────
-            float neckX = s_Head.x + (s_Hip.x - s_Head.x) * 0.25f;
-            float neckY = s_Head.y + (s_Hip.y - s_Head.y) * 0.25f;
+            // ── HEAD CIRCLE ───────────────────────────────────────────
+            CGPathAddEllipseInRect(bp, nil,
+                CGRectMake(s_Head.x - headR, headDrawY - headR, headR*2, headR*2));
+
+            // ── NECK: bottom of head circle ───────────────────────────
+            float neckX = s_Head.x;
+            float neckY = headDrawY + headR; // bottom of circle
 
             // ── SPINE: neck → hip ─────────────────────────────────────
             CGPathMoveToPoint(bp,nil,neckX,neckY);
             CGPathAddLineToPoint(bp,nil,s_Hip.x,s_Hip.y);
 
-            // ── CLAVICLE: neck → LS, neck → RS ───────────────────────
+            // ── CLAVICLE: neck → LS and neck → RS ────────────────────
             CGPathMoveToPoint(bp,nil,neckX,neckY);
             CGPathAddLineToPoint(bp,nil,s_LS.x,s_LS.y);
             CGPathMoveToPoint(bp,nil,neckX,neckY);
@@ -2163,31 +2167,29 @@ bool get_IsFiring(uint64_t player) {
             CGPathAddLineToPoint(bp,nil,s_RE.x,s_RE.y);
             CGPathAddLineToPoint(bp,nil,s_RH.x,s_RH.y);
 
-            // ── HIP HORIZONTAL BAR (like reference screenshot) ───────
-            // Connects left-hip side to right-hip side at pelvis level
-            // Use shoulder width as reference for proportional hip bar
+            // ── PELVIS HORIZONTAL BAR ─────────────────────────────────
+            // Legs connect from the ENDS of the bar, not from the center
             float shoulderW = fabsf(s_RS.x - s_LS.x);
-            float hipW = MAX(shoulderW * 0.6f, 4.f);
-            CGPathMoveToPoint(bp,nil,s_Hip.x - hipW * 0.5f, s_Hip.y);
-            CGPathAddLineToPoint(bp,nil,s_Hip.x + hipW * 0.5f, s_Hip.y);
+            float hipW = MAX(shoulderW * 0.7f, 6.f);
+            float hipLX = s_Hip.x - hipW * 0.5f; // left end
+            float hipRX = s_Hip.x + hipW * 0.5f; // right end
+            CGPathMoveToPoint(bp,nil,hipLX, s_Hip.y);
+            CGPathAddLineToPoint(bp,nil,hipRX, s_Hip.y);
 
-            // ── LEGS with KNEES (midpoint Hip→Ankle) ─────────────────
-            // Left knee = midpoint(Hip, LAnkle)
-            float lKneeX = (s_Hip.x + s_LA.x) * 0.5f;
-            float lKneeY = (s_Hip.y + s_LA.y) * 0.5f;
-            // Right knee = midpoint(Hip, RAnkle)
-            float rKneeX = (s_Hip.x + s_RA.x) * 0.5f;
-            float rKneeY = (s_Hip.y + s_RA.y) * 0.5f;
+            // ── LEGS: pelvis bar ENDS → Knee → Ankle ─────────────────
+            // Left: from left end of bar
+            float lKneeX = hipLX + (s_LA.x - hipLX) * 0.5f;
+            float lKneeY = s_Hip.y + (s_LA.y - s_Hip.y) * 0.5f;
+            CGPathMoveToPoint(bp,nil,hipLX, s_Hip.y);
+            CGPathAddLineToPoint(bp,nil,lKneeX, lKneeY);
+            CGPathAddLineToPoint(bp,nil,s_LA.x, s_LA.y);
 
-            // Left leg: Hip → LKnee → LAnkle
-            CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
-            CGPathAddLineToPoint(bp,nil,lKneeX,lKneeY);
-            CGPathAddLineToPoint(bp,nil,s_LA.x,s_LA.y);
-
-            // Right leg: Hip → RKnee → RAnkle
-            CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
-            CGPathAddLineToPoint(bp,nil,rKneeX,rKneeY);
-            CGPathAddLineToPoint(bp,nil,s_RA.x,s_RA.y);
+            // Right: from right end of bar
+            float rKneeX = hipRX + (s_RA.x - hipRX) * 0.5f;
+            float rKneeY = s_Hip.y + (s_RA.y - s_Hip.y) * 0.5f;
+            CGPathMoveToPoint(bp,nil,hipRX, s_Hip.y);
+            CGPathAddLineToPoint(bp,nil,rKneeX, rKneeY);
+            CGPathAddLineToPoint(bp,nil,s_RA.x, s_RA.y);
         }
 
         // ── BOX: corner brackets (skip for tiny/far, draw dot instead) ──
