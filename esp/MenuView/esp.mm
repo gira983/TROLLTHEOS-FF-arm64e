@@ -1967,7 +1967,7 @@ bool get_IsFiring(uint64_t player) {
     uint64_t camera    = CameraMain(matchGame);
     if (!isVaildPtr(camera)) {
         isInMatch = NO;
-        OSAtomicAnd32(0, (volatile uint32_t*)&_validFrameCount); // reset counter
+        __atomic_store_n(&_validFrameCount, 0, __ATOMIC_RELAXED); // reset counter
         dispatch_async(dispatch_get_main_queue(), ^{
             [CATransaction begin]; [CATransaction setDisableActions:YES];
             _boneLayer.path=nil; _boxLayer.path=nil;
@@ -1979,7 +1979,7 @@ bool get_IsFiring(uint64_t player) {
     }
     // Increment valid frame counter — require 2 consecutive valid frames
     // before activating features (prevents stale pointer false positives)
-    OSAtomicIncrement32(&_validFrameCount);
+    __atomic_add_fetch(&_validFrameCount, 1, __ATOMIC_RELAXED);
     BOOL matchReady = (_validFrameCount >= 2);
     isInMatch = matchReady;
 
@@ -2134,37 +2134,59 @@ bool get_IsFiring(uint64_t player) {
 
             CGMutablePathRef bp = BONE_PATH;
 
-            // Head circle (matches reference design)
-            float headR = MAX(2.5f, boxH * 0.07f);
+            // ── HEAD CIRCLE ───────────────────────────────────────────
+            float headR = MAX(3.f, boxH * 0.08f);
             CGPathAddEllipseInRect(bp, nil,
                 CGRectMake(s_Head.x - headR, s_Head.y - headR, headR*2, headR*2));
 
-            // Spine: Head → Neck(midpoint) → Hip
-            float neckX = s_Head.x + (s_Hip.x - s_Head.x) * 0.28f;
-            float neckY = s_Head.y + (s_Hip.y - s_Head.y) * 0.28f;
-            CGPathMoveToPoint(bp,nil,s_Head.x,s_Head.y);
-            CGPathAddLineToPoint(bp,nil,neckX,neckY);
+            // ── NECK: 25% point from head toward hip ──────────────────
+            float neckX = s_Head.x + (s_Hip.x - s_Head.x) * 0.25f;
+            float neckY = s_Head.y + (s_Hip.y - s_Head.y) * 0.25f;
+
+            // ── SPINE: neck → hip ─────────────────────────────────────
+            CGPathMoveToPoint(bp,nil,neckX,neckY);
             CGPathAddLineToPoint(bp,nil,s_Hip.x,s_Hip.y);
 
-            // Shoulders (T-pose cross)
-            CGPathMoveToPoint(bp,nil,s_LS.x,s_LS.y);
-            CGPathAddLineToPoint(bp,nil,neckX,neckY);  // LS → Neck
-            CGPathAddLineToPoint(bp,nil,s_RS.x,s_RS.y); // Neck → RS
+            // ── CLAVICLE: neck → LS, neck → RS ───────────────────────
+            CGPathMoveToPoint(bp,nil,neckX,neckY);
+            CGPathAddLineToPoint(bp,nil,s_LS.x,s_LS.y);
+            CGPathMoveToPoint(bp,nil,neckX,neckY);
+            CGPathAddLineToPoint(bp,nil,s_RS.x,s_RS.y);
 
-            // Left arm: LS → LE → LH
+            // ── LEFT ARM: LS → LE → LH ───────────────────────────────
             CGPathMoveToPoint(bp,nil,s_LS.x,s_LS.y);
             CGPathAddLineToPoint(bp,nil,s_LE.x,s_LE.y);
             CGPathAddLineToPoint(bp,nil,s_LH.x,s_LH.y);
 
-            // Right arm: RS → RE → RH
+            // ── RIGHT ARM: RS → RE → RH ──────────────────────────────
             CGPathMoveToPoint(bp,nil,s_RS.x,s_RS.y);
             CGPathAddLineToPoint(bp,nil,s_RE.x,s_RE.y);
             CGPathAddLineToPoint(bp,nil,s_RH.x,s_RH.y);
 
-            // Legs: Hip → LA, Hip → RA
+            // ── HIP HORIZONTAL BAR (like reference screenshot) ───────
+            // Connects left-hip side to right-hip side at pelvis level
+            // Use shoulder width as reference for proportional hip bar
+            float shoulderW = fabsf(s_RS.x - s_LS.x);
+            float hipW = MAX(shoulderW * 0.6f, 4.f);
+            CGPathMoveToPoint(bp,nil,s_Hip.x - hipW * 0.5f, s_Hip.y);
+            CGPathAddLineToPoint(bp,nil,s_Hip.x + hipW * 0.5f, s_Hip.y);
+
+            // ── LEGS with KNEES (midpoint Hip→Ankle) ─────────────────
+            // Left knee = midpoint(Hip, LAnkle)
+            float lKneeX = (s_Hip.x + s_LA.x) * 0.5f;
+            float lKneeY = (s_Hip.y + s_LA.y) * 0.5f;
+            // Right knee = midpoint(Hip, RAnkle)
+            float rKneeX = (s_Hip.x + s_RA.x) * 0.5f;
+            float rKneeY = (s_Hip.y + s_RA.y) * 0.5f;
+
+            // Left leg: Hip → LKnee → LAnkle
             CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
+            CGPathAddLineToPoint(bp,nil,lKneeX,lKneeY);
             CGPathAddLineToPoint(bp,nil,s_LA.x,s_LA.y);
+
+            // Right leg: Hip → RKnee → RAnkle
             CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
+            CGPathAddLineToPoint(bp,nil,rKneeX,rKneeY);
             CGPathAddLineToPoint(bp,nil,s_RA.x,s_RA.y);
         }
 
