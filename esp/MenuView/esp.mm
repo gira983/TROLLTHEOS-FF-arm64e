@@ -442,6 +442,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     float _espVW, _espVH;
     // Background ESP compute queue — считаем paths не на main thread
     dispatch_queue_t _espQueue;
+    // Match state: consecutive valid frames counter (prevents false positives)
+    volatile int32_t _validFrameCount;
     // Atomic flag — не запускаем новый расчёт пока предыдущий не кончил
     volatile BOOL _espBusy;
 }
@@ -457,6 +459,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         _espQueue = dispatch_queue_create("esp.render", DISPATCH_QUEUE_SERIAL);
         dispatch_set_target_queue(_espQueue, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
         _espBusy = NO;
+        _validFrameCount = 0;
 
         // Init viewport size from screen
         CGSize sc = UIScreen.mainScreen.bounds.size;
@@ -1115,20 +1118,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [self addSegmentTo:aimTabContainer atY:ay title:@"" options:@[@"Always", @"Shooting"] selectedRef:&aimTrigger tag:12];
 
     // ══ EXTRA TAB ═════════════════════════════════════════════════════
-    // Wrap extraTabContainer in a scroll view so sliders don't clip when content > tabH
-    UIScrollView *extraScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
-    extraScroll.backgroundColor = COL_BG1;
-    extraScroll.hidden = YES;
-    extraScroll.showsVerticalScrollIndicator = NO;
-    extraScroll.clipsToBounds = YES;
-    [menuContainer addSubview:extraScroll];
-
-    extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(0, 0, tabW, tabH * 3)];
+    extraTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
     extraTabContainer.backgroundColor = COL_BG1;
-    [extraScroll addSubview:extraTabContainer];
-
-    // Keep reference to scroll for hidden toggle
-    objc_setAssociatedObject(extraTabContainer, (void*)0xE5C, extraScroll, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    extraTabContainer.clipsToBounds = YES;
+    extraTabContainer.hidden = YES;
+    [menuContainer addSubview:extraTabContainer];
 
     CGFloat eW = tabW;
     CGFloat ey = 0;
@@ -1285,8 +1279,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)switchToTab:(NSInteger)tabIndex {
     mainTabContainer.hidden = YES;
     aimTabContainer.hidden = YES;
-    // extraTabContainer is inside extraScroll — hide the scroll view
-    [objc_getAssociatedObject(extraTabContainer, (void*)0xE5C) setHidden:YES];
+    extraTabContainer.hidden = YES;
     extraTabContainer.userInteractionEnabled = NO;
     settingTabContainer.hidden = YES;
     mainTabContainer.userInteractionEnabled = NO;
@@ -1323,33 +1316,48 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
     switch (tabIndex) {
         case 0:
-            mainTabContainer.hidden = NO;
-            mainTabContainer.userInteractionEnabled = YES;
-            break;
         case 1:
-            aimTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
-            aimTabContainer.hidden = NO;
-            aimTabContainer.userInteractionEnabled = YES;
+        case 3: {
+            // Restore menuContainer to original size if it was grown for Extra tab
+            // Original size stored at setup time — re-derive from mainTabContainer
+            CGRect mf = menuContainer.frame;
+            CGFloat origH = mainTabContainer.frame.size.height + mainTabContainer.frame.origin.y;
+            if (mf.size.height != origH && origH > 50) {
+                CGFloat diff = mf.size.height - origH;
+                menuContainer.frame = CGRectMake(mf.origin.x, mf.origin.y + diff * 0.5f,
+                                                  mf.size.width, origH);
+            }
+            if (tabIndex == 0) {
+                mainTabContainer.hidden = NO; mainTabContainer.userInteractionEnabled = YES;
+            } else if (tabIndex == 1) {
+                aimTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
+                aimTabContainer.hidden = NO; aimTabContainer.userInteractionEnabled = YES;
+            } else {
+                settingTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
+                settingTabContainer.hidden = NO; settingTabContainer.userInteractionEnabled = YES;
+            }
             break;
+        }
         case 2: {
-            // Show extraScroll (parent of extraTabContainer)
-            UIScrollView *es = objc_getAssociatedObject(extraTabContainer, (void*)0xE5C);
-            es.frame = CGRectMake(tabX, tabY, tabW, tabH);
-            es.hidden = NO;
-            // Update scroll content size to fit all sliders
-            CGFloat contentH = extraTabContainer.subviews.count > 0
-                ? CGRectGetMaxY([[extraTabContainer.subviews lastObject] frame]) + 12
-                : tabH;
-            extraTabContainer.frame = CGRectMake(0, 0, tabW, MAX(contentH, tabH));
-            es.contentSize = CGSizeMake(tabW, MAX(contentH, tabH));
+            // Compute content height from subviews
+            CGFloat contentH = tabH;
+            for (UIView *sv in extraTabContainer.subviews) {
+                CGFloat bottom = CGRectGetMaxY(sv.frame);
+                if (bottom > contentH) contentH = bottom;
+            }
+            contentH += 12;
+            // Grow menuContainer temporarily to fit all sliders
+            CGRect mf = menuContainer.frame;
+            CGFloat extraGrow = MAX(0, contentH - tabH);
+            menuContainer.frame = CGRectMake(mf.origin.x, mf.origin.y - extraGrow * 0.5f,
+                                              mf.size.width, mf.size.height + extraGrow);
+            CGFloat newTabH = contentH;
+            extraTabContainer.frame = CGRectMake(tabX, tabY, tabW, newTabH);
+            extraTabContainer.clipsToBounds = YES;
+            extraTabContainer.hidden = NO;
             extraTabContainer.userInteractionEnabled = YES;
             break;
         }
-        case 3:
-            settingTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
-            settingTabContainer.hidden = NO;
-            settingTabContainer.userInteractionEnabled = YES;
-            break;
     }
 }
 
@@ -1494,90 +1502,138 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 // Restore убран — запись по устаревшим адресам после смены оружия/выхода = краш
 - (void)toggleNoRecoil:(CustomSwitch *)sender {
     isNoRecoil = sender.isOn;
-    if (isNoRecoil) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            const int MAX   = 4096;
-            int32_t search  = 1016018816;
-            int32_t patch   = 180;
-            uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
-            while (isNoRecoil) {
-                int count = scanForValue(0x100000000, 0x160000000,
-                                         &search, sizeof(search), addrs, MAX);
-                for (int i = 0; i < count; i++)
-                    WriteAddr<int32_t>((long)addrs[i], patch);
-                // Sleep прерываемый — проверяем флаг каждые 100мс
-                for (int s = 0; s < 20 && isNoRecoil; s++)
-                    [NSThread sleepForTimeInterval:0.1];
-            }
-            free(addrs);
-        });
+    if (!isNoRecoil) {
+        // User turned OFF — restore immediately if we had cached addresses
+        // (loop will stop on next iteration and also restores)
+        return;
     }
+    // Start smart loop
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        const int32_t searchVal = 1016018816; // original recoil value
+        const int32_t patchVal  = 180;        // no-recoil value
+        const int MAX = 4096;
+        uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
+        int cachedCount = 0;
+        BOOL wasInMatch = NO;
+
+        while (isNoRecoil) {
+            BOOL inMatch = isInMatch;
+
+            if (inMatch && !wasInMatch) {
+                // Just entered match — re-scan for fresh addresses
+                cachedCount = 0;
+            }
+
+            if (inMatch) {
+                if (cachedCount == 0) {
+                    // Scan once per match entry
+                    cachedCount = scanForValue(0x100000000, 0x160000000,
+                                               &searchVal, sizeof(searchVal), addrs, MAX);
+                }
+                // Apply patch every cycle
+                for (int i = 0; i < cachedCount; i++)
+                    WriteAddr<int32_t>((long)addrs[i], patchVal);
+            } else if (wasInMatch && cachedCount > 0) {
+                // Just left match — restore original
+                for (int i = 0; i < cachedCount; i++)
+                    WriteAddr<int32_t>((long)addrs[i], searchVal);
+                cachedCount = 0;
+            }
+
+            wasInMatch = inMatch;
+            // Check flag every 150ms
+            for (int s = 0; s < 15 && isNoRecoil; s++)
+                [NSThread sleepForTimeInterval:0.01];
+        }
+
+        // Loop exited (user turned off) — restore if in match
+        if (cachedCount > 0) {
+            for (int i = 0; i < cachedCount; i++)
+                WriteAddr<int32_t>((long)addrs[i], searchVal);
+        }
+        free(addrs);
+    });
 }
 
-// ── Speed — smart single toggle ──────────────────────────────────────
-// ON (first time): searches for speed value addresses, then patches them.
-// ON (subsequent): reuses cached addresses — no re-scan needed.
-//   Cache survives match start/end but is cleared if game restarts (addresses invalid).
-// OFF: restores original values. Cache kept so next ON is instant.
+// ── Speed — match-aware smart loop ───────────────────────────────────
+// ON: loop watches isInMatch. In match→patches. Out of match→restores.
+// Each new match entry forces a fresh scan (new process = new addresses).
+// OFF: restores immediately and stops loop.
 - (void)toggleSpeed:(CustomSwitch *)sender {
     isSpeedActive = sender.isOn;
+    if (!isSpeedActive) {
+        // Restore immediately using last known addresses
+        if (g_speedAddrs && g_speedAddrs.count > 0) {
+            int64_t orig = 4397530849764387586LL;
+            for (NSNumber *n in g_speedAddrs)
+                WriteAddr<int64_t>((long)n.unsignedLongLongValue, orig);
+        }
+        g_speedAddrs = nil;
+        g_speedSearchDone = NO;
+        return;
+    }
 
-    if (isSpeedActive) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            const int MAX      = 4096;
-            int64_t origVal    = 4397530849764387586LL;  // [0.033f, 0.033f] — original speed
-            int64_t patchVal   = 4366458311853765201LL;  // [0.0186f, 0.0186f] — ~1.77x faster
-            uint64_t *addrs    = (uint64_t *)malloc(MAX * sizeof(uint64_t));
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        const int64_t origVal  = 4397530849764387586LL;
+        const int64_t patchVal = 4366458311853765201LL;
+        const int MAX = 4096;
+        uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
+        int cachedCount = 0;
+        BOOL wasInMatch = NO;
 
-            BOOL needSearch = (!g_speedSearchDone || !g_speedAddrs || g_speedAddrs.count == 0);
+        while (isSpeedActive) {
+            BOOL inMatch = isInMatch;
 
-            if (needSearch) {
-                // First activation OR cache was cleared (game restart)
-                // Scan for original value in game module region
-                int count = scanForValue(0x100000000, 0x200000000,
-                                         &origVal, sizeof(origVal), addrs, MAX);
-                if (count == 0) {
-                    // Not in lobby/match yet — nothing found
-                    free(addrs);
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        sender.on = NO;
-                        isSpeedActive = NO;
-                    });
-                    return;
-                }
-                NSMutableArray *arr = [NSMutableArray arrayWithCapacity:count];
-                for (int i = 0; i < count; i++) [arr addObject:@(addrs[i])];
-                g_speedAddrs     = arr;
-                g_speedSearchDone = YES;
-                NSLog(@"[Speed] searched: found %d addrs", count);
-            } else {
-                NSLog(@"[Speed] activate: using %lu cached addrs", (unsigned long)g_speedAddrs.count);
+            if (inMatch && !wasInMatch) {
+                // New match detected — must re-scan (fresh process addresses)
+                cachedCount = 0;
+                g_speedSearchDone = NO;
             }
 
-            free(addrs);
+            if (inMatch) {
+                if (cachedCount == 0) {
+                    // Scan for speed value
+                    cachedCount = scanForValue(0x100000000, 0x200000000,
+                                               &origVal, sizeof(origVal), addrs, MAX);
+                    if (cachedCount > 0) {
+                        // Update global cache for UI reference
+                        NSMutableArray *arr = [NSMutableArray arrayWithCapacity:cachedCount];
+                        for (int i = 0; i < cachedCount; i++) [arr addObject:@(addrs[i])];
+                        g_speedAddrs = arr;
+                        g_speedSearchDone = YES;
+                    }
+                }
+                // Patch every cycle (value may reset on events)
+                for (int i = 0; i < cachedCount; i++)
+                    WriteAddr<int64_t>((long)addrs[i], patchVal);
 
-            // Patch all cached addresses
-            for (NSNumber *n in g_speedAddrs)
-                WriteAddr<int64_t>((long)n.unsignedLongLongValue, patchVal);
-        });
+            } else if (wasInMatch && cachedCount > 0) {
+                // Left match — restore
+                for (int i = 0; i < cachedCount; i++)
+                    WriteAddr<int64_t>((long)addrs[i], origVal);
+                cachedCount = 0;
+                g_speedAddrs = nil;
+                g_speedSearchDone = NO;
+            }
 
-    } else {
-        // OFF — restore original values to cached addresses
-        if (g_speedAddrs && g_speedAddrs.count > 0) {
-            int64_t origVal = 4397530849764387586LL;
-            for (NSNumber *n in g_speedAddrs)
-                WriteAddr<int64_t>((long)n.unsignedLongLongValue, origVal);
-            NSLog(@"[Speed] reset: restored %lu addrs", (unsigned long)g_speedAddrs.count);
-            // Keep cache — next ON will be instant (no re-scan)
-            // Cache will auto-invalidate if game restarts (addresses become invalid)
+            wasInMatch = inMatch;
+            for (int s = 0; s < 15 && isSpeedActive; s++)
+                [NSThread sleepForTimeInterval:0.01];
         }
-    }
+
+        // User turned OFF — restore
+        if (cachedCount > 0)
+            for (int i = 0; i < cachedCount; i++)
+                WriteAddr<int64_t>((long)addrs[i], origVal);
+        g_speedAddrs = nil;
+        g_speedSearchDone = NO;
+        free(addrs);
+    });
 }
 
-// Kept for compatibility — not used in UI but may be called externally
-- (void)searchSpeed  { /* no-op: search is now done automatically in toggleSpeed */ }
-- (void)activateSpeed { /* no-op */ }
-- (void)resetSpeed   { /* no-op */ }
+- (void)searchSpeed  {}
+- (void)activateSpeed {}
+- (void)resetSpeed   {}
 
 // One-shot action button row (no toggle, just fires action on tap)
 - (UIView *)makeButtonRowWithTitle:(NSString *)title badge:(NSString *)badge
@@ -1910,7 +1966,8 @@ bool get_IsFiring(uint64_t player) {
     uint64_t matchGame = getMatchGame(Moudule_Base);
     uint64_t camera    = CameraMain(matchGame);
     if (!isVaildPtr(camera)) {
-        isInMatch = NO;  // не в матче — сбрасываем флаг
+        isInMatch = NO;
+        OSAtomicAnd32(0, (volatile uint32_t*)&_validFrameCount); // reset counter
         dispatch_async(dispatch_get_main_queue(), ^{
             [CATransaction begin]; [CATransaction setDisableActions:YES];
             _boneLayer.path=nil; _boxLayer.path=nil;
@@ -1920,7 +1977,11 @@ bool get_IsFiring(uint64_t player) {
         });
         return;
     }
-    isInMatch = YES;  // камера валидна — мы в матче
+    // Increment valid frame counter — require 2 consecutive valid frames
+    // before activating features (prevents stale pointer false positives)
+    OSAtomicIncrement32(&_validFrameCount);
+    BOOL matchReady = (_validFrameCount >= 2);
+    isInMatch = matchReady;
 
     uint64_t match = getMatch(matchGame);
     if (!isVaildPtr(match)) return;
