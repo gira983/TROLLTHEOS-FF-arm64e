@@ -2117,77 +2117,96 @@ bool get_IsFiring(uint64_t player) {
         else                  { acR=1.f;  acG=0.2f; acB=0.2f; }  // red    = far
         float acA = isKnocked ? 0.75f : 0.95f;
 
-        // ── SKELETON — skip for tiny/far players ──────────────────────
+        // ── SKELETON — all real bones from dump (Kuydum-verified offsets) ──
         if (isBone && dis <= 150.f && !isTiny) {
-            uint64_t hipNode = getHip(PawnObject);
-            Vector3 HipPos  = isVaildPtr(hipNode) ? getPositionExt(hipNode) : HeadPos;
-            Vector3 s_Hip   = WorldToScreen(HipPos,  matrix, vW, vH);
+            // Read all 13 joints — real offsets from obfuscated dump
+            uint64_t nkNode = getNeck(PawnObject);
+            uint64_t hpNode = getHip(PawnObject);
+            uint64_t lsNode = getLeftShoulder(PawnObject);
+            uint64_t rsNode = getRightShoulder(PawnObject);
+            uint64_t leNode = getLeftElbow(PawnObject);
+            uint64_t reNode = getRightElbow(PawnObject);
+            uint64_t lhNode = getLeftHand(PawnObject);
+            uint64_t rhNode = getRightHand(PawnObject);
+            uint64_t lkNode = getLeftKnee(PawnObject);   // 0x5F0 — real knee
+            uint64_t rkNode = getRightKnee(PawnObject);  // 0x5F8 — real knee
+            uint64_t lfNode = getLeftFoot(PawnObject);   // 0x600 — real foot
+            uint64_t rfNode = getRightFoot(PawnObject);  // 0x608 — real foot
 
-            Vector3 s_LS = WorldToScreen(getPositionExt(getLeftShoulder(PawnObject)),  matrix, vW, vH);
-            Vector3 s_RS = WorldToScreen(getPositionExt(getRightShoulder(PawnObject)), matrix, vW, vH);
-            Vector3 s_LE = WorldToScreen(getPositionExt(getLeftElbow(PawnObject)),     matrix, vW, vH);
-            Vector3 s_RE = WorldToScreen(getPositionExt(getRightElbow(PawnObject)),    matrix, vW, vH);
-            Vector3 s_LH = WorldToScreen(getPositionExt(getLeftHand(PawnObject)),      matrix, vW, vH);
-            Vector3 s_RH = WorldToScreen(getPositionExt(getRightHand(PawnObject)),     matrix, vW, vH);
-            Vector3 s_LA = WorldToScreen(getPositionExt(getLeftAnkle(PawnObject)),     matrix, vW, vH);
-            Vector3 s_RA = WorldToScreen(getPositionExt(getRightAnkle(PawnObject)),    matrix, vW, vH);
+            // Guard — skip skeleton if critical nodes invalid
+            if (!isVaildPtr(hpNode) || !isVaildPtr(lkNode)) goto skip_skeleton;
 
-            CGMutablePathRef bp = BONE_PATH;
+            {
+                Vector3 s_Neck = isVaildPtr(nkNode)
+                    ? WorldToScreen(getPositionExt(nkNode), matrix, vW, vH)
+                    : s_Head; // fallback: use head pos if neck invalid
+                Vector3 s_Hip  = WorldToScreen(getPositionExt(hpNode), matrix, vW, vH);
+                Vector3 s_LS   = WorldToScreen(getPositionExt(lsNode), matrix, vW, vH);
+                Vector3 s_RS   = WorldToScreen(getPositionExt(rsNode), matrix, vW, vH);
+                Vector3 s_LE   = WorldToScreen(getPositionExt(leNode), matrix, vW, vH);
+                Vector3 s_RE   = WorldToScreen(getPositionExt(reNode), matrix, vW, vH);
+                Vector3 s_LH   = WorldToScreen(getPositionExt(lhNode), matrix, vW, vH);
+                Vector3 s_RH   = WorldToScreen(getPositionExt(rhNode), matrix, vW, vH);
+                Vector3 s_LK   = WorldToScreen(getPositionExt(lkNode), matrix, vW, vH);
+                Vector3 s_RK   = WorldToScreen(getPositionExt(rkNode), matrix, vW, vH);
+                Vector3 s_LF   = WorldToScreen(getPositionExt(lfNode), matrix, vW, vH);
+                Vector3 s_RF   = WorldToScreen(getPositionExt(rfNode), matrix, vW, vH);
 
-            // ── HEAD CIRCLE ───────────────────────────────────────────
-            float headR = MAX(3.f, boxH * 0.08f);
-            CGPathAddEllipseInRect(bp, nil,
-                CGRectMake(s_Head.x - headR, s_Head.y - headR, headR*2, headR*2));
+                CGMutablePathRef bp = BONE_PATH;
 
-            // ── NECK: 25% point from head toward hip ──────────────────
-            float neckX = s_Head.x + (s_Hip.x - s_Head.x) * 0.25f;
-            float neckY = s_Head.y + (s_Hip.y - s_Head.y) * 0.25f;
+                // ── HEAD CIRCLE ───────────────────────────────────────
+                // HeadNode = pivot at top of neck — shift circle up half-radius
+                float headR = MAX(4.f, boxH * 0.12f);
+                float headCY = s_Head.y - headR * 0.3f; // slight upward correction
+                CGPathAddEllipseInRect(bp, nil,
+                    CGRectMake(s_Head.x - headR, headCY - headR, headR*2, headR*2));
 
-            // ── SPINE: neck → hip ─────────────────────────────────────
-            CGPathMoveToPoint(bp,nil,neckX,neckY);
-            CGPathAddLineToPoint(bp,nil,s_Hip.x,s_Hip.y);
+                // ── NECK → HEAD bottom ────────────────────────────────
+                // Line from neck joint to bottom of head circle
+                float headBotY = headCY + headR;
+                CGPathMoveToPoint(bp,nil,s_Neck.x, s_Neck.y);
+                CGPathAddLineToPoint(bp,nil,s_Head.x, headBotY);
 
-            // ── CLAVICLE: neck → LS, neck → RS ───────────────────────
-            CGPathMoveToPoint(bp,nil,neckX,neckY);
-            CGPathAddLineToPoint(bp,nil,s_LS.x,s_LS.y);
-            CGPathMoveToPoint(bp,nil,neckX,neckY);
-            CGPathAddLineToPoint(bp,nil,s_RS.x,s_RS.y);
+                // ── SPINE: Neck → Hip ─────────────────────────────────
+                CGPathMoveToPoint(bp,nil,s_Neck.x, s_Neck.y);
+                CGPathAddLineToPoint(bp,nil,s_Hip.x, s_Hip.y);
 
-            // ── LEFT ARM: LS → LE → LH ───────────────────────────────
-            CGPathMoveToPoint(bp,nil,s_LS.x,s_LS.y);
-            CGPathAddLineToPoint(bp,nil,s_LE.x,s_LE.y);
-            CGPathAddLineToPoint(bp,nil,s_LH.x,s_LH.y);
+                // ── CLAVICLES: Neck → LS, Neck → RS ──────────────────
+                CGPathMoveToPoint(bp,nil,s_Neck.x, s_Neck.y);
+                CGPathAddLineToPoint(bp,nil,s_LS.x,  s_LS.y);
+                CGPathMoveToPoint(bp,nil,s_Neck.x, s_Neck.y);
+                CGPathAddLineToPoint(bp,nil,s_RS.x,  s_RS.y);
 
-            // ── RIGHT ARM: RS → RE → RH ──────────────────────────────
-            CGPathMoveToPoint(bp,nil,s_RS.x,s_RS.y);
-            CGPathAddLineToPoint(bp,nil,s_RE.x,s_RE.y);
-            CGPathAddLineToPoint(bp,nil,s_RH.x,s_RH.y);
+                // ── LEFT ARM: LS → LE → LH ───────────────────────────
+                CGPathMoveToPoint(bp,nil,s_LS.x, s_LS.y);
+                CGPathAddLineToPoint(bp,nil,s_LE.x, s_LE.y);
+                CGPathAddLineToPoint(bp,nil,s_LH.x, s_LH.y);
 
-            // ── HIP HORIZONTAL BAR (like reference screenshot) ───────
-            // Connects left-hip side to right-hip side at pelvis level
-            // Use shoulder width as reference for proportional hip bar
-            float shoulderW = fabsf(s_RS.x - s_LS.x);
-            float hipW = MAX(shoulderW * 0.6f, 4.f);
-            CGPathMoveToPoint(bp,nil,s_Hip.x - hipW * 0.5f, s_Hip.y);
-            CGPathAddLineToPoint(bp,nil,s_Hip.x + hipW * 0.5f, s_Hip.y);
+                // ── RIGHT ARM: RS → RE → RH ──────────────────────────
+                CGPathMoveToPoint(bp,nil,s_RS.x, s_RS.y);
+                CGPathAddLineToPoint(bp,nil,s_RE.x, s_RE.y);
+                CGPathAddLineToPoint(bp,nil,s_RH.x, s_RH.y);
 
-            // ── LEGS with KNEES (midpoint Hip→Ankle) ─────────────────
-            // Left knee = midpoint(Hip, LAnkle)
-            float lKneeX = (s_Hip.x + s_LA.x) * 0.5f;
-            float lKneeY = (s_Hip.y + s_LA.y) * 0.5f;
-            // Right knee = midpoint(Hip, RAnkle)
-            float rKneeX = (s_Hip.x + s_RA.x) * 0.5f;
-            float rKneeY = (s_Hip.y + s_RA.y) * 0.5f;
+                // ── PELVIS BAR: Hip ± half shoulder width ─────────────
+                // Legs branch from ends of this bar
+                float shoulderW = fabsf(s_RS.x - s_LS.x);
+                float hipHalfW  = MAX(shoulderW * 0.4f, 5.f);
+                float hipLX = s_Hip.x - hipHalfW;
+                float hipRX = s_Hip.x + hipHalfW;
+                CGPathMoveToPoint(bp,nil,hipLX, s_Hip.y);
+                CGPathAddLineToPoint(bp,nil,hipRX, s_Hip.y);
 
-            // Left leg: Hip → LKnee → LAnkle
-            CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
-            CGPathAddLineToPoint(bp,nil,lKneeX,lKneeY);
-            CGPathAddLineToPoint(bp,nil,s_LA.x,s_LA.y);
+                // ── LEFT LEG: hipL → LeftKnee → LeftFoot ─────────────
+                CGPathMoveToPoint(bp,nil,hipLX,  s_Hip.y);
+                CGPathAddLineToPoint(bp,nil,s_LK.x, s_LK.y);
+                CGPathAddLineToPoint(bp,nil,s_LF.x, s_LF.y);
 
-            // Right leg: Hip → RKnee → RAnkle
-            CGPathMoveToPoint(bp,nil,s_Hip.x,s_Hip.y);
-            CGPathAddLineToPoint(bp,nil,rKneeX,rKneeY);
-            CGPathAddLineToPoint(bp,nil,s_RA.x,s_RA.y);
+                // ── RIGHT LEG: hipR → RightKnee → RightFoot ──────────
+                CGPathMoveToPoint(bp,nil,hipRX,  s_Hip.y);
+                CGPathAddLineToPoint(bp,nil,s_RK.x, s_RK.y);
+                CGPathAddLineToPoint(bp,nil,s_RF.x, s_RF.y);
+            }
+            skip_skeleton:;
         }
 
         // ── BOX: corner brackets (skip for tiny/far, draw dot instead) ──
