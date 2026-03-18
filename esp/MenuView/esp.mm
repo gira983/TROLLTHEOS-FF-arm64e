@@ -2154,53 +2154,72 @@ bool get_IsFiring(uint64_t player) {
 
                 CGMutablePathRef bp = BONE_PATH;
 
-                // ── HEAD → NECK line (no circle — cleaner look) ──────
-                CGPathMoveToPoint(bp,nil,s_Head.x, s_Head.y);
-                CGPathAddLineToPoint(bp,nil,s_Neck.x, s_Neck.y);
+                // ── CLAMP helper ──────────────────────────────────────
+                // All bone X coords are clamped to ±maxHalfW from the
+                // spine center to prevent skeleton exploding on far/angled targets.
+                // maxHalfW = boxW * 1.1 gives a 10% margin above the box width.
+                float spineX  = s_Hip.x * 0.5f + s_Neck.x * 0.5f; // spine center X
+                float maxHalfW = MAX(boxW * 0.55f, 8.f);
+                auto clampX = [&](float x) -> float {
+                    return fminf(fmaxf(x, spineX - maxHalfW), spineX + maxHalfW);
+                };
+                // Apply clamp to all projected bone X
+                float LS_x = clampX(s_LS.x), LS_y = s_LS.y;
+                float RS_x = clampX(s_RS.x), RS_y = s_RS.y;
+                float LE_x = clampX(s_LE.x), LE_y = s_LE.y;
+                float RE_x = clampX(s_RE.x), RE_y = s_RE.y;
+                float LH_x = clampX(s_LH.x), LH_y = s_LH.y;
+                float RH_x = clampX(s_RH.x), RH_y = s_RH.y;
+                float LK_x = clampX(s_LK.x), LK_y = s_LK.y;
+                float RK_x = clampX(s_RK.x), RK_y = s_RK.y;
+                float LF_x = clampX(s_LF.x), LF_y = s_LF.y;
+                float RF_x = clampX(s_RF.x), RF_y = s_RF.y;
+                float NK_x = clampX(s_Neck.x), NK_y = s_Neck.y;
+                float HP_x = clampX(s_Hip.x),  HP_y = s_Hip.y;
+                float HD_x = clampX(s_Head.x),  HD_y = s_Head.y;
+
+                // ── HEAD → NECK ───────────────────────────────────────
+                CGPathMoveToPoint(bp,nil,HD_x, HD_y);
+                CGPathAddLineToPoint(bp,nil,NK_x, NK_y);
 
                 // ── SPINE: Neck → Hip ─────────────────────────────────
-                CGPathMoveToPoint(bp,nil,s_Neck.x, s_Neck.y);
-                CGPathAddLineToPoint(bp,nil,s_Hip.x, s_Hip.y);
+                CGPathMoveToPoint(bp,nil,NK_x, NK_y);
+                CGPathAddLineToPoint(bp,nil,HP_x, HP_y);
 
                 // ── CLAVICLES: Neck → LS, Neck → RS ──────────────────
-                CGPathMoveToPoint(bp,nil,s_Neck.x, s_Neck.y);
-                CGPathAddLineToPoint(bp,nil,s_LS.x,  s_LS.y);
-                CGPathMoveToPoint(bp,nil,s_Neck.x, s_Neck.y);
-                CGPathAddLineToPoint(bp,nil,s_RS.x,  s_RS.y);
+                CGPathMoveToPoint(bp,nil,NK_x, NK_y);
+                CGPathAddLineToPoint(bp,nil,LS_x, LS_y);
+                CGPathMoveToPoint(bp,nil,NK_x, NK_y);
+                CGPathAddLineToPoint(bp,nil,RS_x, RS_y);
 
                 // ── LEFT ARM: LS → LE → LH ───────────────────────────
-                CGPathMoveToPoint(bp,nil,s_LS.x, s_LS.y);
-                CGPathAddLineToPoint(bp,nil,s_LE.x, s_LE.y);
-                CGPathAddLineToPoint(bp,nil,s_LH.x, s_LH.y);
+                CGPathMoveToPoint(bp,nil,LS_x, LS_y);
+                CGPathAddLineToPoint(bp,nil,LE_x, LE_y);
+                CGPathAddLineToPoint(bp,nil,LH_x, LH_y);
 
                 // ── RIGHT ARM: RS → RE → RH ──────────────────────────
-                CGPathMoveToPoint(bp,nil,s_RS.x, s_RS.y);
-                CGPathAddLineToPoint(bp,nil,s_RE.x, s_RE.y);
-                CGPathAddLineToPoint(bp,nil,s_RH.x, s_RH.y);
+                CGPathMoveToPoint(bp,nil,RS_x, RS_y);
+                CGPathAddLineToPoint(bp,nil,RE_x, RE_y);
+                CGPathAddLineToPoint(bp,nil,RH_x, RH_y);
 
                 // ── PELVIS BAR ────────────────────────────────────────
-                // Use actual knee X positions to determine bar endpoints —
-                // avoids crossed legs when viewed from front (knees swap sides)
-                float barLX = MIN(s_LK.x, s_RK.x); // screen-left end
-                float barRX = MAX(s_LK.x, s_RK.x); // screen-right end
-                // Clamp bar width to reasonable range
-                float barW = barRX - barLX;
-                if (barW < 4.f) { barLX = s_Hip.x - 4.f; barRX = s_Hip.x + 4.f; }
-                CGPathMoveToPoint(bp,nil,barLX, s_Hip.y);
-                CGPathAddLineToPoint(bp,nil,barRX, s_Hip.y);
+                float barLX = MIN(LK_x, RK_x);
+                float barRX = MAX(LK_x, RK_x);
+                if (barRX - barLX < 4.f) { barLX = HP_x - 4.f; barRX = HP_x + 4.f; }
+                CGPathMoveToPoint(bp,nil,barLX, HP_y);
+                CGPathAddLineToPoint(bp,nil,barRX, HP_y);
 
-                // ── LEGS: each knee connects to its own side of the bar ──
-                // LK goes to the bar end closest to it (no crossing)
-                float lBarX = (fabsf(s_LK.x - barLX) < fabsf(s_LK.x - barRX)) ? barLX : barRX;
-                float rBarX = (fabsf(s_RK.x - barLX) < fabsf(s_RK.x - barRX)) ? barLX : barRX;
+                // ── LEGS: each knee to nearest bar end (no crossing) ──
+                float lBarX = (fabsf(LK_x - barLX) < fabsf(LK_x - barRX)) ? barLX : barRX;
+                float rBarX = (fabsf(RK_x - barLX) < fabsf(RK_x - barRX)) ? barLX : barRX;
 
-                CGPathMoveToPoint(bp,nil,lBarX, s_Hip.y);
-                CGPathAddLineToPoint(bp,nil,s_LK.x, s_LK.y);
-                CGPathAddLineToPoint(bp,nil,s_LF.x, s_LF.y);
+                CGPathMoveToPoint(bp,nil,lBarX, HP_y);
+                CGPathAddLineToPoint(bp,nil,LK_x, LK_y);
+                CGPathAddLineToPoint(bp,nil,LF_x, LF_y);
 
-                CGPathMoveToPoint(bp,nil,rBarX, s_Hip.y);
-                CGPathAddLineToPoint(bp,nil,s_RK.x, s_RK.y);
-                CGPathAddLineToPoint(bp,nil,s_RF.x, s_RF.y);
+                CGPathMoveToPoint(bp,nil,rBarX, HP_y);
+                CGPathAddLineToPoint(bp,nil,RK_x, RK_y);
+                CGPathAddLineToPoint(bp,nil,RF_x, RF_y);
             }
             skip_skeleton:;
         }
@@ -2254,7 +2273,7 @@ bool get_IsFiring(uint64_t player) {
                 if (isKnocked) snprintf(hpBuf,sizeof(hpBuf),"KO");
                 else           snprintf(hpBuf,sizeof(hpBuf),"%d",CurHP);
                 float tW = 28.f;
-                addText(hpBuf, hpBX + hpBW*0.5f - tW*0.5f, hpBY-12.f, tW, 11.f, 11.f, 1.f,1.f,1.f,1.f, 0.f, 1);
+                addText(hpBuf, hpBX + hpBW*0.5f - tW*0.5f, hpBY-12.f, tW, 11.f, fmaxf(7.f,fminf(13.f,boxH*0.09f)), 1.f,1.f,1.f,1.f, 0.f, 1);
             }
         }
 
@@ -2266,7 +2285,7 @@ bool get_IsFiring(uint64_t player) {
             float nW = MAX(boxW, 70.f);
             float nY = by - 13.f - (isHealth ? 12.f : 0.f);
             char nb[48]; strncpy(nb, ns, 47); nb[47]=0;
-            addText(nb, bx+(boxW-nW)*0.5f, nY, nW, 12.f, 11.f, 1.f,1.f,1.f,1.f, 0.45f, 1);
+            addText(nb, bx+(boxW-nW)*0.5f, nY, nW, 12.f, fmaxf(7.f,fminf(13.f,boxH*0.09f)), 1.f,1.f,1.f,1.f, 0.45f, 1);
         }
 
         // ── DISTANCE (always shown for tiny/far enemies) ───────────
@@ -2278,7 +2297,7 @@ bool get_IsFiring(uint64_t player) {
             else               snprintf(db,sizeof(db),"%.0fM",dis);
             float distW = MAX(boxW, 55.f);
             float distX = bx + (boxW - distW) * 0.5f;
-            addText(db, distX, by+boxH+3.f, distW, 12.f, 11.f, acR,acG,acB,acA, 0.f, 1);
+            addText(db, distX, by+boxH+3.f, distW, 12.f, fmaxf(7.f,fminf(13.f,boxH*0.09f)), acR,acG,acB,acA, 0.f, 1);
         }
 
         // ── ESP LINE ─────────────────────────────────────────────────
