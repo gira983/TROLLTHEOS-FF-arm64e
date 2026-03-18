@@ -2072,7 +2072,7 @@ bool get_IsFiring(uint64_t player) {
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
             Vector3 ap = HeadPos;
-            if (aimTarget == 1) ap = HeadPos + Vector3(0,-0.15f,0);
+            if (aimTarget == 1) ap = getPositionExt(getNeck(PawnObject));
             else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
             Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
             float dx = ws.x - center.x, dy = ws.y - center.y;
@@ -2154,18 +2154,9 @@ bool get_IsFiring(uint64_t player) {
 
                 CGMutablePathRef bp = BONE_PATH;
 
-                // ── HEAD CIRCLE ───────────────────────────────────────
-                // HeadNode = pivot at top of neck — shift circle up half-radius
-                float headR = MAX(4.f, boxH * 0.12f);
-                float headCY = s_Head.y - headR * 0.3f; // slight upward correction
-                CGPathAddEllipseInRect(bp, nil,
-                    CGRectMake(s_Head.x - headR, headCY - headR, headR*2, headR*2));
-
-                // ── NECK → HEAD bottom ────────────────────────────────
-                // Line from neck joint to bottom of head circle
-                float headBotY = headCY + headR;
-                CGPathMoveToPoint(bp,nil,s_Neck.x, s_Neck.y);
-                CGPathAddLineToPoint(bp,nil,s_Head.x, headBotY);
+                // ── HEAD → NECK line (no circle — cleaner look) ──────
+                CGPathMoveToPoint(bp,nil,s_Head.x, s_Head.y);
+                CGPathAddLineToPoint(bp,nil,s_Neck.x, s_Neck.y);
 
                 // ── SPINE: Neck → Hip ─────────────────────────────────
                 CGPathMoveToPoint(bp,nil,s_Neck.x, s_Neck.y);
@@ -2187,22 +2178,27 @@ bool get_IsFiring(uint64_t player) {
                 CGPathAddLineToPoint(bp,nil,s_RE.x, s_RE.y);
                 CGPathAddLineToPoint(bp,nil,s_RH.x, s_RH.y);
 
-                // ── PELVIS BAR: Hip ± half shoulder width ─────────────
-                // Legs branch from ends of this bar
-                float shoulderW = fabsf(s_RS.x - s_LS.x);
-                float hipHalfW  = MAX(shoulderW * 0.4f, 5.f);
-                float hipLX = s_Hip.x - hipHalfW;
-                float hipRX = s_Hip.x + hipHalfW;
-                CGPathMoveToPoint(bp,nil,hipLX, s_Hip.y);
-                CGPathAddLineToPoint(bp,nil,hipRX, s_Hip.y);
+                // ── PELVIS BAR ────────────────────────────────────────
+                // Use actual knee X positions to determine bar endpoints —
+                // avoids crossed legs when viewed from front (knees swap sides)
+                float barLX = MIN(s_LK.x, s_RK.x); // screen-left end
+                float barRX = MAX(s_LK.x, s_RK.x); // screen-right end
+                // Clamp bar width to reasonable range
+                float barW = barRX - barLX;
+                if (barW < 4.f) { barLX = s_Hip.x - 4.f; barRX = s_Hip.x + 4.f; }
+                CGPathMoveToPoint(bp,nil,barLX, s_Hip.y);
+                CGPathAddLineToPoint(bp,nil,barRX, s_Hip.y);
 
-                // ── LEFT LEG: hipL → LeftKnee → LeftFoot ─────────────
-                CGPathMoveToPoint(bp,nil,hipLX,  s_Hip.y);
+                // ── LEGS: each knee connects to its own side of the bar ──
+                // LK goes to the bar end closest to it (no crossing)
+                float lBarX = (fabsf(s_LK.x - barLX) < fabsf(s_LK.x - barRX)) ? barLX : barRX;
+                float rBarX = (fabsf(s_RK.x - barLX) < fabsf(s_RK.x - barRX)) ? barLX : barRX;
+
+                CGPathMoveToPoint(bp,nil,lBarX, s_Hip.y);
                 CGPathAddLineToPoint(bp,nil,s_LK.x, s_LK.y);
                 CGPathAddLineToPoint(bp,nil,s_LF.x, s_LF.y);
 
-                // ── RIGHT LEG: hipR → RightKnee → RightFoot ──────────
-                CGPathMoveToPoint(bp,nil,hipRX,  s_Hip.y);
+                CGPathMoveToPoint(bp,nil,rBarX, s_Hip.y);
                 CGPathAddLineToPoint(bp,nil,s_RK.x, s_RK.y);
                 CGPathAddLineToPoint(bp,nil,s_RF.x, s_RF.y);
             }
@@ -2303,7 +2299,7 @@ bool get_IsFiring(uint64_t player) {
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
-        else if (aimTarget==1) ap = getPositionExt(getHead(bestTarget))+Vector3(0,-0.15f,0);
+        else if (aimTarget==1) ap = getPositionExt(getNeck(bestTarget));
         else                   ap = getPositionExt(getHip(bestTarget));
         set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
     }
