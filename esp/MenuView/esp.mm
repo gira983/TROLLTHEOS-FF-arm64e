@@ -2072,7 +2072,15 @@ bool get_IsFiring(uint64_t player) {
         // ── Обычный Aimbot ───────────────────────────────────────────
         if (isAimbot && dis <= aimDistance) {
             Vector3 ap = HeadPos;
-            if (aimTarget == 1) ap = getPositionExt(getNeck(PawnObject));
+            if (aimTarget == 1) {
+                // Neck = interpolated between Head(75%) and Hip(25%) — no separate Neck bone
+                Vector3 hPos = getPositionExt(getHead(PawnObject));
+                uint64_t hipN = getHip(PawnObject);
+                Vector3 neckAp = isVaildPtr(hipN)
+                    ? hPos + (getPositionExt(hipN) - hPos) * 0.25f
+                    : hPos;
+                ap = neckAp;
+            }
             else if (aimTarget == 2) ap = getPositionExt(getHip(PawnObject));
             Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
             float dx = ws.x - center.x, dy = ws.y - center.y;
@@ -2137,9 +2145,13 @@ bool get_IsFiring(uint64_t player) {
             if (!isVaildPtr(hpNode) || !isVaildPtr(lkNode)) goto skip_skeleton;
 
             {
-                Vector3 s_Neck = isVaildPtr(nkNode)
-                    ? WorldToScreen(getPositionExt(nkNode), matrix, vW, vH)
-                    : s_Head; // fallback: use head pos if neck invalid
+                // Neck = 20% from Head toward Hip (no reliable Neck bone in this build)
+                uint64_t hpNodeForNeck = getHip(PawnObject);
+                Vector3 neckWorld = isVaildPtr(hpNodeForNeck)
+                    ? HeadPos + (getPositionExt(hpNodeForNeck) - HeadPos) * 0.20f
+                    : HeadPos;
+                Vector3 s_Neck = WorldToScreen(neckWorld, matrix, vW, vH);
+                (void)nkNode; // nkNode not used — Neck is interpolated
                 Vector3 s_Hip  = WorldToScreen(getPositionExt(hpNode), matrix, vW, vH);
                 Vector3 s_LS   = WorldToScreen(getPositionExt(lsNode), matrix, vW, vH);
                 Vector3 s_RS   = WorldToScreen(getPositionExt(rsNode), matrix, vW, vH);
@@ -2203,21 +2215,25 @@ bool get_IsFiring(uint64_t player) {
                 CGPathAddLineToPoint(bp,nil,RH_x, RH_y);
 
                 // ── PELVIS BAR ────────────────────────────────────────
-                float barLX = MIN(LK_x, RK_x);
-                float barRX = MAX(LK_x, RK_x);
-                if (barRX - barLX < 4.f) { barLX = HP_x - 4.f; barRX = HP_x + 4.f; }
-                CGPathMoveToPoint(bp,nil,barLX, HP_y);
-                CGPathAddLineToPoint(bp,nil,barRX, HP_y);
+                // Width derived from shoulders (stable, not from knees)
+                float sholderHalfW = fabsf(RS_x - LS_x) * 0.5f;
+                float pelvisHalfW  = MAX(sholderHalfW * 0.6f, boxW * 0.15f);
+                float pLX = HP_x - pelvisHalfW;
+                float pRX = HP_x + pelvisHalfW;
+                CGPathMoveToPoint(bp,nil,pLX, HP_y);
+                CGPathAddLineToPoint(bp,nil,pRX, HP_y);
 
-                // ── LEGS: each knee to nearest bar end (no crossing) ──
-                float lBarX = (fabsf(LK_x - barLX) < fabsf(LK_x - barRX)) ? barLX : barRX;
-                float rBarX = (fabsf(RK_x - barLX) < fabsf(RK_x - barRX)) ? barLX : barRX;
+                // ── LEGS: Hip → Knee → Foot (direct, no bar dependency) ──
+                // Left leg — determine correct side by knee X vs hip X
+                // If LK is left of RK → left leg uses pLX, else pRX
+                float useLX = (LK_x <= RK_x) ? pLX : pRX;
+                float useRX = (LK_x <= RK_x) ? pRX : pLX;
 
-                CGPathMoveToPoint(bp,nil,lBarX, HP_y);
+                CGPathMoveToPoint(bp,nil,useLX, HP_y);
                 CGPathAddLineToPoint(bp,nil,LK_x, LK_y);
                 CGPathAddLineToPoint(bp,nil,LF_x, LF_y);
 
-                CGPathMoveToPoint(bp,nil,rBarX, HP_y);
+                CGPathMoveToPoint(bp,nil,useRX, HP_y);
                 CGPathAddLineToPoint(bp,nil,RK_x, RK_y);
                 CGPathAddLineToPoint(bp,nil,RF_x, RF_y);
             }
@@ -2318,7 +2334,14 @@ bool get_IsFiring(uint64_t player) {
     if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
-        else if (aimTarget==1) ap = getPositionExt(getNeck(bestTarget));
+        else if (aimTarget==1) {
+            // Neck = 25% toward Hip from Head
+            Vector3 hPos = getPositionExt(getHead(bestTarget));
+            uint64_t hipN = getHip(bestTarget);
+            ap = isVaildPtr(hipN)
+                ? hPos + (getPositionExt(hipN) - hPos) * 0.25f
+                : hPos;
+        }
         else                   ap = getPositionExt(getHip(bestTarget));
         set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
     }
