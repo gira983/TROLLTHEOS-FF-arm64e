@@ -2167,18 +2167,16 @@ static void resetMatchState(void) {
         if (s_HeadTop.x < -200 || s_HeadTop.x > vW+200 ||
             s_HeadTop.y < -200 || s_HeadTop.y > vH+200) continue;
 
-        // ── Stable box size — based on distance, NOT toe projection ─────
-        // Toe node projection causes pulsation when player moves/crouches.
-        // Distance-based formula gives consistent stable size.
-        // Calibrated: at 10m ~180px tall on 390px screen → K=1800
-        float boxH = fmaxf(vH * 1800.f / (dis * vH), 12.f);
-        // Hard clamp: never bigger than 80% of screen height
-        boxH = fminf(boxH, vH * 0.8f);
+        // ── Box size from real toe–head projection ───────────────────
+        // fabsf(headTop.y - toe.y) gives correct perspective scale.
+        // Clamped to reasonable range to handle edge cases.
+        float rawH = fabsf(s_HeadTop.y - s_Toe.y);
+        float boxH = fmaxf(fminf(rawH, vH * 0.9f), 10.f);
         bool isTiny = false;
         float boxW = boxH * 0.42f;
-        // Center box on head X, top at head Y
+        // Top of box = headTop Y, centered on head X
         float bx   = s_Head.x - boxW * 0.5f;
-        float by   = s_Head.y - boxH * 0.08f; // slight offset so head is inside box
+        float by   = s_HeadTop.y;
 
         // Skip full detail rendering beyond kESPDetailDistance
         if (dis > kESPDetailDistance) continue;
