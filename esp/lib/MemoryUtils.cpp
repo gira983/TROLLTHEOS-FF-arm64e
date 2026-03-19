@@ -143,7 +143,7 @@ extern "C" mach_port_t Method1_ProcessorSetTasks_Public(pid_t targetPid) {
 }
 
 // Defined in MemoryUtils_ObjC.mm (needs ObjC/Foundation)
-extern mach_port_t Method3_PortStash(pid_t targetPid);
+extern "C" mach_port_t Method3_PortStash(pid_t targetPid);
 
 mach_port_t AcquireTaskPort(pid_t pid) {
     InitFunctionPointers();
