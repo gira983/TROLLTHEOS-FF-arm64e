@@ -15,7 +15,6 @@
 // 2 = iterate  (mach_port_names)     — итерация pid_for_task по всем портам, скрытный
 // 3 = kfd      (kernel exploit)      — обходит все Mach API
 //                                      physpuppet=iOS<=16.3, smith=iOS<=16.5, landa=iOS<=16.7
-extern int g_taskMethod;
 
 // kfd puaf sub-метод (только когда g_taskMethod == 3):
 // 0 = physpuppet, 1 = smith, 2 = landa
@@ -44,7 +43,7 @@ vm_map_offset_t GetGameModule_Base(char* GameProcessName);
 
 bool _read(long addr, void *buffer, int len);
 void InitFunctionPointers(void);
-mach_port_t Method1_ProcessorSetTasks_Public(pid_t targetPid);
+extern "C" mach_port_t Method1_ProcessorSetTasks_Public(pid_t targetPid);
 bool _write(long addr, const void *buffer, int len);
 
 template<typename T>
