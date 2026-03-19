@@ -1,6 +1,4 @@
 #import "esp.h"
-#import "../lib/TouchAimbot.h"
-#import "../lib/PortStash.h"
 #import <objc/runtime.h>
 
 // Лог в файл (определён в HUDApp.mm)
@@ -542,7 +540,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         // value-scan features инициализируются при первом включении
 
         [self SetUpBase];
-        TouchAimbot_Init();
+
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
         // 30fps для ESP: плавно и не жрёт FPS игры
         // _espBusy гарантирует что тяжёлый кадр не накапливается
@@ -1759,17 +1757,10 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    // Отправляем rotation в HUD (UID 0) через IPC
-    // HUD делает vm_write — выглядит как системный процесс, не как чит
-    FryzzAimRequest req;
-    req.playerAddr = player;
-    req.x = rotation.x;
-    req.y = rotation.y;
-    req.z = rotation.z;
-    req.w = rotation.w;
-    NSData *data = [NSData dataWithBytes:&req length:sizeof(req)];
-    [data writeToFile:@FRYZZ_IPC_AIM_PATH atomically:NO]; // NO = быстрее
-    notify_post(FRYZZ_NOTIFY_AIM_WRITE);
+    // Silent aim: пишем ТОЛЬКО в m_CurrentAimRotation (пуля)
+    // m_AimRotation (камера) НЕ трогаем — камера смотрит куда игрок целится
+    // Сервер видит нормальный угол камеры, пуля летит в цель
+    WriteAddr<Quaternion>(player + 0x172C, rotation);
 }
 
 bool get_IsFiring(uint64_t player) {
@@ -2192,15 +2183,15 @@ static void resetMatchState(void) {
     // ── Aimbot apply ──────────────────────────────────────────────────
     // Throttle: пишем rotation не чаще 10 раз/сек (было 60fps)
     // Снижает паттерн детекции — выглядит как редкое обращение
-    bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
-    // Edge trigger: пишем только в момент начала стрельбы, не каждый кадр
-    // Это минимизирует количество внешних записей в память
+    // ── Silent Aim: пишем только в m_CurrentAimRotation (пуля) ────────
+    // Камера НЕ двигается — выглядит как обычный игрок
+    // Пуля летит в цель независимо от куда смотрит камера
+    // Пишем только в момент нажатия кнопки стрельбы (edge)
     static bool _prevFire = false;
-    bool fireEdge = isFire && !_prevFire; // true только в первый кадр выстрела
+    bool _fireEdge = isFire && !_prevFire;
     _prevFire = isFire;
-    bool doAim = (aimTrigger == 0) ? shouldAim  // Always: каждый кадр
-                                   : fireEdge;   // Shooting: только на edge
-    if (isAimbot && matchReady && isVaildPtr(bestTarget) && doAim) {
+    bool shouldAim = (aimTrigger==0) ? true : _fireEdge;
+    if (isAimbot && matchReady && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
         else if (aimTarget==1) {
