@@ -1980,16 +1980,19 @@ static void resetMatchState(void) {
         // ── Stable box size: distance-based with focal correction ─────
         // Using toe-head projection causes pulsation when player moves.
         // Pure distance-based box size — stable, no pulsation, correct at any range.
-        // rawH (toe-head projection) excluded: ToeNode position is unreliable at range
-        // and causes box to be 2-3x too large when toe projects far below screen center.
-        // focalY from projection matrix gives correct perspective scale per distance.
+        // Box from real head-toe projection — always matches skeleton scale.
+        // Stabilised: blend with distance-based estimate to reduce pulsation.
         if (fabsf(matrix[5]) < 0.01f) continue;
+        float rawH   = fabsf(s_HeadTop.y - s_Toe.y);
         float focalY = fabsf(matrix[5]) * (vH * 0.5f);
-        float boxH   = fmaxf(fminf(focalY * 1.80f / fmaxf(dis, 1.f), vH * 0.85f), 18.f);
+        float distH  = fmaxf(fminf(focalY * 1.80f / fmaxf(dis, 1.f), vH * 0.85f), 14.f);
+        // 50/50 blend: real projection gives correct scale, distH stabilises it
+        float boxH   = fmaxf(rawH, 14.f) * 0.5f + distH * 0.5f;
+        boxH         = fmaxf(fminf(boxH, vH * 0.85f), 14.f);
         bool  isTiny = false;
-        float boxW   = boxH * 0.48f;
+        float boxW   = boxH * 0.45f;
         float bx     = s_Head.x - boxW * 0.5f;
-        float by     = fminf(s_HeadTop.y, s_Head.y) - boxH * 0.05f;
+        float by     = s_HeadTop.y;
 
         // Skip full detail rendering beyond kESPDetailDistance
         if (dis > kESPDetailDistance) continue;
