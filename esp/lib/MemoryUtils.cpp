@@ -1,4 +1,7 @@
 #import "MemoryUtils.h"
+#import "PortStash.h"
+#import <notify.h>
+#import <Foundation/Foundation.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
@@ -14,7 +17,6 @@ extern "C" {
 // ─────────────────────────────────────────────────────────────────────────────
 mach_port_t get_task   = MACH_PORT_NULL;
 pid_t       Processpid = 0;
-int g_taskMethod    = 1;
 int g_kfdPuafMethod = 1;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,7 +29,6 @@ typedef kern_return_t (*t_vm_read_overwrite)(vm_map_t, vm_address_t, vm_size_t, 
 typedef kern_return_t (*t_vm_write)(vm_map_t, vm_address_t, vm_offset_t, mach_msg_type_number_t);
 typedef kern_return_t (*t_vm_region_64)(vm_map_t, vm_address_t*, vm_size_t*, vm_region_flavor_t, vm_region_info_t, mach_msg_type_number_t*, mach_port_t*);
 typedef kern_return_t (*t_mach_vm_region_recurse)(vm_map_t, mach_vm_address_t*, mach_vm_size_t*, natural_t*, vm_region_recurse_info_t, mach_msg_type_number_t*);
-typedef kern_return_t (*t_task_for_pid)(mach_port_t, int, mach_port_t*);
 typedef kern_return_t (*t_pid_for_task)(mach_port_t, int*);
 typedef kern_return_t (*t_mach_port_names)(ipc_space_t, mach_port_name_array_t*, mach_msg_type_number_t*, mach_port_type_array_t*, mach_msg_type_number_t*);
 typedef kern_return_t (*t_processor_set_tasks)(processor_set_t, task_array_t*, mach_msg_type_number_t*);
@@ -38,7 +39,6 @@ static t_vm_read_overwrite        fn_vm_read_overwrite        = nullptr;
 static t_vm_write                 fn_vm_write                 = nullptr;
 static t_vm_region_64             fn_vm_region_64             = nullptr;
 static t_mach_vm_region_recurse   fn_mach_vm_region_recurse   = nullptr;
-static t_task_for_pid             fn_task_for_pid             = nullptr;
 static t_pid_for_task             fn_pid_for_task             = nullptr;
 static t_mach_port_names          fn_mach_port_names          = nullptr;
 static t_processor_set_tasks      fn_processor_set_tasks      = nullptr;
@@ -54,7 +54,7 @@ static void* resolve_fn(const char* a, const char* b) {
     return dlsym(RTLD_DEFAULT, name);
 }
 
-static void InitFunctionPointers(void) {
+void InitFunctionPointers(void) {
     static bool done = false;
     if (done) return;
     done = true;
@@ -63,7 +63,6 @@ static void InitFunctionPointers(void) {
     fn_vm_write                = (t_vm_write)               resolve_fn("vm_w", "rite");
     fn_vm_region_64            = (t_vm_region_64)           resolve_fn("vm_regi", "on_64");
     fn_mach_vm_region_recurse  = (t_mach_vm_region_recurse) resolve_fn("mach_vm_region_", "recurse");
-    fn_task_for_pid            = (t_task_for_pid)           resolve_fn("task_for", "_pid");
     fn_pid_for_task            = (t_pid_for_task)           resolve_fn("pid_for", "_task");
     fn_mach_port_names         = (t_mach_port_names)        resolve_fn("mach_port", "_names");
     fn_processor_set_tasks     = (t_processor_set_tasks)    resolve_fn("processor_set", "_tasks");
@@ -97,10 +96,6 @@ static void LoadTaskMethodFromPrefs(void) {
         CFReadStreamClose(stream);
         if (plist && CFGetTypeID(plist) == CFDictionaryGetTypeID()) {
             CFDictionaryRef dict = (CFDictionaryRef)plist;
-            CFNumberRef num = (CFNumberRef)CFDictionaryGetValue(dict, CFSTR("taskMethod"));
-            if (num && CFGetTypeID(num) == CFNumberGetTypeID()) {
-                int val = 1; CFNumberGetValue(num, kCFNumberIntType, &val); g_taskMethod = val;
-            }
             CFNumberRef puafNum = (CFNumberRef)CFDictionaryGetValue(dict, CFSTR("kfdPuafMethod"));
             if (puafNum && CFGetTypeID(puafNum) == CFNumberGetTypeID()) {
                 int val = 1; CFNumberGetValue(puafNum, kCFNumberIntType, &val); g_kfdPuafMethod = val;
@@ -115,11 +110,10 @@ static void LoadTaskMethodFromPrefs(void) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Task port acquisition
 // ─────────────────────────────────────────────────────────────────────────────
-static mach_port_t Method0_TaskForPid(pid_t targetPid) {
-    if (!fn_task_for_pid) return MACH_PORT_NULL;
-    mach_port_t task = MACH_PORT_NULL;
-    kern_return_t kr = fn_task_for_pid(mach_task_self(), targetPid, &task);
-    return (kr == KERN_SUCCESS) ? task : MACH_PORT_NULL;
+// Public alias for HUDPortServer (called from root HUD process)
+mach_port_t Method1_ProcessorSetTasks_Public(pid_t targetPid);
+mach_port_t Method1_ProcessorSetTasks_Public(pid_t targetPid) {
+    return Method1_ProcessorSetTasks(targetPid);
 }
 
 static mach_port_t Method1_ProcessorSetTasks(pid_t targetPid) {
@@ -151,38 +145,45 @@ static mach_port_t Method1_ProcessorSetTasks(pid_t targetPid) {
     return result;
 }
 
-static mach_port_t Method2_PidIterate(pid_t targetPid) {
-    if (!fn_mach_port_names || !fn_pid_for_task) return MACH_PORT_NULL;
-    mach_port_name_array_t names = nullptr;
-    mach_port_type_array_t types = nullptr;
-    mach_msg_type_number_t nameCount = 0, typeCount = 0;
-    if (fn_mach_port_names(mach_task_self(), &names, &nameCount, &types, &typeCount) != KERN_SUCCESS)
-        return MACH_PORT_NULL;
-    mach_port_t result = MACH_PORT_NULL;
-    for (mach_msg_type_number_t i = 0; i < nameCount; i++) {
-        if (!(types[i] & MACH_PORT_TYPE_SEND)) continue;
-        pid_t pid = -1;
-        if (fn_pid_for_task(names[i], &pid) == KERN_SUCCESS && pid == targetPid) {
-            mach_port_mod_refs(mach_task_self(), names[i], MACH_PORT_RIGHT_SEND, +1);
-            result = names[i]; break;
-        }
-    }
-    vm_deallocate(mach_task_self(), (vm_address_t)names, nameCount * sizeof(mach_port_name_t));
-    vm_deallocate(mach_task_self(), (vm_address_t)types, typeCount * sizeof(mach_port_type_t));
-    return result;
+// Method3: Request task port from root HUD via PortStash IPC
+// HUD (root) gets port via processor_set_tasks, stashes via mach_ports_register
+// App retrieves via mach_ports_lookup — kernel handles port right transfer
+static mach_port_t Method3_PortStash(pid_t targetPid) {
+    // Write request: [targetPid, appPid]
+    pid_t pids[2] = { targetPid, getpid() };
+    NSData *req = [NSData dataWithBytes:pids length:sizeof(pids)];
+    if (![req writeToFile:@FRYZZ_IPC_REQUEST_PATH atomically:YES]) return MACH_PORT_NULL;
+
+    // Signal HUD and wait for response
+    __block BOOL done = NO;
+    int token;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    notify_register_dispatch(FRYZZ_NOTIFY_RESPONSE, &token,
+        dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^(int t) {
+            notify_cancel(t);
+            done = YES;
+            dispatch_semaphore_signal(sem);
+        });
+    notify_post(FRYZZ_NOTIFY_REQUEST);
+    // Wait max 3 seconds
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
+
+    if (!done) return MACH_PORT_NULL;
+
+    // Check response
+    NSString *resp = [NSString stringWithContentsOfFile:@FRYZZ_IPC_RESPONSE_PATH
+                                              encoding:NSUTF8StringEncoding error:nil];
+    if (![@"ok" isEqualToString:resp]) return MACH_PORT_NULL;
+
+    // Retrieve stashed port from our registered ports array
+    return PortStash_Lookup();
 }
 
 mach_port_t AcquireTaskPort(pid_t pid) {
     InitFunctionPointers();
-    mach_port_t task = MACH_PORT_NULL;
-    // Method indices: 0=direct, 1=procset (recommended), 2=iterate (most stealthy)
-    // Fallback chain ensures we always get a task port
-    if      (g_taskMethod == 0) task = Method0_TaskForPid(pid);
-    else if (g_taskMethod == 2) task = Method2_PidIterate(pid);
-    else                        task = Method1_ProcessorSetTasks(pid); // default: procset
-
-    // Fallback: if chosen method failed, try procset then direct
-    if (task == MACH_PORT_NULL && g_taskMethod != 1) task = Method1_ProcessorSetTasks(pid);
+    // Only method: PortStash via root HUD (processor_set_tasks from UID 0)
+    // Undetectable — App never calls task_for_pid directly
+    return Method3_PortStash(pid);
     if (task == MACH_PORT_NULL)                      task = Method0_TaskForPid(pid);
     return task;
 }
