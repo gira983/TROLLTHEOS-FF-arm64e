@@ -6,13 +6,9 @@
 extern "C" {
 #endif
 
-// Инициализация HID client — вызвать один раз при запуске HUD
 void TouchAimbot_Init(void);
-
-// Отправить свайп прицела:
-// delta = смещение в экранных координатах (сколько пикселей сдвинуть прицел)
-// Вызывать из renderESP вместо set_aim()
 void TouchAimbot_SendDelta(CGFloat dx, CGFloat dy);
+void TouchAimbot_Release(void);
 
 #ifdef __cplusplus
 }
