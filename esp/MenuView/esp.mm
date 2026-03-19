@@ -115,6 +115,15 @@ static float aimSensX = 1.0f;     // Aim axis X sensitivity multiplier
 static float aimSensY = 1.0f;     // Aim axis Y sensitivity multiplier
 static bool isStreamerMode = NO;   // Stream Proof
 
+// ── Новые фичи из дампа ──────────────────────────────────────────
+static bool isSpeedHack   = NO;   // Speed @ 0x488
+static bool isNoAngle     = NO;   // no angle limit prism 0xD04/0xD08
+static bool isLockFire    = NO;   // lockFire врагам @ 0x1A00
+static bool isLockMove    = NO;   // LockMove врагам @ 0x19E0
+static bool isFlyUp       = NO;   // FlyUPDistance @ 0x1A44
+static float g_speedValue = 12.0f;  // default: ~2x normal speed
+static float g_flyValue   = 8.0f;   // default fly height
+
 
 @interface CustomSwitch : UIControl
 @property (nonatomic, assign, getter=isOn) BOOL on;
@@ -1226,11 +1235,22 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [settingTabContainer addSubview:cHdr];
     cy += 32;
 
-    // PATCHES
+    // ── HACKS ─────────────────────────────────────────────────────
+    UIView *cSec0 = [self makeSectionHeaderWithTitle:@"HACKS" atY:cy width:cW];
+    [settingTabContainer addSubview:cSec0]; cy += 18;
 
-    // Speed — single toggle button
-    // First ON: searches addresses then patches. Subsequent ON: reuses cached addresses.
-    // OFF: restores original values. Cache cleared on game restart automatically.
+    struct { NSString *title; SEL action; } hackRows[] = {
+        { @"Speed",          @selector(toggleSpeedHack:)  },
+        { @"No Angle Limit", @selector(toggleNoAngle:)    },
+        { @"Lock Enemy Fire",@selector(toggleLockFire:)   },
+        { @"Freeze Enemies", @selector(toggleLockMove:)   },
+        { @"High Jump",      @selector(toggleFlyUp:)      },
+    };
+    for (int i = 0; i < 5; i++) {
+        UIView *row = [self makeCheckRowWithTitle:hackRows[i].title badge:nil badgeColor:nil
+                            atY:cy width:cW initialValue:NO action:hackRows[i].action];
+        [settingTabContainer addSubview:row]; cy += 26;
+    }
 
     cy += 4;
     UIView *cSec2 = [self makeSectionHeaderWithTitle:@"PRIVACY" atY:cy width:cW];
@@ -1499,6 +1519,13 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
 // ── Value scan helper ────────────────────────────────────────────────
 
+// ── Новые фичи из дампа ──────────────────────────────────────────
+- (void)toggleSpeedHack:(CustomSwitch *)sender { isSpeedHack = sender.isOn; }
+- (void)toggleNoAngle:(CustomSwitch *)sender   { isNoAngle   = sender.isOn; }
+- (void)toggleLockFire:(CustomSwitch *)sender  { isLockFire  = sender.isOn; }
+- (void)toggleLockMove:(CustomSwitch *)sender  { isLockMove  = sender.isOn; }
+- (void)toggleFlyUp:(CustomSwitch *)sender     { isFlyUp     = sender.isOn; }
+
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
     void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, &kSegHandlerKey);
@@ -1757,18 +1784,20 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    // Silent aim через lockUpdateRotation:
-    // 1. Блокируем игровое обновление rotation (0x19F0 = true)
-    // 2. Пишем целевой rotation в m_CurrentAimRotation (0x172C)
-    // 3. Камера (0x53C) НЕ меняется — выглядит нормально для сервера
-    WriteAddr<bool>(player + 0x19F0, true);         // lockUpdateRotation = true
-    WriteAddr<Quaternion>(player + 0x172C, rotation); // пуля летит в цель
-    // Разблокируем через 50мс — достаточно для одной очереди
-    uint64_t playerCopy = player;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC),
-                   dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        WriteAddr<bool>(playerCopy + 0x19F0, false); // lockUpdateRotation = false
-    });
+    // Пишем в оба поля — аимбот работает стабильно
+    // Небольшой рандомный noise делает статистику человекоподобной
+    // rand offset ±0.01 рад (~0.5°) — незаметно для игрока, но меняет паттерн
+    static uint32_t _seed = 12345;
+    _seed = _seed * 1664525 + 1013904223; // LCG random
+    float noise = ((_seed & 0xFF) / 255.0f - 0.5f) * 0.02f; // ±0.01
+    // Добавляем noise к rotation через небольшое смещение вектора
+    Quaternion noisy = rotation;
+    noisy.x += noise;
+    noisy.y += noise * 0.5f;
+    float len = sqrtf(noisy.x*noisy.x + noisy.y*noisy.y + noisy.z*noisy.z + noisy.w*noisy.w);
+    if (len > 0.001f) { noisy.x/=len; noisy.y/=len; noisy.z/=len; noisy.w/=len; }
+    WriteAddr<Quaternion>(player + OFF_ROTATION, noisy); // 0x53C камера
+    WriteAddr<Quaternion>(player + 0x172C,       noisy); // 0x172C пуля
 }
 
 bool get_IsFiring(uint64_t player) {
@@ -1868,6 +1897,23 @@ static void resetMatchState(void) {
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
 
+    // ── Фичи для локального игрока ───────────────────────────────
+    if (isSpeedHack) {
+        // Speed @ 0x488 — float, обычная скорость ~6.0
+        WriteAddr<float>(myPawnObject + 0x488, g_speedValue);
+    }
+    if (isNoAngle) {
+        // Убираем ограничения вертикального угла прицела
+        WriteAddr<float>(myPawnObject + 0xD04, -90.0f); // m_MinAngleX
+        WriteAddr<float>(myPawnObject + 0xD08,  90.0f); // m_MaxAngleX
+        WriteAddr<float>(myPawnObject + 0x1408, -90.0f); // minAngleInCreep
+        WriteAddr<float>(myPawnObject + 0x140C,  90.0f); // maxAngleInCreep
+    }
+    if (isFlyUp) {
+        // Увеличиваем высоту прыжка/полёта
+        WriteAddr<float>(myPawnObject + 0x1A44, g_flyValue);
+    }
+
 
     uint64_t playerList = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
     uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
@@ -1942,6 +1988,17 @@ static void resetMatchState(void) {
         // Нокнутый — прямые field reads из IL2CPP дампа:
         bool isKnocked = ReadAddr<bool>(PawnObject + 0xA0)
                       || ReadAddr<bool>(PawnObject + 0x1110);
+
+        // ── Фичи для врагов ──────────────────────────────────────────
+        if (isLockFire) {
+            // Блокируем стрельбу врага
+            WriteAddr<bool>(PawnObject + 0x1A00, true);  // lockFire
+        }
+        if (isLockMove) {
+            // Замораживаем движение врага
+            WriteAddr<bool>(PawnObject + 0x19E0, true);  // LockMove
+            WriteAddr<bool>(PawnObject + 0x19D8, true);  // LockInput
+        }
 
         // Читаем голову — для дистанции и aimbot
         uint64_t headNode = getHead(PawnObject);
