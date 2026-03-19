@@ -2178,10 +2178,12 @@ static void resetMatchState(void) {
         // Distance-based formula is stable: boxH = focalY * playerH / dis
         // focalY = matrix[5] * vH/2  (extracted from projection matrix)
         // Player height ~1.8m in FF world units.
+        // Guard: matrix[5]=0 means projection matrix not yet valid — skip
+        if (fabsf(matrix[5]) < 0.01f) continue;
         float focalY    = fabsf(matrix[5]) * (vH * 0.5f);
         float playerH   = 1.80f;  // metres
         float boxH_dist = fmaxf(fminf(focalY * playerH / fmaxf(dis, 0.5f), vH * 0.85f), 14.f);
-        // Blend with projection to handle non-standard FOVs: 70% distance, 30% projection
+        // Blend with projection: 70% distance-based (stable), 30% real projection
         float rawH      = fabsf(s_HeadTop.y - s_Toe.y);
         float boxH      = boxH_dist * 0.7f + fmaxf(rawH, 10.f) * 0.3f;
         boxH            = fmaxf(fminf(boxH, vH * 0.85f), 14.f);
@@ -2263,15 +2265,9 @@ static void resetMatchState(void) {
                 float HP_x = s_Hip.x,  HP_y = s_Hip.y;
                 float HD_x = s_Head.x,  HD_y = s_Head.y;
 
-                // ── SPINE top = midpoint Head→Neck, bottom = Hip ────────
-                // ── SPINE: Head → Neck → Chest → Hip (4 точки) ──────
-                // Chest = 50% между Neck и Hip
-                float chest_x = (NK_x + HP_x) * 0.5f;
-                float chest_y = (NK_y + HP_y) * 0.5f;
-
+                // ── SPINE: Head → Neck → Hip ─────────────────────────
                 CGPathMoveToPoint(bp,nil,HD_x, HD_y);
                 CGPathAddLineToPoint(bp,nil,NK_x, NK_y);
-                CGPathAddLineToPoint(bp,nil,chest_x, chest_y);
                 CGPathAddLineToPoint(bp,nil,HP_x, HP_y);
 
                 // ── CLAVICLES: Neck → LS и Neck → RS ─────────────────
@@ -2290,30 +2286,16 @@ static void resetMatchState(void) {
                 CGPathAddLineToPoint(bp,nil,RE_x, RE_y);
                 CGPathAddLineToPoint(bp,nil,RH_x, RH_y);
 
-                // ── РЁБРА: chest → LS и chest → RS ───────────────────
-                CGPathMoveToPoint(bp,nil,chest_x, chest_y);
-                CGPathAddLineToPoint(bp,nil,LS_x, LS_y);
-                CGPathMoveToPoint(bp,nil,chest_x, chest_y);
-                CGPathAddLineToPoint(bp,nil,RS_x, RS_y);
-
-                // ── PELVIS разведение ─────────────────────────────────
+                // ── PELVIS + LEGS ─────────────────────────────────────
                 float shoulderSpan = fabsf(RS_x - LS_x);
                 float hipOffset    = fmaxf(shoulderSpan * 0.38f, boxW * 0.12f);
                 float hipL_x = HP_x - hipOffset;
                 float hipR_x = HP_x + hipOffset;
                 if (LK_x > RK_x) { float t = hipL_x; hipL_x = hipR_x; hipR_x = t; }
 
-                // Горизонтальная линия таза
                 CGPathMoveToPoint(bp,nil,hipL_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,hipR_x, HP_y);
 
-                // Боковые линии: плечо → бедро (формируют торс)
-                CGPathMoveToPoint(bp,nil,LS_x, LS_y);
-                CGPathAddLineToPoint(bp,nil,hipL_x, HP_y);
-                CGPathMoveToPoint(bp,nil,RS_x, RS_y);
-                CGPathAddLineToPoint(bp,nil,hipR_x, HP_y);
-
-                // ── LEGS: hipL/R → Knee → Foot ───────────────────────
                 CGPathMoveToPoint(bp,nil,hipL_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,LK_x, LK_y);
                 CGPathAddLineToPoint(bp,nil,LF_x, LF_y);
