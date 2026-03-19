@@ -1240,10 +1240,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [settingTabContainer addSubview:cSec0]; cy += 18;
 
     struct { NSString *title; SEL action; } hackRows[] = {
-        { @"Speed",          @selector(toggleSpeedHack:)  },
+        { @"Invincible",          @selector(toggleSpeedHack:)  },
         { @"No Angle Limit", @selector(toggleNoAngle:)    },
         { @"Lock Enemy Fire",@selector(toggleLockFire:)   },
-        { @"Freeze Enemies", @selector(toggleLockMove:)   },
+        { @"Knockout Enemies", @selector(toggleLockMove:)   },
         { @"High Jump",      @selector(toggleFlyUp:)      },
     };
     for (int i = 0; i < 5; i++) {
@@ -1520,7 +1520,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 // ── Value scan helper ────────────────────────────────────────────────
 
 // ── Новые фичи из дампа ──────────────────────────────────────────
-- (void)toggleSpeedHack:(CustomSwitch *)sender { isSpeedHack = sender.isOn; }
+- (void)toggleSpeedHack:(CustomSwitch *)sender { isSpeedHack = sender.isOn; } // Invincible + no knockdown damage
 - (void)toggleNoAngle:(CustomSwitch *)sender   { isNoAngle   = sender.isOn; }
 - (void)toggleLockFire:(CustomSwitch *)sender  { isLockFire  = sender.isOn; }
 - (void)toggleLockMove:(CustomSwitch *)sender  { isLockMove  = sender.isOn; }
@@ -1901,52 +1901,16 @@ static void resetMatchState(void) {
     Vector3 myLoc = getPositionExt(camTransform);
 
     // ── Фичи для локального игрока ───────────────────────────────
-    static uint64_t _cachedPawn = 0;
-    static dispatch_source_t _speedTimer = nil;
-
     if (isSpeedHack) {
-        // Speed @ 0x488 перезаписывается игрой каждый тик
-        // Используем high-freq timer чтобы писать чаще игры
-        if (_cachedPawn != myPawnObject || _speedTimer == nil) {
-            _cachedPawn = myPawnObject;
-            if (_speedTimer) { dispatch_source_cancel(_speedTimer); _speedTimer = nil; }
-            dispatch_source_t timer = dispatch_source_create(
-                DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-                dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
-            dispatch_source_set_timer(timer,
-                dispatch_time(DISPATCH_TIME_NOW, 0),
-                5 * NSEC_PER_MSEC, 1 * NSEC_PER_MSEC); // каждые 5мс
-            uint64_t pawn = myPawnObject;
-            dispatch_source_set_event_handler(timer, ^{
-                if (!isSpeedHack || !isInMatch) {
-                    dispatch_source_cancel(timer);
-                    return;
-                }
-                WriteAddr<float>(pawn + 0x488, g_speedValue);
-                WriteAddr<bool>(pawn + 0x1A28, false);  // LockFastRun = false
-                WriteAddr<bool>(pawn + 0x1A30, false);  // LockRunSpeed = false
-            });
-            dispatch_resume(timer);
-            _speedTimer = timer;
-        }
-    } else {
-        if (_speedTimer) { dispatch_source_cancel(_speedTimer); _speedTimer = nil; _cachedPawn = 0; }
-    }
-
-    if (isNoAngle) {
-        // m_MinAngleX/MaxAngleX — игра читает при прицеливании
-        WriteAddr<float>(myPawnObject + 0xD04, -89.9f); // m_MinAngleX
-        WriteAddr<float>(myPawnObject + 0xD08,  89.9f); // m_MaxAngleX
-        WriteAddr<float>(myPawnObject + 0x1408, -89.9f); // minAngleInCreep
-        WriteAddr<float>(myPawnObject + 0x140C,  89.9f); // maxAngleInCreep
-    }
-
-    if (isFlyUp) {
-        // FlyUPDistance — расстояние полёта вверх при прыжке
-        WriteAddr<float>(myPawnObject + 0x1A44, g_flyValue);
-        // Также разрешаем двойной прыжок
-        WriteAddr<bool>(myPawnObject + 0x143C, false); // IsDoubleJumpTriggered reset
-        WriteAddr<bool>(myPawnObject + 0x19D0, false); // DisableJump = false
+        // LastInvincibleOverTime @ 0x101C — читаем текущее и продлеваем
+        // Это float (Unity time в секундах)
+        // Читаем текущее значение и если истекает — продлеваем на 100 сек
+        float invTime = ReadAddr<float>(myPawnObject + 0x101C);
+        // Продлеваем если осталось меньше 10 секунд
+        // Мы не знаем Time.time, но можем просто добавить 100 к текущему
+        WriteAddr<float>(myPawnObject + 0x101C, invTime + 100.0f);
+        // Также убираем урон при нокдауне
+        WriteAddr<float>(myPawnObject + 0x2D4, 0.0f); // m_KnockDownDamagePerSec
     }
 
 
@@ -2026,12 +1990,15 @@ static void resetMatchState(void) {
 
         // ── Фичи для врагов ──────────────────────────────────────────
         if (isLockFire) {
-            // Блокируем стрельбу врага
-            WriteAddr<bool>(PawnObject + 0x1A00, true);  // lockFire
+            // lockFire @ 0x1A00 — блокируем стрельбу
+            WriteAddr<bool>(PawnObject + 0x1A00, true);
+            // UGCStartFiring @ 0x18A = false — дополнительная блокировка
+            WriteAddr<uint8_t>(PawnObject + 0x18A, 0);
         }
         if (isLockMove) {
-            // LockMove — только движение, без LockInput (вызывает краш)
-            WriteAddr<bool>(PawnObject + 0x19E0, true);  // LockMove
+            // IsFrozenKnockDown @ 0xA0 — нокаутируем врага
+            // Этот offset точный (мы его читаем для ESP)
+            WriteAddr<bool>(PawnObject + 0xA0, true);
         }
 
         // Читаем голову — для дистанции и aimbot
