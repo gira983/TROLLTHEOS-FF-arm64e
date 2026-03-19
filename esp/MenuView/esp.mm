@@ -2276,14 +2276,33 @@ static void resetMatchState(void) {
                 CGPathAddLineToPoint(bp,nil,RE_x, RE_y);
                 CGPathAddLineToPoint(bp,nil,RH_x, RH_y);
 
-                // ── LEGS: Hip → Knee → Foot ───────────────────────────
-                // Прямо от Hip joint — без коррекций и баров.
-                // Колени 0x5F0/0x5F8, стопы 0x600/0x608 — реальные joints.
-                CGPathMoveToPoint(bp,nil,HP_x, HP_y);
+                // ── LEGS: Hip → Knee → Foot с разведением ────────────
+                // HipNode — центр таза. Для реалистичного скелетона
+                // ноги стартуют из точек ±40% ширины плеч от Hip.
+                // Это даёт V-форму (разведённые бёдра) при взгляде спереди
+                // и корректно работает сбоку/сзади т.к. привязано к плечам.
+                float shoulderSpan = fabsf(RS_x - LS_x);
+                float hipOffset    = shoulderSpan * 0.35f; // ~35% ширины плеч
+                // Определяем левую/правую стороны бёдер по позиции колен
+                float hipL_x = HP_x - hipOffset;
+                float hipR_x = HP_x + hipOffset;
+                // Если левое колено правее правого — стороны поменялись (вид сзади)
+                if (LK_x > RK_x) {
+                    hipL_x = HP_x + hipOffset;
+                    hipR_x = HP_x - hipOffset;
+                }
+
+                // Горизонтальная линия бёдер (соединяет точки старта ног)
+                CGPathMoveToPoint(bp,nil,hipL_x, HP_y);
+                CGPathAddLineToPoint(bp,nil,hipR_x, HP_y);
+
+                // Левая нога: hipL → LKnee → LFoot
+                CGPathMoveToPoint(bp,nil,hipL_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,LK_x, LK_y);
                 CGPathAddLineToPoint(bp,nil,LF_x, LF_y);
 
-                CGPathMoveToPoint(bp,nil,HP_x, HP_y);
+                // Правая нога: hipR → RKnee → RFoot
+                CGPathMoveToPoint(bp,nil,hipR_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,RK_x, RK_y);
                 CGPathAddLineToPoint(bp,nil,RF_x, RF_y);
             }
