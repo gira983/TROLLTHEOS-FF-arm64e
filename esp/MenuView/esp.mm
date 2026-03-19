@@ -2280,21 +2280,17 @@ static void resetMatchState(void) {
                 CGPathMoveToPoint(bp,nil,pLX, HP_y);
                 CGPathAddLineToPoint(bp,nil,pRX, HP_y);
 
-                // ── LEGS: Hip → Knee → Foot (direct, no bar dependency) ──
-                // Left leg — determine correct side by knee X vs hip X
-                // If LK is left of RK → left leg uses pLX, else pRX
-                float useLX = (LK_x <= RK_x) ? pLX : pRX;
-                float useRX = (LK_x <= RK_x) ? pRX : pLX;
-
-                CGPathMoveToPoint(bp,nil,useLX, HP_y);
+                // ── LEGS: directly Hip → Knee → Foot ─────────────────
+                // No pelvis bar dependency — each leg goes straight from
+                // Hip pivot to its own knee and foot.
+                // This works correctly from any camera angle (front/back/side).
+                CGPathMoveToPoint(bp,nil,HP_adj_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,LK_x, LK_y);
                 CGPathAddLineToPoint(bp,nil,LF_x, LF_y);
 
-                CGPathMoveToPoint(bp,nil,useRX, HP_y);
+                CGPathMoveToPoint(bp,nil,HP_adj_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,RK_x, RK_y);
                 CGPathAddLineToPoint(bp,nil,RF_x, RF_y);
-                // also connect corrected hip to spine bottom
-                // (visual fix: draw Hip→adjHip gap so spine connects pelvis bar)
             }
             skip_skeleton:;
         }
