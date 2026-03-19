@@ -2189,7 +2189,7 @@ static void resetMatchState(void) {
     CFAbsoluteTime _nowAim = CFAbsoluteTimeGetCurrent();
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
     if (isAimbot && matchReady && isVaildPtr(bestTarget) && shouldAim
-        && (_nowAim - _lastAimWrite) >= 0.1) {  // макс 10 раз/сек
+        && (_nowAim - _lastAimWrite) >= (1.0/30.0)) {
         _lastAimWrite = _nowAim;
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
@@ -2201,7 +2201,15 @@ static void resetMatchState(void) {
                 : hPos;
         }
         else ap = getPositionExt(getHip(bestTarget));
-        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
+
+        // Плавное наведение через slerp — убирает мгновенный snap
+        // aimSpeed контролирует скорость: 1.0 = мгновенно, 0.1 = очень плавно
+        Quaternion targetRot = GetRotationToLocation(ap, 0.1f, myLoc);
+        Quaternion currentRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
+        // Slerp: смешиваем текущий угол с целевым
+        float t = fminf(aimSpeed * 0.3f, 1.0f); // плавность зависит от aimSpeed
+        Quaternion smoothRot = Quaternion::Slerp(currentRot, targetRot, t);
+        set_aim(myPawnObject, smoothRot);
     }
 
 
