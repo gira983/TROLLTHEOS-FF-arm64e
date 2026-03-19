@@ -18,9 +18,22 @@ typedef uint32_t IOHIDEventOptionBits;
 typedef IOHIDEventSystemClientRef (*t_IOHIDEventSystemClientCreate)(CFAllocatorRef);
 typedef void (*t_IOHIDEventSystemClientDispatchEvent)(IOHIDEventSystemClientRef, IOHIDEventRef);
 typedef IOHIDEventRef (*t_IOHIDEventCreateDigitizerFingerEvent)(
-    CFAllocatorRef, uint64_t, uint32_t, uint32_t, uint32_t,
-    IOHIDFloat, IOHIDFloat, IOHIDFloat, IOHIDFloat, IOHIDFloat,
-    IOHIDFloat, bool, bool, IOHIDEventOptionBits);
+    CFAllocatorRef allocator,
+    uint64_t       timeStamp,
+    uint32_t       transducerType,   // kIOHIDDigitizerTransducerTypeFinger = 1
+    uint32_t       index,
+    uint32_t       identity,
+    uint32_t       eventMask,        // kIOHIDDigitizerEventTouch = 0x10
+    uint32_t       buttonMask,       // 0
+    IOHIDFloat     x,
+    IOHIDFloat     y,
+    IOHIDFloat     z,
+    IOHIDFloat     tipPressure,
+    IOHIDFloat     barrelPressure,   // 0.0
+    IOHIDFloat     twist,
+    bool           isRange,
+    bool           isTouching,
+    IOHIDEventOptionBits options);
 
 static t_IOHIDEventSystemClientCreate           fn_ClientCreate     = NULL;
 static t_IOHIDEventSystemClientDispatchEvent    fn_ClientDispatch   = NULL;
@@ -88,18 +101,20 @@ extern "C" void TouchAimbot_SendDelta(CGFloat dx, CGFloat dy) {
     if (!g_touchActive) {
         // Phase Began
         IOHIDEventRef began = fn_FingerEvent(
-            kCFAllocatorDefault, timestamp,
-            g_touchID,  // index
-            1,          // identity
-            g_touchID,  // eventMask
-            nx, ny,     // x, y (normalized)
-            0.0,        // z
-            1.0,        // pressure
-            0.0,        // twist
-            0.0,        // minorRadius
-            false,      // isRange
-            true,       // isTouching
-            0           // options (kIOHIDEventOptionNone)
+            kCFAllocatorDefault,
+            timestamp,
+            1,      // kIOHIDDigitizerTransducerTypeFinger
+            0,      // index
+            g_touchID,
+            0x10,   // kIOHIDDigitizerEventTouch
+            0,      // buttonMask
+            nx, ny, 0.0,  // x, y, z
+            1.0,    // tipPressure
+            0.0,    // barrelPressure
+            0.0,    // twist
+            false,  // isRange
+            true,   // isTouching
+            0       // options
         );
         if (began) {
             fn_ClientDispatch(g_hidClient, began);
@@ -118,10 +133,14 @@ extern "C" void TouchAimbot_SendDelta(CGFloat dx, CGFloat dy) {
     IOHIDFloat my = g_touchY / vH;
 
     IOHIDEventRef moved = fn_FingerEvent(
-        kCFAllocatorDefault, timestamp + 1000,
-        g_touchID, 1, g_touchID,
-        mx, my, 0.0, 1.0, 0.0, 0.0,
-        false, true, 1 // kIOHIDEventOptionIsAbsolute = 1
+        kCFAllocatorDefault,
+        timestamp + 1000,
+        1, 0, g_touchID,
+        0x10, 0,
+        mx, my, 0.0,
+        1.0, 0.0, 0.0,
+        false, true,
+        1  // kIOHIDEventOptionIsAbsolute
     );
     if (moved) {
         fn_ClientDispatch(g_hidClient, moved);
@@ -142,10 +161,14 @@ extern "C" void TouchAimbot_Release(void) {
     IOHIDFloat ny = g_touchY / vH;
 
     IOHIDEventRef ended = fn_FingerEvent(
-        kCFAllocatorDefault, timestamp,
-        g_touchID, 1, g_touchID,
-        nx, ny, 0.0, 0.0, 0.0, 0.0,
-        false, false, 0 // isTouching = false
+        kCFAllocatorDefault,
+        timestamp,
+        1, 0, g_touchID,
+        0x10, 0,
+        nx, ny, 0.0,
+        0.0, 0.0, 0.0,
+        false, false,
+        0
     );
     if (ended) {
         fn_ClientDispatch(g_hidClient, ended);
