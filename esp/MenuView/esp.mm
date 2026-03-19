@@ -1757,7 +1757,12 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
+    // Пишем в оба поля одновременно:
+    // 0x53C = m_AimRotation      (камера)
+    // 0x172C = m_CurrentAimRotation (пуля)
+    // Расхождение между ними = детект сервером
     WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);
+    WriteAddr<Quaternion>(player + 0x172C,       rotation);
 }
 
 bool get_IsFiring(uint64_t player) {
@@ -2178,8 +2183,14 @@ static void resetMatchState(void) {
     } // end player loop
 
     // ── Aimbot apply ──────────────────────────────────────────────────
+    // Throttle: пишем rotation не чаще 10 раз/сек (было 60fps)
+    // Снижает паттерн детекции — выглядит как редкое обращение
+    static CFAbsoluteTime _lastAimWrite = 0;
+    CFAbsoluteTime _nowAim = CFAbsoluteTimeGetCurrent();
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
-    if (isAimbot && matchReady && isVaildPtr(bestTarget) && shouldAim) {
+    if (isAimbot && matchReady && isVaildPtr(bestTarget) && shouldAim
+        && (_nowAim - _lastAimWrite) >= 0.1) {  // макс 10 раз/сек
+        _lastAimWrite = _nowAim;
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
         else if (aimTarget==1) {
