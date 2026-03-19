@@ -1757,9 +1757,8 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    // Silent aim: пишем ТОЛЬКО в m_CurrentAimRotation (пуля)
-    // m_AimRotation (камера) НЕ трогаем — камера смотрит куда игрок целится
-    // Сервер видит нормальный угол камеры, пуля летит в цель
+    // Silent aim: только m_CurrentAimRotation (пуля летит в цель)
+    // m_AimRotation (камера 0x53C) не трогаем — камера смотрит как обычно
     WriteAddr<Quaternion>(player + 0x172C, rotation);
 }
 
@@ -2187,10 +2186,7 @@ static void resetMatchState(void) {
     // Камера НЕ двигается — выглядит как обычный игрок
     // Пуля летит в цель независимо от куда смотрит камера
     // Пишем только в момент нажатия кнопки стрельбы (edge)
-    static bool _prevFire = false;
-    bool _fireEdge = isFire && !_prevFire;
-    _prevFire = isFire;
-    bool shouldAim = (aimTrigger==0) ? true : _fireEdge;
+    bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
     if (isAimbot && matchReady && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
