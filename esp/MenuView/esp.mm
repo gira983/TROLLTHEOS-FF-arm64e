@@ -1258,7 +1258,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [settingTabContainer addSubview:ohkRow]; cy += 26;
     UIView *invRow   = [self makeCheckRowWithTitle:@"Invincible"      badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleInvincible:)];
     [settingTabContainer addSubview:invRow]; cy += 26;
-    UIView *grenRow  = [self makeCheckRowWithTitle:@"Inf Grenades"    badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleInfGrenades:)];
+    UIView *grenRow  = [self makeCheckRowWithTitle:@"Nuke Grenade"    badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleInfGrenades:)];
     [settingTabContainer addSubview:grenRow]; cy += 26;
 
     cy += 4;
@@ -1967,12 +1967,32 @@ static void resetMatchState(void) {
             WriteAddr<float>(attr + 0x118, 1.0f);
         }
         if (isInfGrenades) {
-            // CanGrenadeSplit = true — граната делится на много осколков
-            WriteAddr<bool>(attr + 0x264, true);
-            WriteAddr<int> (attr + 0x268, 99); // GrenadeSplitNum
+            // ── NUKE GRENADE ─────────────────────────────────────
+            WriteAddr<bool> (attr + 0x264, true);    // CanGrenadeSplit
+            WriteAddr<int>  (attr + 0x268, 50);      // GrenadeSplitNum — 50 осколков
+            WriteAddr<float>(attr + 0x26C, 0.0f);    // GrenadeSplitTime — мгновенно
+            WriteAddr<float>(attr + 0x270, 0.0f);    // SubGrenadeExplodeTime — мгновенно
+            WriteAddr<float>(attr + 0x274, 50.0f);   // GrenadeSplitVelocityFactor — разлёт
+            WriteAddr<float>(attr + 0x278, 50.0f);   // GrenadeSplitVelocityFactorForStatic
+            WriteAddr<float>(attr + 0x27C, 20.0f);   // SubGrenadeRangeScale x20 радиус
+            WriteAddr<float>(attr + 0x280, 50.0f);   // SubGrenadeDamageScale x50 урон
+            WriteAddr<float>(attr + 0x284, 5.0f);    // SubGrenadeModelScale — большой визуал
+            WriteAddr<float>(attr + 0x288, 20.0f);   // MainGrenadeRangeScale x20 радиус
+            WriteAddr<float>(attr + 0x28C, 50.0f);   // MainGrenadeDamageScale x50 урон
+            WriteAddr<float>(attr + 0x290, 5.0f);    // MainGrenadeModelScale — большой визуал
         } else {
-            WriteAddr<bool>(attr + 0x264, false);
-            WriteAddr<int> (attr + 0x268, 0);
+            WriteAddr<bool> (attr + 0x264, false);
+            WriteAddr<int>  (attr + 0x268, 0);
+            WriteAddr<float>(attr + 0x26C, 0.3f);
+            WriteAddr<float>(attr + 0x270, 0.3f);
+            WriteAddr<float>(attr + 0x274, 1.0f);
+            WriteAddr<float>(attr + 0x278, 1.0f);
+            WriteAddr<float>(attr + 0x27C, 1.0f);
+            WriteAddr<float>(attr + 0x280, 1.0f);
+            WriteAddr<float>(attr + 0x284, 1.0f);
+            WriteAddr<float>(attr + 0x288, 1.0f);
+            WriteAddr<float>(attr + 0x28C, 1.0f);
+            WriteAddr<float>(attr + 0x290, 1.0f);
         }
     }
     // ── Invincible: LastInvincibleOverTime @ 0x101C ───────────────
