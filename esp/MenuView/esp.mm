@@ -1,5 +1,6 @@
 #import "esp.h"
 #import "../lib/TouchAimbot.h"
+#import "../lib/PortStash.h"
 #import <objc/runtime.h>
 
 // Лог в файл (определён в HUDApp.mm)
@@ -20,6 +21,7 @@ static void espLog(NSString *msg) {
 #endif
 }
 #import "mahoa.h"
+#import <notify.h>
 
 // --- Obfuscated offsets (compile-time encrypted, runtime decrypted) ---
 // Player fields
@@ -1757,12 +1759,17 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    // Пишем в оба поля одновременно:
-    // 0x53C = m_AimRotation      (камера)
-    // 0x172C = m_CurrentAimRotation (пуля)
-    // Расхождение между ними = детект сервером
-    WriteAddr<Quaternion>(player + OFF_ROTATION, rotation);
-    WriteAddr<Quaternion>(player + 0x172C,       rotation);
+    // Отправляем rotation в HUD (UID 0) через IPC
+    // HUD делает vm_write — выглядит как системный процесс, не как чит
+    FryzzAimRequest req;
+    req.playerAddr = player;
+    req.x = rotation.x;
+    req.y = rotation.y;
+    req.z = rotation.z;
+    req.w = rotation.w;
+    NSData *data = [NSData dataWithBytes:&req length:sizeof(req)];
+    [data writeToFile:@FRYZZ_IPC_AIM_PATH atomically:NO]; // NO = быстрее
+    notify_post(FRYZZ_NOTIFY_AIM_WRITE);
 }
 
 bool get_IsFiring(uint64_t player) {
@@ -2185,12 +2192,15 @@ static void resetMatchState(void) {
     // ── Aimbot apply ──────────────────────────────────────────────────
     // Throttle: пишем rotation не чаще 10 раз/сек (было 60fps)
     // Снижает паттерн детекции — выглядит как редкое обращение
-    static CFAbsoluteTime _lastAimWrite = 0;
-    CFAbsoluteTime _nowAim = CFAbsoluteTimeGetCurrent();
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
-    if (isAimbot && matchReady && isVaildPtr(bestTarget) && shouldAim
-        && (_nowAim - _lastAimWrite) >= (1.0/30.0)) {
-        _lastAimWrite = _nowAim;
+    // Edge trigger: пишем только в момент начала стрельбы, не каждый кадр
+    // Это минимизирует количество внешних записей в память
+    static bool _prevFire = false;
+    bool fireEdge = isFire && !_prevFire; // true только в первый кадр выстрела
+    _prevFire = isFire;
+    bool doAim = (aimTrigger == 0) ? shouldAim  // Always: каждый кадр
+                                   : fireEdge;   // Shooting: только на edge
+    if (isAimbot && matchReady && isVaildPtr(bestTarget) && doAim) {
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
         else if (aimTarget==1) {
@@ -2201,15 +2211,7 @@ static void resetMatchState(void) {
                 : hPos;
         }
         else ap = getPositionExt(getHip(bestTarget));
-
-        // Плавное наведение через slerp — убирает мгновенный snap
-        // aimSpeed контролирует скорость: 1.0 = мгновенно, 0.1 = очень плавно
-        Quaternion targetRot = GetRotationToLocation(ap, 0.1f, myLoc);
-        Quaternion currentRot = ReadAddr<Quaternion>(myPawnObject + OFF_ROTATION);
-        // Slerp: смешиваем текущий угол с целевым
-        float t = fminf(aimSpeed * 0.3f, 1.0f); // плавность зависит от aimSpeed
-        Quaternion smoothRot = Quaternion::Slerp(currentRot, targetRot, t);
-        set_aim(myPawnObject, smoothRot);
+        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
     }
 
 
