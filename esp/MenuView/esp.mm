@@ -1757,9 +1757,18 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
 
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
-    // Silent aim: только m_CurrentAimRotation (пуля летит в цель)
-    // m_AimRotation (камера 0x53C) не трогаем — камера смотрит как обычно
-    WriteAddr<Quaternion>(player + 0x172C, rotation);
+    // Silent aim через lockUpdateRotation:
+    // 1. Блокируем игровое обновление rotation (0x19F0 = true)
+    // 2. Пишем целевой rotation в m_CurrentAimRotation (0x172C)
+    // 3. Камера (0x53C) НЕ меняется — выглядит нормально для сервера
+    WriteAddr<bool>(player + 0x19F0, true);         // lockUpdateRotation = true
+    WriteAddr<Quaternion>(player + 0x172C, rotation); // пуля летит в цель
+    // Разблокируем через 50мс — достаточно для одной очереди
+    uint64_t playerCopy = player;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC),
+                   dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        WriteAddr<bool>(playerCopy + 0x19F0, false); // lockUpdateRotation = false
+    });
 }
 
 bool get_IsFiring(uint64_t player) {
@@ -2186,8 +2195,10 @@ static void resetMatchState(void) {
     // Камера НЕ двигается — выглядит как обычный игрок
     // Пуля летит в цель независимо от куда смотрит камера
     // Пишем только в момент нажатия кнопки стрельбы (edge)
-    bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
-    if (isAimbot && matchReady && isVaildPtr(bestTarget) && shouldAim) {
+    // Silent aim: всегда активен когда враг в FOV (не зависит от isFire)
+    // OFF_FIRING offset непроверен — используем Always режим
+    bool shouldAim = isVaildPtr(bestTarget);
+    if (isAimbot && matchReady && shouldAim) {
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
         else if (aimTarget==1) {
