@@ -138,7 +138,7 @@ static mach_port_t Method1_ProcessorSetTasks(pid_t targetPid) {
 }
 
 // Public alias for HUDPortServer (called from root HUD process)
-mach_port_t Method1_ProcessorSetTasks_Public(pid_t targetPid) {
+extern "C" mach_port_t Method1_ProcessorSetTasks_Public(pid_t targetPid) {
     return Method1_ProcessorSetTasks(targetPid);
 }
 
