@@ -2255,40 +2255,35 @@ static void resetMatchState(void) {
                 float HD_x = s_Head.x,  HD_y = s_Head.y;
 
                 // ── SPINE top = midpoint Head→Neck, bottom = Hip ────────
-                // spineTop: between Head and Neck (upper chest area)
-                float spineTopX = (HD_x + NK_x) * 0.5f;
-                float spineTopY = (HD_y + NK_y) * 0.5f;
-                // Hip correction toward head center
-                float HP_adj_x = HP_x * 0.7f + HD_x * 0.3f;
+                // ── SPINE: Head → Neck → Hip (3 точки центра тела) ──
+                CGPathMoveToPoint(bp,nil,HD_x, HD_y);
+                CGPathAddLineToPoint(bp,nil,NK_x, NK_y);
+                CGPathAddLineToPoint(bp,nil,HP_x, HP_y);
 
-                // ── SPINE: spineTop → Hip ─────────────────────────────
-                CGPathMoveToPoint(bp,nil,spineTopX, spineTopY);
-                CGPathAddLineToPoint(bp,nil,HP_adj_x, HP_y);
-
-                // ── CLAVICLES: spineTop → LS, spineTop → RS ──────────
-                CGPathMoveToPoint(bp,nil,spineTopX, spineTopY);
+                // ── CLAVICLES: Neck → LS и Neck → RS ─────────────────
+                CGPathMoveToPoint(bp,nil,NK_x, NK_y);
                 CGPathAddLineToPoint(bp,nil,LS_x, LS_y);
-                CGPathMoveToPoint(bp,nil,spineTopX, spineTopY);
+                CGPathMoveToPoint(bp,nil,NK_x, NK_y);
                 CGPathAddLineToPoint(bp,nil,RS_x, RS_y);
 
-                // ── LEFT ARM: LS → LE → LH ───────────────────────────
+                // ── LEFT ARM: LS → LE → LH ────────────────────────────
                 CGPathMoveToPoint(bp,nil,LS_x, LS_y);
                 CGPathAddLineToPoint(bp,nil,LE_x, LE_y);
                 CGPathAddLineToPoint(bp,nil,LH_x, LH_y);
 
-                // ── RIGHT ARM: RS → RE → RH ──────────────────────────
+                // ── RIGHT ARM: RS → RE → RH ───────────────────────────
                 CGPathMoveToPoint(bp,nil,RS_x, RS_y);
                 CGPathAddLineToPoint(bp,nil,RE_x, RE_y);
                 CGPathAddLineToPoint(bp,nil,RH_x, RH_y);
 
-                // ── LEGS: from Hip (spine bottom), diverge like Λ ─────
-                // Left leg and right leg start from same Hip point
-                // and spread out to knees and feet — natural V-shape
-                CGPathMoveToPoint(bp,nil,HP_adj_x, HP_y);
+                // ── LEGS: Hip → Knee → Foot ───────────────────────────
+                // Прямо от Hip joint — без коррекций и баров.
+                // Колени 0x5F0/0x5F8, стопы 0x600/0x608 — реальные joints.
+                CGPathMoveToPoint(bp,nil,HP_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,LK_x, LK_y);
                 CGPathAddLineToPoint(bp,nil,LF_x, LF_y);
 
-                CGPathMoveToPoint(bp,nil,HP_adj_x, HP_y);
+                CGPathMoveToPoint(bp,nil,HP_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,RK_x, RK_y);
                 CGPathAddLineToPoint(bp,nil,RF_x, RF_y);
             }
