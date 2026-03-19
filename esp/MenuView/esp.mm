@@ -122,6 +122,8 @@ static bool isSpeedActive = NO;
 // Must persist across match start/end to allow activate/reset
 static NSMutableArray<NSNumber*> *g_speedAddrs = nil;
 static bool g_speedSearchDone = NO;   // true after searchSpeed() found addresses
+static bool g_wasAlive = NO;          // tracks local player alive→dead transition
+static int  g_myLastHP = -1;          // last known local player HP
 
 @interface CustomSwitch : UIControl
 @property (nonatomic, assign, getter=isOn) BOOL on;
@@ -1960,14 +1962,42 @@ bool get_IsFiring(uint64_t player) {
     [CATransaction commit];
 }
 
+// ── Full match-state reset (called on death, camera loss, match exit) ──
+static void resetMatchState(void) {
+    isInMatch         = NO;
+    g_speedAddrs      = nil;
+    g_speedSearchDone = NO;
+    g_wasAlive        = NO;
+    g_myLastHP        = -1;
+}
+
 - (void)renderESP {
     if (Moudule_Base == -1) return;
+
+    // ── Primary match check: CurrentMatchGame from GameFacade (dump offset 0x8) ──
+    // Non-zero only while inside a match — lobby/loading = 0
+    uint64_t currentMatchGame = getCurrentMatchGame(Moudule_Base);
+    if (!isVaildPtr(currentMatchGame)) {
+        if (isInMatch) {
+            // Just left match — full state reset
+            resetMatchState();
+            __atomic_store_n(&_validFrameCount, 0, __ATOMIC_RELAXED);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [CATransaction begin]; [CATransaction setDisableActions:YES];
+                _boneLayer.path=nil; _boxLayer.path=nil;
+                _hpBgLayer.path=nil; _hpFillLayer.path=nil; _lineLayer.path=nil;
+                for (CATextLayer *t in _textPool) t.hidden = YES;
+                [CATransaction commit];
+            });
+        }
+        return;
+    }
 
     uint64_t matchGame = getMatchGame(Moudule_Base);
     uint64_t camera    = CameraMain(matchGame);
     if (!isVaildPtr(camera)) {
-        isInMatch = NO;
-        __atomic_store_n(&_validFrameCount, 0, __ATOMIC_RELAXED); // reset counter
+        resetMatchState();
+        __atomic_store_n(&_validFrameCount, 0, __ATOMIC_RELAXED);
         dispatch_async(dispatch_get_main_queue(), ^{
             [CATransaction begin]; [CATransaction setDisableActions:YES];
             _boneLayer.path=nil; _boxLayer.path=nil;
@@ -1991,6 +2021,17 @@ bool get_IsFiring(uint64_t player) {
 
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
+
+    // ── Death detection & match-state cleanup ────────────────────────
+    int myHP = get_CurHP(myPawnObject);
+    BOOL iAmAlive = (myHP > 0);
+    if (g_wasAlive && !iAmAlive && g_myLastHP > 0) {
+        // alive→dead: full state reset + re-validation
+        resetMatchState();
+        __atomic_store_n(&_validFrameCount, 0, __ATOMIC_RELAXED);
+    }
+    g_wasAlive = iAmAlive;
+    g_myLastHP = myHP;
 
     uint64_t playerList = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
     uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
@@ -2077,7 +2118,7 @@ bool get_IsFiring(uint64_t player) {
                 Vector3 hPos = getPositionExt(getHead(PawnObject));
                 uint64_t hipN = getHip(PawnObject);
                 Vector3 neckAp = isVaildPtr(hipN)
-                    ? hPos + (getPositionExt(hipN) - hPos) * 0.25f
+                    ? hPos + (getPositionExt(hipN) - hPos) * 0.30f
                     : hPos;
                 ap = neckAp;
             }
@@ -2148,7 +2189,7 @@ bool get_IsFiring(uint64_t player) {
                 // Neck = 20% from Head toward Hip (no reliable Neck bone in this build)
                 uint64_t hpNodeForNeck = getHip(PawnObject);
                 Vector3 neckWorld = isVaildPtr(hpNodeForNeck)
-                    ? HeadPos + (getPositionExt(hpNodeForNeck) - HeadPos) * 0.20f
+                    ? HeadPos + (getPositionExt(hpNodeForNeck) - HeadPos) * 0.30f
                     : HeadPos;
                 Vector3 s_Neck = WorldToScreen(neckWorld, matrix, vW, vH);
                 (void)nkNode; // nkNode not used — Neck is interpolated
@@ -2195,8 +2236,11 @@ bool get_IsFiring(uint64_t player) {
                 CGPathAddLineToPoint(bp,nil,NK_x, NK_y);
 
                 // ── SPINE: Neck → Hip ─────────────────────────────────
+                // HipNode pivot is offset backward in world — correct X toward feet midpoint
+                float feetMidX = (LF_x + RF_x) * 0.5f;
+                float HP_adj_x = HP_x * 0.35f + feetMidX * 0.65f;
                 CGPathMoveToPoint(bp,nil,NK_x, NK_y);
-                CGPathAddLineToPoint(bp,nil,HP_x, HP_y);
+                CGPathAddLineToPoint(bp,nil,HP_adj_x, HP_y);
 
                 // ── CLAVICLES: Neck → LS, Neck → RS ──────────────────
                 CGPathMoveToPoint(bp,nil,NK_x, NK_y);
@@ -2215,11 +2259,10 @@ bool get_IsFiring(uint64_t player) {
                 CGPathAddLineToPoint(bp,nil,RH_x, RH_y);
 
                 // ── PELVIS BAR ────────────────────────────────────────
-                // Width derived from shoulders (stable, not from knees)
                 float sholderHalfW = fabsf(RS_x - LS_x) * 0.5f;
                 float pelvisHalfW  = MAX(sholderHalfW * 0.6f, boxW * 0.15f);
-                float pLX = HP_x - pelvisHalfW;
-                float pRX = HP_x + pelvisHalfW;
+                float pLX = HP_adj_x - pelvisHalfW;
+                float pRX = HP_adj_x + pelvisHalfW;
                 CGPathMoveToPoint(bp,nil,pLX, HP_y);
                 CGPathAddLineToPoint(bp,nil,pRX, HP_y);
 
@@ -2236,6 +2279,8 @@ bool get_IsFiring(uint64_t player) {
                 CGPathMoveToPoint(bp,nil,useRX, HP_y);
                 CGPathAddLineToPoint(bp,nil,RK_x, RK_y);
                 CGPathAddLineToPoint(bp,nil,RF_x, RF_y);
+                // also connect corrected hip to spine bottom
+                // (visual fix: draw Hip→adjHip gap so spine connects pelvis bar)
             }
             skip_skeleton:;
         }
@@ -2339,7 +2384,7 @@ bool get_IsFiring(uint64_t player) {
             Vector3 hPos = getPositionExt(getHead(bestTarget));
             uint64_t hipN = getHip(bestTarget);
             ap = isVaildPtr(hipN)
-                ? hPos + (getPositionExt(hipN) - hPos) * 0.25f
+                ? hPos + (getPositionExt(hipN) - hPos) * 0.30f
                 : hPos;
         }
         else                   ap = getPositionExt(getHip(bestTarget));
