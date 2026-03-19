@@ -2254,19 +2254,21 @@ static void resetMatchState(void) {
                 float HP_x = s_Hip.x,  HP_y = s_Hip.y;
                 float HD_x = s_Head.x,  HD_y = s_Head.y;
 
-                // ── NECK start (no head circle) ──────────────────────
-                // Head joint connects directly to Neck
-
-                // ── SPINE: Neck → Hip ────────────────────────────────
-                // Small correction: blend Hip X slightly toward head X
+                // ── SPINE top = midpoint Head→Neck, bottom = Hip ────────
+                // spineTop: between Head and Neck (upper chest area)
+                float spineTopX = (HD_x + NK_x) * 0.5f;
+                float spineTopY = (HD_y + NK_y) * 0.5f;
+                // Hip correction toward head center
                 float HP_adj_x = HP_x * 0.7f + HD_x * 0.3f;
-                CGPathMoveToPoint(bp,nil,NK_x, NK_y);
+
+                // ── SPINE: spineTop → Hip ─────────────────────────────
+                CGPathMoveToPoint(bp,nil,spineTopX, spineTopY);
                 CGPathAddLineToPoint(bp,nil,HP_adj_x, HP_y);
 
-                // ── CLAVICLES: Neck → LS, Neck → RS ──────────────────
-                CGPathMoveToPoint(bp,nil,NK_x, NK_y);
+                // ── CLAVICLES: spineTop → LS, spineTop → RS ──────────
+                CGPathMoveToPoint(bp,nil,spineTopX, spineTopY);
                 CGPathAddLineToPoint(bp,nil,LS_x, LS_y);
-                CGPathMoveToPoint(bp,nil,NK_x, NK_y);
+                CGPathMoveToPoint(bp,nil,spineTopX, spineTopY);
                 CGPathAddLineToPoint(bp,nil,RS_x, RS_y);
 
                 // ── LEFT ARM: LS → LE → LH ───────────────────────────
@@ -2279,7 +2281,9 @@ static void resetMatchState(void) {
                 CGPathAddLineToPoint(bp,nil,RE_x, RE_y);
                 CGPathAddLineToPoint(bp,nil,RH_x, RH_y);
 
-                // ── LEGS: Hip → Knee → Foot (no pelvis bar) ─────────
+                // ── LEGS: from Hip (spine bottom), diverge like Λ ─────
+                // Left leg and right leg start from same Hip point
+                // and spread out to knees and feet — natural V-shape
                 CGPathMoveToPoint(bp,nil,HP_adj_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,LK_x, LK_y);
                 CGPathAddLineToPoint(bp,nil,LF_x, LF_y);
