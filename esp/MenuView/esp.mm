@@ -1,4 +1,5 @@
 #import "esp.h"
+#import "../lib/TouchAimbot.h"
 #import <objc/runtime.h>
 
 // Лог в файл (определён в HUDApp.mm)
@@ -539,6 +540,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         // value-scan features инициализируются при первом включении
 
         [self SetUpBase];
+        TouchAimbot_Init();
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
         // 30fps для ESP: плавно и не жрёт FPS игры
         // _espBusy гарантирует что тяжёлый кадр не накапливается
@@ -1977,27 +1979,17 @@ static void resetMatchState(void) {
 
         // ── Stable box size: distance-based with focal correction ─────
         // Using toe-head projection causes pulsation when player moves.
-        // Distance-based formula is stable: boxH = focalY * playerH / dis
-        // focalY = matrix[5] * vH/2  (extracted from projection matrix)
-        // Player height ~1.8m in FF world units.
-        // Guard: matrix[5]=0 means projection matrix not yet valid — skip
+        // Pure distance-based box size — stable, no pulsation, correct at any range.
+        // rawH (toe-head projection) excluded: ToeNode position is unreliable at range
+        // and causes box to be 2-3x too large when toe projects far below screen center.
+        // focalY from projection matrix gives correct perspective scale per distance.
         if (fabsf(matrix[5]) < 0.01f) continue;
-        float focalY    = fabsf(matrix[5]) * (vH * 0.5f);
-        float playerH   = 1.80f;  // metres
-        float boxH_dist = fmaxf(fminf(focalY * playerH / fmaxf(dis, 0.5f), vH * 0.85f), 14.f);
-        // Blend with projection: 70% distance-based (stable), 30% real projection
-        float rawH      = fabsf(s_HeadTop.y - s_Toe.y);
-        float boxH      = boxH_dist * 0.7f + fmaxf(rawH, 10.f) * 0.3f;
-        boxH            = fmaxf(fminf(boxH, vH * 0.85f), 14.f);
-        bool isTiny     = false;
-        // Box wider than before — skeleton needs room (was 0.42, now 0.52)
-        float boxW = boxH * 0.52f;
-        // Expand box by 15% on each side so skeleton fits comfortably
-        float expand = boxH * 0.08f;
-        float bx   = s_Head.x - boxW * 0.5f - expand;
-        float by   = fminf(s_HeadTop.y, s_Head.y) - expand;
-        boxW += expand * 2.f;
-        boxH += expand * 2.f;
+        float focalY = fabsf(matrix[5]) * (vH * 0.5f);
+        float boxH   = fmaxf(fminf(focalY * 1.80f / fmaxf(dis, 1.f), vH * 0.85f), 18.f);
+        bool  isTiny = false;
+        float boxW   = boxH * 0.48f;
+        float bx     = s_Head.x - boxW * 0.5f;
+        float by     = fminf(s_HeadTop.y, s_Head.y) - boxH * 0.05f;
 
         // Skip full detail rendering beyond kESPDetailDistance
         if (dis > kESPDetailDistance) continue;
@@ -2182,21 +2174,37 @@ static void resetMatchState(void) {
         }
     } // end player loop
 
-    // ── Обычный Aimbot apply ─────────────────────────────────────────
+    // ── Aimbot via IOHIDEvent touch injection ─────────────────────────
+    // НЕ пишем в память игры — отправляем свайп через HID стек
+    // Выглядит как реальный палец на джойстике прицела
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
-    if (isAimbot && isVaildPtr(bestTarget) && shouldAim) {
+    if (isAimbot && matchReady && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
         if      (aimTarget==0) ap = getPositionExt(getHead(bestTarget));
         else if (aimTarget==1) {
-            // Neck = 25% toward Hip from Head
             Vector3 hPos = getPositionExt(getHead(bestTarget));
             uint64_t hipN = getHip(bestTarget);
             ap = isVaildPtr(hipN)
                 ? hPos + (getPositionExt(hipN) - hPos) * 0.30f
                 : hPos;
         }
-        else                   ap = getPositionExt(getHip(bestTarget));
-        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
+        else ap = getPositionExt(getHip(bestTarget));
+
+        // Проецируем цель → delta от центра экрана
+        Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
+        float dx = ws.x - center.x;
+        float dy = ws.y - center.y;
+        // Масштабируем на speed и sensitivity
+        float scale = aimSpeed * 0.06f;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            TouchAimbot_SendDelta((CGFloat)(dx * scale * aimSensX),
+                                  (CGFloat)(dy * scale * aimSensY));
+        });
+    } else if (isAimbot) {
+        // Нет цели — отпускаем виртуальный палец
+        dispatch_async(dispatch_get_main_queue(), ^{
+            TouchAimbot_Release();
+        });
     }
 
 
