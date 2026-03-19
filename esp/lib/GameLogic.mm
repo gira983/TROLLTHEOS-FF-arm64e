@@ -54,10 +54,23 @@
 
 #pragma mark - Function Game
 
+// ─── GameFacade static fields (from dump) ────────────────────────────────────
+// GameFacade_Static + 0x0 = CurrentGame      (BaseGame)
+// GameFacade_Static + 0x8 = CurrentMatchGame (MatchGame) ← in-match indicator
+#define GL_GAMEFACADE_CURRENT_GAME       ENCRYPTOFFSET("0x0")
+#define GL_GAMEFACADE_CURRENT_MATCHGAME  ENCRYPTOFFSET("0x8")
+
 uint64_t getMatchGame(uint64_t Moudule_Base) {
     uint64_t GameFacade_TypeInfo = ReadAddr<uint64_t>(Moudule_Base + GL_GAMEFACADE_TI);
     uint64_t GameFacade_Static   = ReadAddr<uint64_t>(GameFacade_TypeInfo + GL_GAMEFACADE_ST);
-    return ReadAddr<uint64_t>(GameFacade_Static + 0x0);
+    return ReadAddr<uint64_t>(GameFacade_Static + GL_GAMEFACADE_CURRENT_GAME);
+}
+
+// Returns CurrentMatchGame — non-zero only while inside a match
+uint64_t getCurrentMatchGame(uint64_t Moudule_Base) {
+    uint64_t GameFacade_TypeInfo = ReadAddr<uint64_t>(Moudule_Base + GL_GAMEFACADE_TI);
+    uint64_t GameFacade_Static   = ReadAddr<uint64_t>(GameFacade_TypeInfo + GL_GAMEFACADE_ST);
+    return ReadAddr<uint64_t>(GameFacade_Static + GL_GAMEFACADE_CURRENT_MATCHGAME);
 }
 
 uint64_t getMatch(uint64_t matchgame) {
