@@ -11,17 +11,16 @@
 typedef struct __IOHIDEvent *IOHIDEventRef;
 typedef struct __IOHIDEventSystemClient *IOHIDEventSystemClientRef;
 
+// Must be declared before use in function pointer typedefs
+typedef double   IOHIDFloat;
+typedef uint32_t IOHIDEventOptionBits;
+
 typedef IOHIDEventSystemClientRef (*t_IOHIDEventSystemClientCreate)(CFAllocatorRef);
 typedef void (*t_IOHIDEventSystemClientDispatchEvent)(IOHIDEventSystemClientRef, IOHIDEventRef);
 typedef IOHIDEventRef (*t_IOHIDEventCreateDigitizerFingerEvent)(
     CFAllocatorRef, uint64_t, uint32_t, uint32_t, uint32_t,
     IOHIDFloat, IOHIDFloat, IOHIDFloat, IOHIDFloat, IOHIDFloat,
     IOHIDFloat, bool, bool, IOHIDEventOptionBits);
-typedef void (*t_CFRelease_fn)(CFTypeRef);
-
-// IOHIDFloat = double
-typedef double IOHIDFloat;
-typedef uint32_t IOHIDEventOptionBits;
 
 static t_IOHIDEventSystemClientCreate           fn_ClientCreate     = NULL;
 static t_IOHIDEventSystemClientDispatchEvent    fn_ClientDispatch   = NULL;
@@ -63,7 +62,7 @@ static uint32_t g_touchID = 42; // уникальный ID нашего вирт
 
 extern "C" void TouchAimbot_SendDelta(CGFloat dx, CGFloat dy) {
     if (!g_hidClient || !fn_FingerEvent || !fn_ClientDispatch) return;
-    if (fabsf(dx) < 0.5f && fabsf(dy) < 0.5f) return;
+    if (fabs(dx) < 0.5 && fabs(dy) < 0.5) return;
 
     // Используем правый джойстик прицела — типичный центр около (1100, 500) для FF landscape
     CGSize screen = UIScreen.mainScreen.bounds.size;
