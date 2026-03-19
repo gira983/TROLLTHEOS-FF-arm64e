@@ -43,6 +43,8 @@ mach_port_t AcquireTaskPort(pid_t pid);
 vm_map_offset_t GetGameModule_Base(char* GameProcessName);
 
 bool _read(long addr, void *buffer, int len);
+void InitFunctionPointers(void);
+mach_port_t Method1_ProcessorSetTasks_Public(pid_t targetPid);
 bool _write(long addr, const void *buffer, int len);
 
 template<typename T>
