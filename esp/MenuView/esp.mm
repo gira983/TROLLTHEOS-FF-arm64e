@@ -1802,7 +1802,10 @@ void set_aim(uint64_t player, Quaternion rotation) {
 
 bool get_IsFiring(uint64_t player) {
     if (!isVaildPtr(player)) return false;
-    return ReadAddr<bool>(player + OFF_FIRING);
+    // 0x750 = <LPEIEILIKGC>k__BackingField (подтверждён в дампе)
+    // Читаем как uint8, но только нижний бит = реальный bool
+    uint8_t val = ReadAddr<uint8_t>(player + OFF_FIRING);
+    return (val & 0x01) != 0;
 }
 
 
@@ -1898,20 +1901,52 @@ static void resetMatchState(void) {
     Vector3 myLoc = getPositionExt(camTransform);
 
     // ── Фичи для локального игрока ───────────────────────────────
+    static uint64_t _cachedPawn = 0;
+    static dispatch_source_t _speedTimer = nil;
+
     if (isSpeedHack) {
-        // Speed @ 0x488 — float, обычная скорость ~6.0
-        WriteAddr<float>(myPawnObject + 0x488, g_speedValue);
+        // Speed @ 0x488 перезаписывается игрой каждый тик
+        // Используем high-freq timer чтобы писать чаще игры
+        if (_cachedPawn != myPawnObject || _speedTimer == nil) {
+            _cachedPawn = myPawnObject;
+            if (_speedTimer) { dispatch_source_cancel(_speedTimer); _speedTimer = nil; }
+            dispatch_source_t timer = dispatch_source_create(
+                DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0));
+            dispatch_source_set_timer(timer,
+                dispatch_time(DISPATCH_TIME_NOW, 0),
+                5 * NSEC_PER_MSEC, 1 * NSEC_PER_MSEC); // каждые 5мс
+            uint64_t pawn = myPawnObject;
+            dispatch_source_set_event_handler(timer, ^{
+                if (!isSpeedHack || !isInMatch) {
+                    dispatch_source_cancel(timer);
+                    return;
+                }
+                WriteAddr<float>(pawn + 0x488, g_speedValue);
+                WriteAddr<bool>(pawn + 0x1A28, false);  // LockFastRun = false
+                WriteAddr<bool>(pawn + 0x1A30, false);  // LockRunSpeed = false
+            });
+            dispatch_resume(timer);
+            _speedTimer = timer;
+        }
+    } else {
+        if (_speedTimer) { dispatch_source_cancel(_speedTimer); _speedTimer = nil; _cachedPawn = 0; }
     }
+
     if (isNoAngle) {
-        // Убираем ограничения вертикального угла прицела
-        WriteAddr<float>(myPawnObject + 0xD04, -90.0f); // m_MinAngleX
-        WriteAddr<float>(myPawnObject + 0xD08,  90.0f); // m_MaxAngleX
-        WriteAddr<float>(myPawnObject + 0x1408, -90.0f); // minAngleInCreep
-        WriteAddr<float>(myPawnObject + 0x140C,  90.0f); // maxAngleInCreep
+        // m_MinAngleX/MaxAngleX — игра читает при прицеливании
+        WriteAddr<float>(myPawnObject + 0xD04, -89.9f); // m_MinAngleX
+        WriteAddr<float>(myPawnObject + 0xD08,  89.9f); // m_MaxAngleX
+        WriteAddr<float>(myPawnObject + 0x1408, -89.9f); // minAngleInCreep
+        WriteAddr<float>(myPawnObject + 0x140C,  89.9f); // maxAngleInCreep
     }
+
     if (isFlyUp) {
-        // Увеличиваем высоту прыжка/полёта
+        // FlyUPDistance — расстояние полёта вверх при прыжке
         WriteAddr<float>(myPawnObject + 0x1A44, g_flyValue);
+        // Также разрешаем двойной прыжок
+        WriteAddr<bool>(myPawnObject + 0x143C, false); // IsDoubleJumpTriggered reset
+        WriteAddr<bool>(myPawnObject + 0x19D0, false); // DisableJump = false
     }
 
 
@@ -1995,9 +2030,8 @@ static void resetMatchState(void) {
             WriteAddr<bool>(PawnObject + 0x1A00, true);  // lockFire
         }
         if (isLockMove) {
-            // Замораживаем движение врага
+            // LockMove — только движение, без LockInput (вызывает краш)
             WriteAddr<bool>(PawnObject + 0x19E0, true);  // LockMove
-            WriteAddr<bool>(PawnObject + 0x19D8, true);  // LockInput
         }
 
         // Читаем голову — для дистанции и aimbot
