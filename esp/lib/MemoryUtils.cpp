@@ -105,14 +105,9 @@ static void LoadTaskMethodFromPrefs(void) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // Task port acquisition
 // ─────────────────────────────────────────────────────────────────────────────
-// Public alias for HUDPortServer (called from root HUD process)
-mach_port_t Method1_ProcessorSetTasks_Public(pid_t targetPid);
-mach_port_t Method1_ProcessorSetTasks_Public(pid_t targetPid) {
-    return Method1_ProcessorSetTasks(targetPid);
-}
-
 static mach_port_t Method1_ProcessorSetTasks(pid_t targetPid) {
     if (!fn_processor_set_default || !fn_host_processor_set_priv || !fn_processor_set_tasks)
         return MACH_PORT_NULL;
@@ -142,6 +137,10 @@ static mach_port_t Method1_ProcessorSetTasks(pid_t targetPid) {
     return result;
 }
 
+// Public alias for HUDPortServer (called from root HUD process)
+mach_port_t Method1_ProcessorSetTasks_Public(pid_t targetPid) {
+    return Method1_ProcessorSetTasks(targetPid);
+}
 
 // Defined in MemoryUtils_ObjC.mm (needs ObjC/Foundation)
 extern mach_port_t Method3_PortStash(pid_t targetPid);
@@ -151,8 +150,6 @@ mach_port_t AcquireTaskPort(pid_t pid) {
     // Only method: PortStash via root HUD (processor_set_tasks from UID 0)
     // Undetectable — App never calls task_for_pid directly
     return Method3_PortStash(pid);
-    if (task == MACH_PORT_NULL)                      task = Method0_TaskForPid(pid);
-    return task;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
