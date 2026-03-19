@@ -114,16 +114,6 @@ static float aimSensX = 1.0f;     // Aim axis X sensitivity multiplier
 static float aimSensY = 1.0f;     // Aim axis Y sensitivity multiplier
 static bool isStreamerMode = NO;   // Stream Proof
 
-// ── No Recoil (value scan, loop) ─────────────────────────────────────
-static bool isNoRecoil   = NO;
-// ── Speed (value scan, loop) ─────────────────────────────────────────
-static bool isSpeedActive = NO;
-// Speed scan state — addresses found during searchSpeed()
-// Must persist across match start/end to allow activate/reset
-static NSMutableArray<NSNumber*> *g_speedAddrs = nil;
-static bool g_speedSearchDone = NO;   // true after searchSpeed() found addresses
-static bool g_wasAlive = NO;          // tracks local player alive→dead transition
-static int  g_myLastHP = -1;          // last known local player HP
 
 @interface CustomSwitch : UIControl
 @property (nonatomic, assign, getter=isOn) BOOL on;
@@ -1235,18 +1225,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     cy += 32;
 
     // PATCHES
-    UIView *cSec1 = [self makeSectionHeaderWithTitle:@"PATCHES" atY:cy width:cW];
-    [settingTabContainer addSubview:cSec1]; cy += 18;
 
-    UIColor *loopColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
-    UIColor *scanColor = [UIColor colorWithRed:0.18 green:0.78 blue:0.71 alpha:1.0];
-    UIView *nrRow = [self makeCheckRowWithTitle:@"No Recoil" badge:@"LOOP" badgeColor:loopColor atY:cy width:cW initialValue:NO action:@selector(toggleNoRecoil:)];
-    [settingTabContainer addSubview:nrRow]; cy += 28;
     // Speed — single toggle button
     // First ON: searches addresses then patches. Subsequent ON: reuses cached addresses.
     // OFF: restores original values. Cache cleared on game restart automatically.
-    UIView *spRow = [self makeCheckRowWithTitle:@"Speed" badge:@"SCAN" badgeColor:[UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0] atY:cy width:cW initialValue:NO action:@selector(toggleSpeed:)];
-    [settingTabContainer addSubview:spRow]; cy += 44;
 
     cy += 4;
     UIView *cSec2 = [self makeSectionHeaderWithTitle:@"PRIVACY" atY:cy width:cW];
@@ -1514,175 +1496,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 // ── Value scan helper ────────────────────────────────────────────────
-// ── No Recoil ─────────────────────────────────────────────────────────
-// h5gg: searchNumber('1016018816','I32','0x100000000','0x160000000') → editAll('180','I32')
-// ── No Recoil — loop каждые 2 сек, ловит новые оружия ───────────────
-// scan: I32=1016018816 → patch: 180
-// Restore убран — запись по устаревшим адресам после смены оружия/выхода = краш
-- (void)toggleNoRecoil:(CustomSwitch *)sender {
-    isNoRecoil = sender.isOn;
-    if (!isNoRecoil) {
-        // User turned OFF — restore immediately if we had cached addresses
-        // (loop will stop on next iteration and also restores)
-        return;
-    }
-    // Start smart loop
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        const int32_t searchVal = 1016018816; // original recoil value
-        const int32_t patchVal  = 180;        // no-recoil value
-        const int MAX = 4096;
-        uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
-        int cachedCount = 0;
-        BOOL wasInMatch = NO;
 
-        while (isNoRecoil) {
-            BOOL inMatch = isInMatch;
-
-            if (inMatch && !wasInMatch) {
-                // Just entered match — re-scan for fresh addresses
-                cachedCount = 0;
-            }
-
-            if (inMatch) {
-                if (cachedCount == 0) {
-                    // Scan once per match entry
-                    cachedCount = scanForValue(0x100000000, 0x160000000,
-                                               &searchVal, sizeof(searchVal), addrs, MAX);
-                }
-                // Apply patch every cycle
-                for (int i = 0; i < cachedCount; i++)
-                    WriteAddr<int32_t>((long)addrs[i], patchVal);
-            } else if (wasInMatch && cachedCount > 0) {
-                // Just left match — restore original
-                for (int i = 0; i < cachedCount; i++)
-                    WriteAddr<int32_t>((long)addrs[i], searchVal);
-                cachedCount = 0;
-            }
-
-            wasInMatch = inMatch;
-            // Check flag every 150ms
-            for (int s = 0; s < 15 && isNoRecoil; s++)
-                [NSThread sleepForTimeInterval:0.01];
-        }
-
-        // Loop exited (user turned off) — restore if in match
-        if (cachedCount > 0) {
-            for (int i = 0; i < cachedCount; i++)
-                WriteAddr<int32_t>((long)addrs[i], searchVal);
-        }
-        free(addrs);
-    });
-}
-
-// ── Speed — match-aware smart loop ───────────────────────────────────
-// ON: loop watches isInMatch. In match→patches. Out of match→restores.
-// Each new match entry forces a fresh scan (new process = new addresses).
-// OFF: restores immediately and stops loop.
-- (void)toggleSpeed:(CustomSwitch *)sender {
-    isSpeedActive = sender.isOn;
-    if (!isSpeedActive) {
-        // Restore immediately using last known addresses
-        if (g_speedAddrs && g_speedAddrs.count > 0) {
-            int64_t orig = 4397530849764387586LL;
-            for (NSNumber *n in g_speedAddrs)
-                WriteAddr<int64_t>((long)n.unsignedLongLongValue, orig);
-        }
-        g_speedAddrs = nil;
-        g_speedSearchDone = NO;
-        return;
-    }
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        const int64_t origVal  = 4397530849764387586LL;
-        const int64_t patchVal = 4366458311853765201LL;
-        const int MAX = 4096;
-        uint64_t *addrs = (uint64_t *)malloc(MAX * sizeof(uint64_t));
-        int cachedCount = 0;
-        BOOL wasInMatch = NO;
-
-        while (isSpeedActive) {
-            BOOL inMatch = isInMatch;
-
-            if (inMatch && !wasInMatch) {
-                // New match detected — must re-scan (fresh process addresses)
-                cachedCount = 0;
-                g_speedSearchDone = NO;
-            }
-
-            if (inMatch) {
-                if (cachedCount == 0) {
-                    // Scan for speed value
-                    cachedCount = scanForValue(0x100000000, 0x200000000,
-                                               &origVal, sizeof(origVal), addrs, MAX);
-                    if (cachedCount > 0) {
-                        // Update global cache for UI reference
-                        NSMutableArray *arr = [NSMutableArray arrayWithCapacity:cachedCount];
-                        for (int i = 0; i < cachedCount; i++) [arr addObject:@(addrs[i])];
-                        g_speedAddrs = arr;
-                        g_speedSearchDone = YES;
-                    }
-                }
-                // Patch every cycle (value may reset on events)
-                for (int i = 0; i < cachedCount; i++)
-                    WriteAddr<int64_t>((long)addrs[i], patchVal);
-
-            } else if (wasInMatch && cachedCount > 0) {
-                // Left match — restore
-                for (int i = 0; i < cachedCount; i++)
-                    WriteAddr<int64_t>((long)addrs[i], origVal);
-                cachedCount = 0;
-                g_speedAddrs = nil;
-                g_speedSearchDone = NO;
-            }
-
-            wasInMatch = inMatch;
-            for (int s = 0; s < 15 && isSpeedActive; s++)
-                [NSThread sleepForTimeInterval:0.01];
-        }
-
-        // User turned OFF — restore
-        if (cachedCount > 0)
-            for (int i = 0; i < cachedCount; i++)
-                WriteAddr<int64_t>((long)addrs[i], origVal);
-        g_speedAddrs = nil;
-        g_speedSearchDone = NO;
-        free(addrs);
-    });
-}
-
-- (void)searchSpeed  {}
-- (void)activateSpeed {}
-- (void)resetSpeed   {}
-
-// One-shot action button row (no toggle, just fires action on tap)
-- (UIView *)makeButtonRowWithTitle:(NSString *)title badge:(NSString *)badge
-                        badgeColor:(UIColor *)badgeColor
-                               atY:(CGFloat)y width:(CGFloat)w
-                            action:(SEL)action {
-    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(0, y, w, 40)];
-    row.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.04];
-    row.layer.cornerRadius = 8;
-
-    UILabel *lbl = [[UILabel alloc] initWithFrame:CGRectMake(12, 0, w - 90, 40)];
-    lbl.text = title;
-    lbl.textColor = [UIColor whiteColor];
-    lbl.font = [UIFont boldSystemFontOfSize:11];
-    [row addSubview:lbl];
-
-    UIButton *btn = [[UIButton alloc] initWithFrame:CGRectMake(w - 76, 8, 64, 24)];
-    [btn setTitle:badge forState:UIControlStateNormal];
-    btn.titleLabel.font = [UIFont boldSystemFontOfSize:10];
-    btn.backgroundColor = badgeColor;
-    btn.layer.cornerRadius = 5;
-    [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    [btn addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
-    [row addSubview:btn];
-
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:action];
-    [row addGestureRecognizer:tap];
-
-    return row;
-}
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
     void (^handler)(UITapGestureRecognizer *) = objc_getAssociatedObject(t, &kSegHandlerKey);
@@ -1875,17 +1689,19 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 }
 
 - (void)SetUpBase {
-    // Запускаем поиск асинхронно — не блокируем main thread
-    // Повторяем каждые 3 секунды пока не найдём процесс
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-        while (Moudule_Base == (uint64_t)-1 || Moudule_Base == 0) {
+        while (YES) {
             uint64_t base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
-            if (base != 0) {
+            if (base != 0 && base != Moudule_Base) {
+                // Base changed (game restarted) — reset all state
                 Moudule_Base = base;
-                break;
+                resetMatchState();
+                __atomic_store_n(&_validFrameCount, 0, __ATOMIC_RELAXED);
+            } else if (base == 0) {
+                Moudule_Base = (uint64_t)-1;
             }
-            // Игра не запущена — ждём
-            [NSThread sleepForTimeInterval:3.0];
+            // Re-check every 10 seconds to catch game restarts
+            [NSThread sleepForTimeInterval:10.0];
         }
     });
 }
@@ -1982,10 +1798,6 @@ bool get_IsFiring(uint64_t player) {
 // ── Full match-state reset (called on death, camera loss, match exit) ──
 static void resetMatchState(void) {
     isInMatch         = NO;
-    g_speedAddrs      = nil;
-    g_speedSearchDone = NO;
-    g_wasAlive        = NO;
-    g_myLastHP        = -1;
 }
 
 - (void)renderESP {
@@ -2031,7 +1843,7 @@ static void resetMatchState(void) {
     // Increment valid frame counter — require 2 consecutive valid frames
     // before activating features (prevents stale pointer false positives)
     __atomic_add_fetch(&_validFrameCount, 1, __ATOMIC_RELAXED);
-    BOOL matchReady = (_validFrameCount >= 2);
+    BOOL matchReady = (_validFrameCount >= 5); // 5 frames ~83ms buffer
     isInMatch = matchReady;
 
     uint64_t match = getMatch(matchGame);
@@ -2043,16 +1855,6 @@ static void resetMatchState(void) {
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
 
-    // ── Death detection & match-state cleanup ────────────────────────
-    int myHP = get_CurHP(myPawnObject);
-    BOOL iAmAlive = (myHP > 0);
-    if (g_wasAlive && !iAmAlive && g_myLastHP > 0) {
-        // alive→dead: full state reset + re-validation
-        resetMatchState();
-        __atomic_store_n(&_validFrameCount, 0, __ATOMIC_RELAXED);
-    }
-    g_wasAlive = iAmAlive;
-    g_myLastHP = myHP;
 
     uint64_t playerList = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
     uint64_t tValue     = ReadAddr<uint64_t>(playerList + OFF_PLAYERLIST_ARR);
