@@ -2074,10 +2074,15 @@ static void resetMatchState(void) {
     CGMutablePathRef boneMidPath     = CGPathCreateMutable();
     CGMutablePathRef boneFarPath     = CGPathCreateMutable();
     CGMutablePathRef boneKnockedPath = CGPathCreateMutable();
-    CGMutablePathRef boxNearPath     = CGPathCreateMutable();
-    CGMutablePathRef boxMidPath      = CGPathCreateMutable();
-    CGMutablePathRef boxFarPath      = CGPathCreateMutable();
-    CGMutablePathRef boxKnockedPath  = CGPathCreateMutable();
+    CGMutablePathRef boxNearPath      = CGPathCreateMutable();
+    CGMutablePathRef boxMidPath       = CGPathCreateMutable();
+    CGMutablePathRef boxFarPath       = CGPathCreateMutable();
+    CGMutablePathRef boxKnockedPath   = CGPathCreateMutable();
+    // Inner box paths (for double-line effect)
+    CGMutablePathRef boxInnerNearPath    = CGPathCreateMutable();
+    CGMutablePathRef boxInnerMidPath     = CGPathCreateMutable();
+    CGMutablePathRef boxInnerFarPath     = CGPathCreateMutable();
+    CGMutablePathRef boxInnerKnockedPath = CGPathCreateMutable();
     CGMutablePathRef lineNearPath    = CGPathCreateMutable();
     CGMutablePathRef lineMidPath     = CGPathCreateMutable();
     CGMutablePathRef lineFarPath     = CGPathCreateMutable();
@@ -2088,8 +2093,9 @@ static void resetMatchState(void) {
     CGMutablePathRef hpFillPath       = hpFillGreenPath;       // алиас
 
     // Выбор нужного bucket'а по дистанции/состоянию
-    #define BONE_PATH  (isKnocked ? boneKnockedPath : (dis<40.f ? boneNearPath : (dis<100.f ? boneMidPath : boneFarPath)))
-    #define BOX_PATH   (isKnocked ? boxKnockedPath  : (dis<40.f ? boxNearPath  : (dis<100.f ? boxMidPath  : boxFarPath)))
+    #define BONE_PATH       (isKnocked ? boneKnockedPath    : (dis<40.f ? boneNearPath    : (dis<100.f ? boneMidPath    : boneFarPath)))
+    #define BOX_PATH        (isKnocked ? boxKnockedPath     : (dis<40.f ? boxNearPath     : (dis<100.f ? boxMidPath     : boxFarPath)))
+    #define BOX_INNER_PATH  (isKnocked ? boxInnerKnockedPath: (dis<40.f ? boxInnerNearPath: (dis<100.f ? boxInnerMidPath: boxInnerFarPath)))
     #define LINE_PATH  (isKnocked ? lineFarPath     : (dis<40.f ? lineNearPath : (dis<100.f ? lineMidPath : lineFarPath)))
 
     // Текстовые записи
@@ -2248,17 +2254,8 @@ static void resetMatchState(void) {
                 float HP_x = s_Hip.x,  HP_y = s_Hip.y;
                 float HD_x = s_Head.x,  HD_y = s_Head.y;
 
-                // ── HEAD CIRCLE ───────────────────────────────────────
-                // HeadNode (0x5B8) is at neck base in Unity.
-                // Draw circle ABOVE it by ~headR offset.
-                float headR = fmaxf(boxH * 0.10f, 4.f);
-                float headCircleY = HD_y - headR * 0.5f; // shift up
-                CGPathAddEllipseInRect(bp, nil,
-                    CGRectMake(HD_x - headR, headCircleY - headR, headR*2, headR*2));
-
-                // ── HEAD → NECK (bottom of circle to neck joint) ──────
-                CGPathMoveToPoint(bp,nil,HD_x, headCircleY + headR);
-                CGPathAddLineToPoint(bp,nil,NK_x, NK_y);
+                // ── NECK start (no head circle) ──────────────────────
+                // Head joint connects directly to Neck
 
                 // ── SPINE: Neck → Hip ────────────────────────────────
                 // Small correction: blend Hip X slightly toward head X
@@ -2282,18 +2279,7 @@ static void resetMatchState(void) {
                 CGPathAddLineToPoint(bp,nil,RE_x, RE_y);
                 CGPathAddLineToPoint(bp,nil,RH_x, RH_y);
 
-                // ── PELVIS BAR ────────────────────────────────────────
-                float sholderHalfW = fabsf(RS_x - LS_x) * 0.5f;
-                float pelvisHalfW  = MAX(sholderHalfW * 0.6f, boxW * 0.15f);
-                float pLX = HP_adj_x - pelvisHalfW;
-                float pRX = HP_adj_x + pelvisHalfW;
-                CGPathMoveToPoint(bp,nil,pLX, HP_y);
-                CGPathAddLineToPoint(bp,nil,pRX, HP_y);
-
-                // ── LEGS: directly Hip → Knee → Foot ─────────────────
-                // No pelvis bar dependency — each leg goes straight from
-                // Hip pivot to its own knee and foot.
-                // This works correctly from any camera angle (front/back/side).
+                // ── LEGS: Hip → Knee → Foot (no pelvis bar) ─────────
                 CGPathMoveToPoint(bp,nil,HP_adj_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,LK_x, LK_y);
                 CGPathAddLineToPoint(bp,nil,LF_x, LF_y);
@@ -2313,21 +2299,8 @@ static void resetMatchState(void) {
             CGMutablePathRef xp = BOX_PATH;
             CGPathAddRect(xp, nil, CGRectMake(bx, by, boxW, boxH));
 
-            // Inner rect path — separate layer
-            CGMutablePathRef innerPath = CGPathCreateMutable();
-            CGPathAddRect(innerPath, nil, CGRectMake(bx+gap, by+gap, boxW-gap*2, boxH-gap*2));
-
-            // Pick inner layer by distance/state (same logic as BONE_PATH)
-            CAShapeLayer *innerLayer = isKnocked ? _boxInnerKnocked
-                : (dis < 40.f ? _boxInnerNear : (dis < 100.f ? _boxInnerMid : _boxInnerFar));
-
-            // Apply inner path (will be committed on main thread with outer)
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [CATransaction begin]; [CATransaction setDisableActions:YES];
-                innerLayer.path = innerPath;
-                [CATransaction commit];
-                CGPathRelease(innerPath);
-            });
+            // Inner rect — collected into path pool, applied in main commit
+            CGPathAddRect(BOX_INNER_PATH, nil, CGRectMake(bx+gap, by+gap, boxW-gap*2, boxH-gap*2));
         }
 
         // ── HP BAR: vertical, left side of box (reference design) ──────
@@ -2425,11 +2398,15 @@ static void resetMatchState(void) {
         _boneMid.path     = b_bone ? boneMidPath     : nil;
         _boneFar.path     = b_bone ? boneFarPath     : nil;
         _boneKnocked.path = b_bone ? boneKnockedPath : nil;
-        // Боксы по зонам
+        // Боксы по зонам (outer + inner)
         _boxNear.path    = b_box ? boxNearPath    : nil;
         _boxMid.path     = b_box ? boxMidPath     : nil;
         _boxFar.path     = b_box ? boxFarPath     : nil;
         _boxKnocked.path = b_box ? boxKnockedPath : nil;
+        _boxInnerNear.path    = b_box ? boxInnerNearPath    : nil;
+        _boxInnerMid.path     = b_box ? boxInnerMidPath     : nil;
+        _boxInnerFar.path     = b_box ? boxInnerFarPath     : nil;
+        _boxInnerKnocked.path = b_box ? boxInnerKnockedPath : nil;
         // Линии по зонам
         _lineNear.path = b_line ? lineNearPath : nil;
         _lineMid.path  = b_line ? lineMidPath  : nil;
@@ -2473,6 +2450,8 @@ static void resetMatchState(void) {
         CGPathRelease(boneFarPath);     CGPathRelease(boneKnockedPath);
         CGPathRelease(boxNearPath);     CGPathRelease(boxMidPath);
         CGPathRelease(boxFarPath);      CGPathRelease(boxKnockedPath);
+        CGPathRelease(boxInnerNearPath);CGPathRelease(boxInnerMidPath);
+        CGPathRelease(boxInnerFarPath); CGPathRelease(boxInnerKnockedPath);
         CGPathRelease(lineNearPath);    CGPathRelease(lineMidPath);
         CGPathRelease(lineFarPath);
         CGPathRelease(hpBgPath);
