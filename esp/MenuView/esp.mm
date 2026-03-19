@@ -2174,9 +2174,11 @@ static void resetMatchState(void) {
         float boxH = fmaxf(fminf(rawH, vH * 0.9f), 10.f);
         bool isTiny = false;
         float boxW = boxH * 0.42f;
-        // Top of box = headTop Y, centered on head X
+        // Box top = highest point on screen (min Y = headTop)
+        // Box centered on head X
+        float boxTopY = fminf(s_HeadTop.y, s_Head.y);
         float bx   = s_Head.x - boxW * 0.5f;
-        float by   = s_HeadTop.y;
+        float by   = boxTopY;
 
         // Skip full detail rendering beyond kESPDetailDistance
         if (dis > kESPDetailDistance) continue;
@@ -2246,8 +2248,16 @@ static void resetMatchState(void) {
                 float HP_x = s_Hip.x,  HP_y = s_Hip.y;
                 float HD_x = s_Head.x,  HD_y = s_Head.y;
 
-                // ── HEAD → NECK ───────────────────────────────────────
-                CGPathMoveToPoint(bp,nil,HD_x, HD_y);
+                // ── HEAD CIRCLE ───────────────────────────────────────
+                // HeadNode (0x5B8) is at neck base in Unity.
+                // Draw circle ABOVE it by ~headR offset.
+                float headR = fmaxf(boxH * 0.10f, 4.f);
+                float headCircleY = HD_y - headR * 0.5f; // shift up
+                CGPathAddEllipseInRect(bp, nil,
+                    CGRectMake(HD_x - headR, headCircleY - headR, headR*2, headR*2));
+
+                // ── HEAD → NECK (bottom of circle to neck joint) ──────
+                CGPathMoveToPoint(bp,nil,HD_x, headCircleY + headR);
                 CGPathAddLineToPoint(bp,nil,NK_x, NK_y);
 
                 // ── SPINE: Neck → Hip ────────────────────────────────
