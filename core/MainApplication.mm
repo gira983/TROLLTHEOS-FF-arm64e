@@ -94,7 +94,6 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     UILabel *_authorLabel;
     BOOL _supportsCenterMost;
     // Task method selector UI
-    UISegmentedControl *_taskMethodSegment;
     // kfd puaf sub-метод
     UIView             *_kfdCard;
     UISegmentedControl *_kfdPuafSegment;
@@ -332,8 +331,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [_authorLabel setUserInteractionEnabled:YES];
     [_authorLabel addGestureRecognizer:authorTapGesture];
 
-    // ── TASK METHOD SELECTOR ─────────────────────────────────────────
-    // Карточка под кнопкой Start/Stop
+    // ── TASK METHOD: PortStash via root HUD (fixed, no selector needed) ─
     UIView *taskCard = [[UIView alloc] init];
     taskCard.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.06];
     taskCard.layer.cornerRadius = 14;
@@ -343,41 +341,15 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [self.backgroundView addSubview:taskCard];
 
     UILabel *taskTitleLbl = [[UILabel alloc] init];
-    taskTitleLbl.text = @"TASK METHOD";
+    taskTitleLbl.text = @"MEMORY ACCESS";
     taskTitleLbl.textColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.85];
     taskTitleLbl.font = [UIFont fontWithName:@"Courier-Bold" size:10] ?: [UIFont boldSystemFontOfSize:10];
     taskTitleLbl.translatesAutoresizingMaskIntoConstraints = NO;
     [taskCard addSubview:taskTitleLbl];
 
-    // TASK METHOD segments:
-    //   0 = direct      — calls task_for_pid() directly. Works but easily flagged by anti-cheat.
-    //   1 = procset     — uses processor_set_tasks(). No direct task_for_pid call. RECOMMENDED.
-    //   2 = iterate     — iterates mach port namespace via pid_for_task(). Most stealthy, slightly slower.
-    NSArray *methodItems = @[@"direct", @"procset", @"iterate"];
-    _taskMethodSegment = [[UISegmentedControl alloc] initWithItems:methodItems];
-    // Clamp saved index — kfd (old index 3) is removed, fall back to procset
-    NSInteger savedMethod = [self taskMethod];
-    if (savedMethod > 2) { savedMethod = 1; [self setTaskMethod:1]; }
-    _taskMethodSegment.selectedSegmentIndex = savedMethod;
-    [_taskMethodSegment setTitleTextAttributes:@{
-        NSFontAttributeName: [UIFont fontWithName:@"Courier" size:11] ?: [UIFont systemFontOfSize:11],
-        NSForegroundColorAttributeName: [UIColor colorWithWhite:0.6 alpha:1.0]
-    } forState:UIControlStateNormal];
-    [_taskMethodSegment setTitleTextAttributes:@{
-        NSFontAttributeName: [UIFont fontWithName:@"Courier-Bold" size:11] ?: [UIFont boldSystemFontOfSize:11],
-        NSForegroundColorAttributeName: [UIColor colorWithRed:0.08 green:0.09 blue:0.12 alpha:1.0]
-    } forState:UIControlStateSelected];
-    if (@available(iOS 13.0, *)) {
-        _taskMethodSegment.selectedSegmentTintColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:1.0];
-        _taskMethodSegment.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1.0];
-    }
-    [_taskMethodSegment addTarget:self action:@selector(taskMethodChanged:) forControlEvents:UIControlEventValueChanged];
-    _taskMethodSegment.translatesAutoresizingMaskIntoConstraints = NO;
-    [taskCard addSubview:_taskMethodSegment];
-
     UILabel *taskDescLbl = [[UILabel alloc] init];
-    taskDescLbl.text = @"direct — detectable  •  procset — recommended  •  iterate — most stealthy";
-    taskDescLbl.textColor = [UIColor colorWithWhite:0.4 alpha:1.0];
+    taskDescLbl.text = @"PortStash via root HUD  •  processor_set_tasks  •  undetectable";
+    taskDescLbl.textColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.5];
     taskDescLbl.font = [UIFont fontWithName:@"Courier" size:8] ?: [UIFont systemFontOfSize:8];
     taskDescLbl.textAlignment = NSTextAlignmentCenter;
     taskDescLbl.numberOfLines = 1;
@@ -405,14 +377,8 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
         [taskTitleLbl.topAnchor constraintEqualToAnchor:taskCard.topAnchor constant:12],
         [taskTitleLbl.leadingAnchor constraintEqualToAnchor:taskCard.leadingAnchor constant:14],
 
-        // Сегмент
-        [_taskMethodSegment.topAnchor constraintEqualToAnchor:taskTitleLbl.bottomAnchor constant:8],
-        [_taskMethodSegment.leadingAnchor constraintEqualToAnchor:taskCard.leadingAnchor constant:12],
-        [_taskMethodSegment.trailingAnchor constraintEqualToAnchor:taskCard.trailingAnchor constant:-12],
-        [_taskMethodSegment.heightAnchor constraintEqualToConstant:32],
-
-        // Описание
-        [taskDescLbl.topAnchor constraintEqualToAnchor:_taskMethodSegment.bottomAnchor constant:8],
+        // Описание (directly under title)
+        [taskDescLbl.topAnchor constraintEqualToAnchor:taskTitleLbl.bottomAnchor constant:8],
         [taskDescLbl.leadingAnchor constraintEqualToAnchor:taskCard.leadingAnchor constant:12],
         [taskDescLbl.trailingAnchor constraintEqualToAnchor:taskCard.trailingAnchor constant:-12],
         [taskDescLbl.bottomAnchor constraintEqualToAnchor:taskCard.bottomAnchor constant:-12],
@@ -702,25 +668,6 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
 
 - (void)kfdPuafMethodChanged:(UISegmentedControl *)sender {
     [self setKfdPuafMethod:sender.selectedSegmentIndex];
-}
-
-- (NSInteger)taskMethod {
-    [self loadUserDefaults:NO];
-    NSNumber *m = [_userDefaults objectForKey:@"taskMethod"];
-    return m ? [m integerValue] : 1; // default: procset (index 1) — recommended
-}
-
-- (void)setTaskMethod:(NSInteger)method {
-    [self loadUserDefaults:NO];
-    [_userDefaults setObject:@(method) forKey:@"taskMethod"];
-    [self saveUserDefaults];
-}
-
-- (void)taskMethodChanged:(UISegmentedControl *)sender {
-    // Indices: 0=direct, 1=procset, 2=iterate
-    NSInteger method = sender.selectedSegmentIndex;
-    [self setTaskMethod:method];
-    // kfd card is permanently hidden — no animation needed
 }
 
 - (void)tapAuthorLabel:(UITapGestureRecognizer *)sender
