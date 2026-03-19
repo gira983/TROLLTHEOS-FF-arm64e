@@ -2067,20 +2067,28 @@ static void resetMatchState(void) {
                 float HP_x = s_Hip.x,  HP_y = s_Hip.y;
                 float HD_x = s_Head.x,  HD_y = s_Head.y;
 
-                // ── SPINE: прямо Head → Hip (без промежуточных точек) ─
-                // NK (интерполяция) убран из spine — он тянул верх в сторону
-                // при боковом виде создавая эффект спирали
+                // ══════════════════════════════════════════════════════
+                // SKELETON — только реальные 3D кости, никаких вычислений
+                // Все joint coordinates напрямую из дампа
+                // ══════════════════════════════════════════════════════
+
+                // ── SPINE: Head → Hip ─────────────────────────────────
                 CGPathMoveToPoint(bp,nil,HD_x, HD_y);
                 CGPathAddLineToPoint(bp,nil,HP_x, HP_y);
 
-                // ── CLAVICLES: от midpoint spine → LS и RS ───────────
-                // Используем реальные плечи (они правильно следуют за поворотом)
-                float mid_x = (HD_x + HP_x) * 0.5f;
-                float mid_y = (HD_y + HP_y) * 0.5f;
-                CGPathMoveToPoint(bp,nil,mid_x, mid_y);
-                CGPathAddLineToPoint(bp,nil,LS_x, LS_y);
-                CGPathMoveToPoint(bp,nil,mid_x, mid_y);
+                // ── SHOULDERS BAR: LS → RS ────────────────────────────
+                // Горизонтальная перекладина плеч — всегда правильная
+                CGPathMoveToPoint(bp,nil,LS_x, LS_y);
                 CGPathAddLineToPoint(bp,nil,RS_x, RS_y);
+
+                // ── TORSO: spine → shoulders (крест) ─────────────────
+                // Соединяем середину spine с серединой shoulder bar
+                float spMid_x = (HD_x + HP_x) * 0.5f;
+                float spMid_y = (HD_y + HP_y) * 0.5f;
+                float shMid_x = (LS_x + RS_x) * 0.5f;
+                float shMid_y = (LS_y + RS_y) * 0.5f;
+                CGPathMoveToPoint(bp,nil,spMid_x, spMid_y);
+                CGPathAddLineToPoint(bp,nil,shMid_x, shMid_y);
 
                 // ── LEFT ARM: LS → LE → LH ────────────────────────────
                 CGPathMoveToPoint(bp,nil,LS_x, LS_y);
@@ -2092,24 +2100,14 @@ static void resetMatchState(void) {
                 CGPathAddLineToPoint(bp,nil,RE_x, RE_y);
                 CGPathAddLineToPoint(bp,nil,RH_x, RH_y);
 
-                // ── PELVIS + LEGS ─────────────────────────────────────
-                // hipOffset: берём расстояние между коленями — они уже
-                // правильно повёрнуты в 3D, поэтому при боковом виде
-                // маленький offset, при фронтальном — большой. Естественно.
-                float kneeSpan  = fabsf(LK_x - RK_x);
-                float hipOffset = fmaxf(kneeSpan * 0.5f, boxW * 0.10f);
-                float hipL_x = HP_x - hipOffset;
-                float hipR_x = HP_x + hipOffset;
-                if (LK_x > RK_x) { float t = hipL_x; hipL_x = hipR_x; hipR_x = t; }
-
-                CGPathMoveToPoint(bp,nil,hipL_x, HP_y);
-                CGPathAddLineToPoint(bp,nil,hipR_x, HP_y);
-
-                CGPathMoveToPoint(bp,nil,hipL_x, HP_y);
+                // ── LEGS: Hip → Knee → Foot ───────────────────────────
+                // Прямо от Hip joint — никаких вычисленных hipOffset
+                // Колени и стопы реальные 3D кости — правильные при любом угле
+                CGPathMoveToPoint(bp,nil,HP_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,LK_x, LK_y);
                 CGPathAddLineToPoint(bp,nil,LF_x, LF_y);
 
-                CGPathMoveToPoint(bp,nil,hipR_x, HP_y);
+                CGPathMoveToPoint(bp,nil,HP_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,RK_x, RK_y);
                 CGPathAddLineToPoint(bp,nil,RF_x, RF_y);
             }
