@@ -413,10 +413,14 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     CAShapeLayer *_boneMid;     // <100м жёлтый
     CAShapeLayer *_boneFar;     // >=100м белый/голубой
     CAShapeLayer *_boneKnocked; // нокнут фиолетовый
-    CAShapeLayer *_boxNear;
+    CAShapeLayer *_boxNear;       // outer rect
     CAShapeLayer *_boxMid;
     CAShapeLayer *_boxFar;
     CAShapeLayer *_boxKnocked;
+    CAShapeLayer *_boxInnerNear;  // inner rect (double-line effect)
+    CAShapeLayer *_boxInnerMid;
+    CAShapeLayer *_boxInnerFar;
+    CAShapeLayer *_boxInnerKnocked;
     CAShapeLayer *_lineNear;
     CAShapeLayer *_lineMid;
     CAShapeLayer *_lineFar;
@@ -507,12 +511,19 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         _boneKnocked = makeShape([UIColor colorWithRed:0.7f green:0.5f blue:1.f alpha:0.75f], 0.9f, YES);
         _boneLayer   = _boneFar;
 
-        // Corner-bracket box — white, thin (matches reference)
-        _boxNear    = makeShape([UIColor colorWithWhite:1.f alpha:0.98f], 1.5f, NO);
-        _boxMid     = makeShape([UIColor colorWithWhite:1.f alpha:0.90f], 1.4f, NO);
-        _boxFar     = makeShape([UIColor colorWithWhite:1.f alpha:0.80f], 1.2f, NO);
-        _boxKnocked = makeShape([UIColor colorWithRed:0.7f green:0.5f blue:1.f alpha:0.80f], 1.1f, NO);
+        // Box — outer rect (thicker) + inner rect (thinner) = double-line reference style
+        UIColor *boxWhite   = [UIColor colorWithWhite:1.f alpha:0.95f];
+        UIColor *boxKnColor = [UIColor colorWithRed:0.7f green:0.5f blue:1.f alpha:0.85f];
+        _boxNear    = makeShape(boxWhite,   1.6f, NO);
+        _boxMid     = makeShape(boxWhite,   1.5f, NO);
+        _boxFar     = makeShape(boxWhite,   1.3f, NO);
+        _boxKnocked = makeShape(boxKnColor, 1.2f, NO);
         _boxLayer   = _boxFar;
+        // Inner rect — thinner, inset by 2px
+        _boxInnerNear    = makeShape(boxWhite,   0.8f, NO);
+        _boxInnerMid     = makeShape(boxWhite,   0.7f, NO);
+        _boxInnerFar     = makeShape(boxWhite,   0.6f, NO);
+        _boxInnerKnocked = makeShape(boxKnColor, 0.6f, NO);
 
         // ESP lines — white, semi-transparent (matches reference)
         _lineNear = makeShape([UIColor colorWithWhite:1.f alpha:0.55f], 0.9f, NO);
@@ -1991,6 +2002,8 @@ static void resetMatchState(void) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [CATransaction begin]; [CATransaction setDisableActions:YES];
                 _boneLayer.path=nil; _boxLayer.path=nil;
+                _boxInnerNear.path=nil; _boxInnerMid.path=nil;
+                _boxInnerFar.path=nil;  _boxInnerKnocked.path=nil;
                 _hpBgLayer.path=nil; _hpFillLayer.path=nil; _lineLayer.path=nil;
                 for (CATextLayer *t in _textPool) t.hidden = YES;
                 [CATransaction commit];
@@ -2007,6 +2020,8 @@ static void resetMatchState(void) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [CATransaction begin]; [CATransaction setDisableActions:YES];
             _boneLayer.path=nil; _boxLayer.path=nil;
+            _boxInnerNear.path=nil; _boxInnerMid.path=nil;
+            _boxInnerFar.path=nil;  _boxInnerKnocked.path=nil;
             _hpBgLayer.path=nil; _hpFillLayer.path=nil; _lineLayer.path=nil;
             for (CATextLayer *t in _textPool) t.hidden = YES;
             [CATransaction commit];
@@ -2152,14 +2167,18 @@ static void resetMatchState(void) {
         if (s_HeadTop.x < -200 || s_HeadTop.x > vW+200 ||
             s_HeadTop.y < -200 || s_HeadTop.y > vH+200) continue;
 
-        float boxH = fabsf(s_HeadTop.y - s_Toe.y);
-        // If player is tiny on screen (far away) — still show dot + distance label
-        // but skip heavy skeleton/box rendering
-        // No tiny-dot mode — always render full box regardless of distance
+        // ── Stable box size — based on distance, NOT toe projection ─────
+        // Toe node projection causes pulsation when player moves/crouches.
+        // Distance-based formula gives consistent stable size.
+        // Calibrated: at 10m ~180px tall on 390px screen → K=1800
+        float boxH = fmaxf(vH * 1800.f / (dis * vH), 12.f);
+        // Hard clamp: never bigger than 80% of screen height
+        boxH = fminf(boxH, vH * 0.8f);
         bool isTiny = false;
-        float boxW = MAX(boxH * 0.45f, 8.f);
-        float bx   = s_HeadTop.x - boxW * 0.5f;
-        float by   = s_HeadTop.y;
+        float boxW = boxH * 0.42f;
+        // Center box on head X, top at head Y
+        float bx   = s_Head.x - boxW * 0.5f;
+        float by   = s_Head.y - boxH * 0.08f; // slight offset so head is inside box
 
         // Skip full detail rendering beyond kESPDetailDistance
         if (dis > kESPDetailDistance) continue;
@@ -2233,10 +2252,9 @@ static void resetMatchState(void) {
                 CGPathMoveToPoint(bp,nil,HD_x, HD_y);
                 CGPathAddLineToPoint(bp,nil,NK_x, NK_y);
 
-                // ── SPINE: Neck → Hip ─────────────────────────────────
-                // HipNode pivot is offset backward in world — correct X toward feet midpoint
-                float feetMidX = (LF_x + RF_x) * 0.5f;
-                float HP_adj_x = HP_x * 0.35f + feetMidX * 0.65f;
+                // ── SPINE: Neck → Hip ────────────────────────────────
+                // Small correction: blend Hip X slightly toward head X
+                float HP_adj_x = HP_x * 0.7f + HD_x * 0.3f;
                 CGPathMoveToPoint(bp,nil,NK_x, NK_y);
                 CGPathAddLineToPoint(bp,nil,HP_adj_x, HP_y);
 
@@ -2283,13 +2301,29 @@ static void resetMatchState(void) {
             skip_skeleton:;
         }
 
-        // ── BOX: full rectangle (reference design) ───────────────────
+        // ── BOX: double rectangle (reference design) ─────────────────
+        // Outer rect — defines the bounding box
+        // Inner rect — inset 2px, thinner line → double-line visual effect
         if (isBox) {
+            float gap = 2.f; // px gap between outer and inner
             CGMutablePathRef xp = BOX_PATH;
-            // Outer rect
-            CGPathAddRect(xp, nil, CGRectMake(bx-1.f, by-1.f, boxW+2.f, boxH+2.f));
-            // Inner rect (double-line effect as in reference)
-            CGPathAddRect(xp, nil, CGRectMake(bx+1.f, by+1.f, boxW-2.f, boxH-2.f));
+            CGPathAddRect(xp, nil, CGRectMake(bx, by, boxW, boxH));
+
+            // Inner rect path — separate layer
+            CGMutablePathRef innerPath = CGPathCreateMutable();
+            CGPathAddRect(innerPath, nil, CGRectMake(bx+gap, by+gap, boxW-gap*2, boxH-gap*2));
+
+            // Pick inner layer by distance/state (same logic as BONE_PATH)
+            CAShapeLayer *innerLayer = isKnocked ? _boxInnerKnocked
+                : (dis < 40.f ? _boxInnerNear : (dis < 100.f ? _boxInnerMid : _boxInnerFar));
+
+            // Apply inner path (will be committed on main thread with outer)
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [CATransaction begin]; [CATransaction setDisableActions:YES];
+                innerLayer.path = innerPath;
+                [CATransaction commit];
+                CGPathRelease(innerPath);
+            });
         }
 
         // ── HP BAR: vertical, left side of box (reference design) ──────
