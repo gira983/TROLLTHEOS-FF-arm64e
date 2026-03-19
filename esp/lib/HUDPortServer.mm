@@ -7,6 +7,9 @@
 #import <unistd.h>
 #import <Foundation/Foundation.h>
 
+// Cached game task port — set when port request succeeds
+static mach_port_t g_cachedGameTask = MACH_PORT_NULL;
+
 // Called from HUD process (UID 0) to serve task port requests.
 // Runs on a background thread alongside the HUD UI.
 extern "C" void HUDPortServer_Start(void) {
@@ -61,6 +64,11 @@ extern "C" void HUDPortServer_Start(void) {
                     return;
                 }
 
+                // Cache gameTask in HUD for aim writes (UID 0 vm_write)
+                if (g_cachedGameTask != MACH_PORT_NULL)
+                    mach_port_deallocate(mach_task_self(), g_cachedGameTask);
+                g_cachedGameTask = gameTask;
+
                 // Stash game port into app's registered ports via kernel API
                 bool ok = PortStash_Register(appTask, gameTask);
                 mach_port_deallocate(mach_task_self(), appTask);
@@ -73,6 +81,32 @@ extern "C" void HUDPortServer_Start(void) {
             });
 
         NSLog(@"[HUDPortServer] Listening for requests...");
+
+        // Aim write server — получаем rotation от App, пишем через vm_write (UID 0)
+        int aimToken;
+        notify_register_dispatch(FRYZZ_NOTIFY_AIM_WRITE, &aimToken,
+            dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0),
+            ^(int t) {
+                if (g_cachedGameTask == MACH_PORT_NULL) return;
+
+                // Читаем aim request из файла
+                NSData *data = [NSData dataWithContentsOfFile:@FRYZZ_IPC_AIM_PATH];
+                if (!data || data.length < sizeof(FryzzAimRequest)) return;
+
+                FryzzAimRequest req;
+                memcpy(&req, data.bytes, sizeof(req));
+                if (req.playerAddr == 0) return;
+
+                // Пишем оба rotation поля из UID 0
+                float quat[4] = { req.x, req.y, req.z, req.w };
+                vm_write(g_cachedGameTask,
+                         (vm_address_t)(req.playerAddr + 0x53C),
+                         (vm_offset_t)quat, sizeof(quat));
+                vm_write(g_cachedGameTask,
+                         (vm_address_t)(req.playerAddr + 0x172C),
+                         (vm_offset_t)quat, sizeof(quat));
+            });
+
         // Keep thread alive
         [[NSRunLoop currentRunLoop] run];
     });
