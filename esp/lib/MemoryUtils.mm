@@ -10,7 +10,7 @@
 // Method3: Request task port from root HUD via PortStash IPC
 // HUD (root) gets port via processor_set_tasks, stashes via mach_ports_register
 // App retrieves via mach_ports_lookup — kernel handles port right transfer
-mach_port_t Method3_PortStash(pid_t targetPid) {
+extern "C" mach_port_t Method3_PortStash(pid_t targetPid) {
     // Write request: [targetPid, appPid]
     pid_t pids[2] = { targetPid, getpid() };
     NSData *req = [NSData dataWithBytes:pids length:sizeof(pids)];
