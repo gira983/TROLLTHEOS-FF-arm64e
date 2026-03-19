@@ -511,19 +511,19 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         _boneKnocked = makeShape([UIColor colorWithRed:0.7f green:0.5f blue:1.f alpha:0.75f], 0.9f, YES);
         _boneLayer   = _boneFar;
 
-        // Box — outer rect (thicker) + inner rect (thinner) = double-line reference style
-        UIColor *boxWhite   = [UIColor colorWithWhite:1.f alpha:0.95f];
+        // Box — thin outer + very thin inner for elegant double-line look
+        UIColor *boxWhite   = [UIColor colorWithWhite:1.f alpha:0.90f];
         UIColor *boxKnColor = [UIColor colorWithRed:0.7f green:0.5f blue:1.f alpha:0.85f];
-        _boxNear    = makeShape(boxWhite,   1.6f, NO);
-        _boxMid     = makeShape(boxWhite,   1.5f, NO);
-        _boxFar     = makeShape(boxWhite,   1.3f, NO);
-        _boxKnocked = makeShape(boxKnColor, 1.2f, NO);
+        _boxNear    = makeShape(boxWhite,   1.0f, NO);
+        _boxMid     = makeShape(boxWhite,   1.0f, NO);
+        _boxFar     = makeShape(boxWhite,   0.9f, NO);
+        _boxKnocked = makeShape(boxKnColor, 0.9f, NO);
         _boxLayer   = _boxFar;
-        // Inner rect — thinner, inset by 2px
-        _boxInnerNear    = makeShape(boxWhite,   0.8f, NO);
-        _boxInnerMid     = makeShape(boxWhite,   0.7f, NO);
-        _boxInnerFar     = makeShape(boxWhite,   0.6f, NO);
-        _boxInnerKnocked = makeShape(boxKnColor, 0.6f, NO);
+        // Inner rect — very thin
+        _boxInnerNear    = makeShape(boxWhite,   0.5f, NO);
+        _boxInnerMid     = makeShape(boxWhite,   0.5f, NO);
+        _boxInnerFar     = makeShape(boxWhite,   0.4f, NO);
+        _boxInnerKnocked = makeShape(boxKnColor, 0.4f, NO);
 
         // ESP lines — white, semi-transparent (matches reference)
         _lineNear = makeShape([UIColor colorWithWhite:1.f alpha:0.55f], 0.9f, NO);
@@ -2173,18 +2173,27 @@ static void resetMatchState(void) {
         if (s_HeadTop.x < -200 || s_HeadTop.x > vW+200 ||
             s_HeadTop.y < -200 || s_HeadTop.y > vH+200) continue;
 
-        // ── Box size from real toe–head projection ───────────────────
-        // fabsf(headTop.y - toe.y) gives correct perspective scale.
-        // Clamped to reasonable range to handle edge cases.
-        float rawH = fabsf(s_HeadTop.y - s_Toe.y);
-        float boxH = fmaxf(fminf(rawH, vH * 0.9f), 10.f);
-        bool isTiny = false;
-        float boxW = boxH * 0.42f;
-        // Box top = highest point on screen (min Y = headTop)
-        // Box centered on head X
-        float boxTopY = fminf(s_HeadTop.y, s_Head.y);
-        float bx   = s_Head.x - boxW * 0.5f;
-        float by   = boxTopY;
+        // ── Stable box size: distance-based with focal correction ─────
+        // Using toe-head projection causes pulsation when player moves.
+        // Distance-based formula is stable: boxH = focalY * playerH / dis
+        // focalY = matrix[5] * vH/2  (extracted from projection matrix)
+        // Player height ~1.8m in FF world units.
+        float focalY    = fabsf(matrix[5]) * (vH * 0.5f);
+        float playerH   = 1.80f;  // metres
+        float boxH_dist = fmaxf(fminf(focalY * playerH / fmaxf(dis, 0.5f), vH * 0.85f), 14.f);
+        // Blend with projection to handle non-standard FOVs: 70% distance, 30% projection
+        float rawH      = fabsf(s_HeadTop.y - s_Toe.y);
+        float boxH      = boxH_dist * 0.7f + fmaxf(rawH, 10.f) * 0.3f;
+        boxH            = fmaxf(fminf(boxH, vH * 0.85f), 14.f);
+        bool isTiny     = false;
+        // Box wider than before — skeleton needs room (was 0.42, now 0.52)
+        float boxW = boxH * 0.52f;
+        // Expand box by 15% on each side so skeleton fits comfortably
+        float expand = boxH * 0.08f;
+        float bx   = s_Head.x - boxW * 0.5f - expand;
+        float by   = fminf(s_HeadTop.y, s_Head.y) - expand;
+        boxW += expand * 2.f;
+        boxH += expand * 2.f;
 
         // Skip full detail rendering beyond kESPDetailDistance
         if (dis > kESPDetailDistance) continue;
@@ -2255,9 +2264,14 @@ static void resetMatchState(void) {
                 float HD_x = s_Head.x,  HD_y = s_Head.y;
 
                 // ── SPINE top = midpoint Head→Neck, bottom = Hip ────────
-                // ── SPINE: Head → Neck → Hip (3 точки центра тела) ──
+                // ── SPINE: Head → Neck → Chest → Hip (4 точки) ──────
+                // Chest = 50% между Neck и Hip
+                float chest_x = (NK_x + HP_x) * 0.5f;
+                float chest_y = (NK_y + HP_y) * 0.5f;
+
                 CGPathMoveToPoint(bp,nil,HD_x, HD_y);
                 CGPathAddLineToPoint(bp,nil,NK_x, NK_y);
+                CGPathAddLineToPoint(bp,nil,chest_x, chest_y);
                 CGPathAddLineToPoint(bp,nil,HP_x, HP_y);
 
                 // ── CLAVICLES: Neck → LS и Neck → RS ─────────────────
@@ -2276,32 +2290,34 @@ static void resetMatchState(void) {
                 CGPathAddLineToPoint(bp,nil,RE_x, RE_y);
                 CGPathAddLineToPoint(bp,nil,RH_x, RH_y);
 
-                // ── LEGS: Hip → Knee → Foot с разведением ────────────
-                // HipNode — центр таза. Для реалистичного скелетона
-                // ноги стартуют из точек ±40% ширины плеч от Hip.
-                // Это даёт V-форму (разведённые бёдра) при взгляде спереди
-                // и корректно работает сбоку/сзади т.к. привязано к плечам.
+                // ── РЁБРА: chest → LS и chest → RS ───────────────────
+                CGPathMoveToPoint(bp,nil,chest_x, chest_y);
+                CGPathAddLineToPoint(bp,nil,LS_x, LS_y);
+                CGPathMoveToPoint(bp,nil,chest_x, chest_y);
+                CGPathAddLineToPoint(bp,nil,RS_x, RS_y);
+
+                // ── PELVIS разведение ─────────────────────────────────
                 float shoulderSpan = fabsf(RS_x - LS_x);
-                float hipOffset    = shoulderSpan * 0.35f; // ~35% ширины плеч
-                // Определяем левую/правую стороны бёдер по позиции колен
+                float hipOffset    = fmaxf(shoulderSpan * 0.38f, boxW * 0.12f);
                 float hipL_x = HP_x - hipOffset;
                 float hipR_x = HP_x + hipOffset;
-                // Если левое колено правее правого — стороны поменялись (вид сзади)
-                if (LK_x > RK_x) {
-                    hipL_x = HP_x + hipOffset;
-                    hipR_x = HP_x - hipOffset;
-                }
+                if (LK_x > RK_x) { float t = hipL_x; hipL_x = hipR_x; hipR_x = t; }
 
-                // Горизонтальная линия бёдер (соединяет точки старта ног)
+                // Горизонтальная линия таза
                 CGPathMoveToPoint(bp,nil,hipL_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,hipR_x, HP_y);
 
-                // Левая нога: hipL → LKnee → LFoot
+                // Боковые линии: плечо → бедро (формируют торс)
+                CGPathMoveToPoint(bp,nil,LS_x, LS_y);
+                CGPathAddLineToPoint(bp,nil,hipL_x, HP_y);
+                CGPathMoveToPoint(bp,nil,RS_x, RS_y);
+                CGPathAddLineToPoint(bp,nil,hipR_x, HP_y);
+
+                // ── LEGS: hipL/R → Knee → Foot ───────────────────────
                 CGPathMoveToPoint(bp,nil,hipL_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,LK_x, LK_y);
                 CGPathAddLineToPoint(bp,nil,LF_x, LF_y);
 
-                // Правая нога: hipR → RKnee → RFoot
                 CGPathMoveToPoint(bp,nil,hipR_x, HP_y);
                 CGPathAddLineToPoint(bp,nil,RK_x, RK_y);
                 CGPathAddLineToPoint(bp,nil,RF_x, RF_y);
