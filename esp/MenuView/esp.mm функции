@@ -120,6 +120,11 @@ static bool isInfiniteAmmo = NO;
 static bool isDamageBoost  = NO;
 static bool isSpeedBoost   = NO;
 static bool isEnemyOnMap   = NO;
+static bool isSuperArmor   = NO;
+static bool isInstantSkill = NO;
+static bool isOneHitKill  = NO;
+static bool isInvincible  = NO;
+static bool isInfGrenades = NO;
 
 
 
@@ -1245,6 +1250,16 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [settingTabContainer addSubview:spdRow]; cy += 26;
     UIView *mapRow   = [self makeCheckRowWithTitle:@"Enemy On Map"    badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleEnemyOnMap:)];
     [settingTabContainer addSubview:mapRow]; cy += 26;
+    UIView *armorRow = [self makeCheckRowWithTitle:@"Super Armor"     badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleSuperArmor:)];
+    [settingTabContainer addSubview:armorRow]; cy += 26;
+    UIView *skillRow = [self makeCheckRowWithTitle:@"Instant Skills"  badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleInstantSkill:)];
+    [settingTabContainer addSubview:skillRow]; cy += 26;
+    UIView *ohkRow   = [self makeCheckRowWithTitle:@"One Hit Kill"    badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleOneHitKill:)];
+    [settingTabContainer addSubview:ohkRow]; cy += 26;
+    UIView *invRow   = [self makeCheckRowWithTitle:@"Invincible"      badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleInvincible:)];
+    [settingTabContainer addSubview:invRow]; cy += 26;
+    UIView *grenRow  = [self makeCheckRowWithTitle:@"Inf Grenades"    badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleInfGrenades:)];
+    [settingTabContainer addSubview:grenRow]; cy += 26;
 
     cy += 4;
     UIView *cSec2 = [self makeSectionHeaderWithTitle:@"PRIVACY" atY:cy width:cW];
@@ -1516,6 +1531,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleDamageBoost:(CustomSwitch *)s  { isDamageBoost  = s.isOn; }
 - (void)toggleSpeedBoost:(CustomSwitch *)s   { isSpeedBoost   = s.isOn; }
 - (void)toggleEnemyOnMap:(CustomSwitch *)s   { isEnemyOnMap   = s.isOn; }
+- (void)toggleSuperArmor:(CustomSwitch *)s   { isSuperArmor   = s.isOn; }
+- (void)toggleInstantSkill:(CustomSwitch *)s { isInstantSkill = s.isOn; }
+- (void)toggleOneHitKill:(CustomSwitch *)s  { isOneHitKill  = s.isOn; }
+- (void)toggleInvincible:(CustomSwitch *)s  { isInvincible  = s.isOn; }
+- (void)toggleInfGrenades:(CustomSwitch *)s { isInfGrenades = s.isOn; }
 
 // ── Value scan helper ────────────────────────────────────────────────
 
@@ -1898,23 +1918,27 @@ static void resetMatchState(void) {
     uint64_t attr = ReadAddr<uint64_t>(myPawnObject + 0x680);
     if (isVaildPtr(attr)) {
         if (isInfiniteAmmo) {
-            WriteAddr<bool>(attr + 0xC9, true); // ShootNoReload
-            WriteAddr<bool>(attr + 0xC8, true); // ReloadNoConsumeAmmoclip
+            WriteAddr<bool>(attr + 0xC9, true);  // ShootNoReload
+            WriteAddr<bool>(attr + 0xC8, true);  // ReloadNoConsumeAmmoclip
+            WriteAddr<int> (attr + 0x124, 9999); // BuffWeaponAmmoClip (снайпер)
+            WriteAddr<int> (attr + 0x128, 9999); // TalentWeaponAmmoClip
         } else {
             WriteAddr<bool>(attr + 0xC9, false);
             WriteAddr<bool>(attr + 0xC8, false);
+            WriteAddr<int> (attr + 0x124, 0);
+            WriteAddr<int> (attr + 0x128, 0);
         }
         if (isDamageBoost) {
             WriteAddr<float>(attr + 0x118, 2.0f); // BuffWeaponDamageScale
+            WriteAddr<float>(attr + 0xFC,  2.0f); // DamageAdditionScale
         } else {
             WriteAddr<float>(attr + 0x118, 1.0f);
+            WriteAddr<float>(attr + 0xFC,  1.0f);
         }
         if (isSpeedBoost) {
-            WriteAddr<float>(attr + 0x250, 2.0f); // RunSpeedUpScale
-            WriteAddr<float>(attr + 0x320, 15.0f); // ForceSetRunAndDashSpeed
+            WriteAddr<float>(attr + 0x250, 1.8f); // RunSpeedUpScale x1.8
         } else {
             WriteAddr<float>(attr + 0x250, 1.0f);
-            WriteAddr<float>(attr + 0x320, 0.0f);
         }
         if (isEnemyOnMap) {
             WriteAddr<bool>(attr + 0x160, true); // ShowEnermyTargetOnMap
@@ -1923,6 +1947,39 @@ static void resetMatchState(void) {
             WriteAddr<bool>(attr + 0x160, false);
             WriteAddr<bool>(attr + 0x161, false);
         }
+        if (isSuperArmor) {
+            WriteAddr<bool>(attr + 0x248, true); // IsSuperArmorEnable
+        } else {
+            WriteAddr<bool>(attr + 0x248, false);
+        }
+        if (isInstantSkill) {
+            WriteAddr<float>(attr + 0x188, 0.99f); // ActiveSkillCdReduction
+            WriteAddr<float>(attr + 0x184, 0.99f); // PetSkillCDReduction
+        } else {
+            WriteAddr<float>(attr + 0x188, 0.0f);
+            WriteAddr<float>(attr + 0x184, 0.0f);
+        }
+        if (isOneHitKill) {
+            WriteAddr<float>(attr + 0xFC,  999.0f); // DamageAdditionScale x999
+            WriteAddr<float>(attr + 0x118, 999.0f); // BuffWeaponDamageScale x999
+        } else {
+            WriteAddr<float>(attr + 0xFC,  1.0f);
+            WriteAddr<float>(attr + 0x118, 1.0f);
+        }
+        if (isInfGrenades) {
+            // CanGrenadeSplit = true — граната делится на много осколков
+            WriteAddr<bool>(attr + 0x264, true);
+            WriteAddr<int> (attr + 0x268, 99); // GrenadeSplitNum
+        } else {
+            WriteAddr<bool>(attr + 0x264, false);
+            WriteAddr<int> (attr + 0x268, 0);
+        }
+    }
+    // ── Invincible: LastInvincibleOverTime @ 0x101C ───────────────
+    // IsInvincible() проверяет: Time.time < LastInvincibleOverTime
+    // FLT_MAX = 3.4e+38 → всегда неуязвим
+    if (isInvincible) {
+        WriteAddr<float>(myPawnObject + 0x101C, 3.402823466e+38f);
     }
 
 
