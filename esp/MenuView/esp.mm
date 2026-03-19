@@ -489,6 +489,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             sl.strokeColor = stroke.CGColor;
             sl.lineWidth   = lw;
             sl.lineCap     = round ? kCALineCapRound : kCALineCapSquare;
+            // Disable ALL implicit animations — path changes are instant, no interpolation lag
+            sl.actions = @{@"path":        [NSNull null],
+                           @"strokeColor": [NSNull null],
+                           @"fillColor":   [NSNull null],
+                           @"hidden":      [NSNull null],
+                           @"opacity":     [NSNull null]};
             [self->_espLayer addSublayer:sl];
             return sl;
         };
@@ -2149,8 +2155,9 @@ static void resetMatchState(void) {
         float boxH = fabsf(s_HeadTop.y - s_Toe.y);
         // If player is tiny on screen (far away) — still show dot + distance label
         // but skip heavy skeleton/box rendering
-        bool isTiny = (boxH < 6.0f);
-        float boxW = isTiny ? 6.0f : boxH * 0.45f;
+        // No tiny-dot mode — always render full box regardless of distance
+        bool isTiny = false;
+        float boxW = MAX(boxH * 0.45f, 8.f);
         float bx   = s_HeadTop.x - boxW * 0.5f;
         float by   = s_HeadTop.y;
 
@@ -2167,7 +2174,7 @@ static void resetMatchState(void) {
         float acA = isKnocked ? 0.75f : 0.95f;
 
         // ── SKELETON — all real bones from dump (Kuydum-verified offsets) ──
-        if (isBone && dis <= 150.f && !isTiny) {
+        if (isBone && dis <= 150.f ) {
             // Read all 13 joints — real offsets from obfuscated dump
             uint64_t nkNode = getNeck(PawnObject);
             uint64_t hpNode = getHip(PawnObject);
@@ -2207,29 +2214,20 @@ static void resetMatchState(void) {
 
                 CGMutablePathRef bp = BONE_PATH;
 
-                // ── CLAMP helper ──────────────────────────────────────
-                // All bone X coords are clamped to ±maxHalfW from the
-                // spine center to prevent skeleton exploding on far/angled targets.
-                // maxHalfW = boxW * 1.1 gives a 10% margin above the box width.
-                float spineX  = s_Hip.x * 0.5f + s_Neck.x * 0.5f; // spine center X
-                float maxHalfW = MAX(boxW * 0.55f, 8.f);
-                auto clampX = [&](float x) -> float {
-                    return fminf(fmaxf(x, spineX - maxHalfW), spineX + maxHalfW);
-                };
-                // Apply clamp to all projected bone X
-                float LS_x = clampX(s_LS.x), LS_y = s_LS.y;
-                float RS_x = clampX(s_RS.x), RS_y = s_RS.y;
-                float LE_x = clampX(s_LE.x), LE_y = s_LE.y;
-                float RE_x = clampX(s_RE.x), RE_y = s_RE.y;
-                float LH_x = clampX(s_LH.x), LH_y = s_LH.y;
-                float RH_x = clampX(s_RH.x), RH_y = s_RH.y;
-                float LK_x = clampX(s_LK.x), LK_y = s_LK.y;
-                float RK_x = clampX(s_RK.x), RK_y = s_RK.y;
-                float LF_x = clampX(s_LF.x), LF_y = s_LF.y;
-                float RF_x = clampX(s_RF.x), RF_y = s_RF.y;
-                float NK_x = clampX(s_Neck.x), NK_y = s_Neck.y;
-                float HP_x = clampX(s_Hip.x),  HP_y = s_Hip.y;
-                float HD_x = clampX(s_Head.x),  HD_y = s_Head.y;
+                // ── Direct bone coords — no clamp (real 3D joints) ────
+                float LS_x = s_LS.x, LS_y = s_LS.y;
+                float RS_x = s_RS.x, RS_y = s_RS.y;
+                float LE_x = s_LE.x, LE_y = s_LE.y;
+                float RE_x = s_RE.x, RE_y = s_RE.y;
+                float LH_x = s_LH.x, LH_y = s_LH.y;
+                float RH_x = s_RH.x, RH_y = s_RH.y;
+                float LK_x = s_LK.x, LK_y = s_LK.y;
+                float RK_x = s_RK.x, RK_y = s_RK.y;
+                float LF_x = s_LF.x, LF_y = s_LF.y;
+                float RF_x = s_RF.x, RF_y = s_RF.y;
+                float NK_x = s_Neck.x, NK_y = s_Neck.y;
+                float HP_x = s_Hip.x,  HP_y = s_Hip.y;
+                float HD_x = s_Head.x,  HD_y = s_Head.y;
 
                 // ── HEAD → NECK ───────────────────────────────────────
                 CGPathMoveToPoint(bp,nil,HD_x, HD_y);
@@ -2285,80 +2283,56 @@ static void resetMatchState(void) {
             skip_skeleton:;
         }
 
-        // ── BOX: corner brackets (skip for tiny/far, draw dot instead) ──
-        if (isBox && isTiny) {
-            // Tiny dot marker for far enemies
-            float dotR = 3.5f;
+        // ── BOX: full rectangle (reference design) ───────────────────
+        if (isBox) {
             CGMutablePathRef xp = BOX_PATH;
-            CGPathAddEllipseInRect(xp, nil, CGRectMake(s_Head.x-dotR, s_Head.y-dotR, dotR*2, dotR*2));
-        } else if (isBox) {
-            float cL = MIN(boxW, boxH) * 0.22f;
-            CGMutablePathRef xp = BOX_PATH;
-            // TL
-            CGPathMoveToPoint(xp,nil,bx,by+cL);
-            CGPathAddLineToPoint(xp,nil,bx,by);
-            CGPathAddLineToPoint(xp,nil,bx+cL,by);
-            // TR
-            CGPathMoveToPoint(xp,nil,bx+boxW-cL,by);
-            CGPathAddLineToPoint(xp,nil,bx+boxW,by);
-            CGPathAddLineToPoint(xp,nil,bx+boxW,by+cL);
-            // BL
-            CGPathMoveToPoint(xp,nil,bx,by+boxH-cL);
-            CGPathAddLineToPoint(xp,nil,bx,by+boxH);
-            CGPathAddLineToPoint(xp,nil,bx+cL,by+boxH);
-            // BR
-            CGPathMoveToPoint(xp,nil,bx+boxW-cL,by+boxH);
-            CGPathAddLineToPoint(xp,nil,bx+boxW,by+boxH);
-            CGPathAddLineToPoint(xp,nil,bx+boxW,by+boxH-cL);
-        } // end box corner-bracket
+            // Outer rect
+            CGPathAddRect(xp, nil, CGRectMake(bx-1.f, by-1.f, boxW+2.f, boxH+2.f));
+            // Inner rect (double-line effect as in reference)
+            CGPathAddRect(xp, nil, CGRectMake(bx+1.f, by+1.f, boxW-2.f, boxH-2.f));
+        }
 
-        // ── HP BAR (skip for tiny far enemies) ─────────────────────────
-        if (isHealth && !isTiny) {
+        // ── HP BAR: vertical, left side of box (reference design) ──────
+        if (isHealth) {
             int MaxHP = get_MaxHP(PawnObject);
             if (MaxHP > 0) {
                 float ratio  = fmaxf(0.f, fminf(1.f, (float)CurHP / MaxHP));
-                float hpBW   = 3.5f;
-                float hpBX   = bx - hpBW - 3.f;
+                float hpBW   = 3.f;                    // bar width
+                float hpBX   = bx - hpBW - 2.f;       // left of box
                 float hpBY   = by;
-                CGPathAddRect(hpBgPath,   nil, CGRectMake(hpBX, hpBY, hpBW, boxH));
-                float fillH = boxH * ratio;
-                CGMutablePathRef fillPath = (ratio > 0.6f) ? hpFillGreenPath
-                                          : (ratio > 0.3f) ? hpFillYellowPath : hpFillRedPath;
-                // Нокнутый — пустая полоска, только фон
-                if (!isKnocked)
-                    CGPathAddRect(fillPath, nil, CGRectMake(hpBX, hpBY+boxH-fillH, hpBW, fillH));
-
-                // HP текст — только текущее HP, без MaxHP
-                // HP number — white, above bar, 11pt (matches reference)
-                char hpBuf[32];
-                if (isKnocked) snprintf(hpBuf,sizeof(hpBuf),"KO");
-                else           snprintf(hpBuf,sizeof(hpBuf),"%d",CurHP);
-                float tW = 28.f;
-                addText(hpBuf, hpBX + hpBW*0.5f - tW*0.5f, hpBY-12.f, tW, 11.f, fmaxf(7.f,fminf(13.f,boxH*0.09f)), 1.f,1.f,1.f,1.f, 0.f, 1);
+                // Background (dark)
+                CGPathAddRect(hpBgPath, nil, CGRectMake(hpBX, hpBY, hpBW, boxH));
+                // Fill — always green (reference style), knocked = empty
+                if (!isKnocked) {
+                    float fillH = boxH * ratio;
+                    // Fill from bottom up
+                    CGPathAddRect(hpFillGreenPath, nil,
+                        CGRectMake(hpBX, hpBY + boxH - fillH, hpBW, fillH));
+                }
             }
         }
 
-        // ── NAME (skip for tiny far enemies) ────────────────────────
-        if (isName && !isTiny) {
+        // ── NAME: above box ──────────────────────────────────────────
+        if (isName) {
             NSString *name = GetNickName(PawnObject);
             const char *ns = (name && name.length) ? [name UTF8String] : "?";
-            // Name above box — white bold, subtle dark bg for readability
-            float nW = MAX(boxW, 70.f);
-            float nY = by - 13.f - (isHealth ? 12.f : 0.f);
+            float nW = MAX(boxW, 60.f);
+            float nY = by - 13.f;
             char nb[48]; strncpy(nb, ns, 47); nb[47]=0;
-            addText(nb, bx+(boxW-nW)*0.5f, nY, nW, 12.f, fmaxf(7.f,fminf(13.f,boxH*0.09f)), 1.f,1.f,1.f,1.f, 0.45f, 1);
+            float nfs = fmaxf(8.f, fminf(13.f, boxH * 0.09f));
+            addText(nb, bx+(boxW-nW)*0.5f, nY, nW, 12.f, nfs, 1.f,1.f,1.f,1.f, 0.45f, 1);
         }
 
-        // ── DISTANCE (always shown for tiny/far enemies) ───────────
-        if (isDis || isTiny) {
-            // Distance label — colored by range, uppercase M suffix (matches reference: "12M")
+        // ── DISTANCE: below box ──────────────────────────────────────
+        if (isDis) {
             char db[24];
-            if (isKnocked)     snprintf(db,sizeof(db),"KO %.0fM",dis);
-            else if (dis < 1)  snprintf(db,sizeof(db),"<1M");
-            else               snprintf(db,sizeof(db),"%.0fM",dis);
+            if (isKnocked)    snprintf(db,sizeof(db),"KO %.0fM",dis);
+            else if (dis < 1) snprintf(db,sizeof(db),"<1M");
+            else              snprintf(db,sizeof(db),"%.0fM",dis);
             float distW = MAX(boxW, 55.f);
             float distX = bx + (boxW - distW) * 0.5f;
-            addText(db, distX, by+boxH+3.f, distW, 12.f, fmaxf(7.f,fminf(13.f,boxH*0.09f)), acR,acG,acB,acA, 0.f, 1);
+            float dfs = fmaxf(8.f, fminf(13.f, boxH * 0.09f));
+            addText(db, distX, by+boxH+3.f, distW, 12.f, dfs, acR,acG,acB,acA, 0.f, 1);
         }
 
         // ── ESP LINE ─────────────────────────────────────────────────
