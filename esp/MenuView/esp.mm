@@ -2177,9 +2177,7 @@ static void resetMatchState(void) {
         }
     } // end player loop
 
-    // ── Aimbot via IOHIDEvent touch injection ─────────────────────────
-    // НЕ пишем в память игры — отправляем свайп через HID стек
-    // Выглядит как реальный палец на джойстике прицела
+    // ── Aimbot apply ──────────────────────────────────────────────────
     bool shouldAim = (aimTrigger==0)||(aimTrigger==1&&isFire);
     if (isAimbot && matchReady && isVaildPtr(bestTarget) && shouldAim) {
         Vector3 ap;
@@ -2192,22 +2190,7 @@ static void resetMatchState(void) {
                 : hPos;
         }
         else ap = getPositionExt(getHip(bestTarget));
-
-        // Проецируем цель → delta от центра экрана
-        Vector3 ws = WorldToScreen(ap, matrix, vW, vH);
-        float dx = ws.x - center.x;
-        float dy = ws.y - center.y;
-        // Масштабируем на speed и sensitivity
-        float scale = aimSpeed * 0.06f;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            TouchAimbot_SendDelta((CGFloat)(dx * scale * aimSensX),
-                                  (CGFloat)(dy * scale * aimSensY));
-        });
-    } else if (isAimbot) {
-        // Нет цели — отпускаем виртуальный палец
-        dispatch_async(dispatch_get_main_queue(), ^{
-            TouchAimbot_Release();
-        });
+        set_aim(myPawnObject, GetRotationToLocation(ap, 0.1f, myLoc));
     }
 
 
