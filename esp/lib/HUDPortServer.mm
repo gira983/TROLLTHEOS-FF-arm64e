@@ -9,7 +9,7 @@
 
 // Called from HUD process (UID 0) to serve task port requests.
 // Runs on a background thread alongside the HUD UI.
-void HUDPortServer_Start(void) {
+extern "C" void HUDPortServer_Start(void) {
     // Verify we're running as root
     if (getuid() != 0) {
         NSLog(@"[HUDPortServer] NOT root (uid=%d) — port server disabled", getuid());
