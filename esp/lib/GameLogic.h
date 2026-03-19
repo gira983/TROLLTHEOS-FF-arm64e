@@ -7,6 +7,7 @@
 #pragma mark - Game
 
 uint64_t getMatchGame(uint64_t Moudule_Base);
+uint64_t getCurrentMatchGame(uint64_t Moudule_Base); // non-zero = in match (GameFacade+0x8)
 uint64_t getMatch(uint64_t matchgame);
 uint64_t CameraMain(uint64_t matchgame);
 float*   GetViewMatrix(uint64_t cameraMain);
