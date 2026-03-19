@@ -115,14 +115,13 @@ static float aimSensX = 1.0f;     // Aim axis X sensitivity multiplier
 static float aimSensY = 1.0f;     // Aim axis Y sensitivity multiplier
 static bool isStreamerMode = NO;   // Stream Proof
 
-// ── Новые фичи из дампа ──────────────────────────────────────────
-static bool isSpeedHack   = NO;   // Speed @ 0x488
-static bool isNoAngle     = NO;   // no angle limit prism 0xD04/0xD08
-static bool isLockFire    = NO;   // lockFire врагам @ 0x1A00
-static bool isLockMove    = NO;   // LockMove врагам @ 0x19E0
-static bool isFlyUp       = NO;   // FlyUPDistance @ 0x1A44
-static float g_speedValue = 12.0f;  // default: ~2x normal speed
-static float g_flyValue   = 8.0f;   // default fly height
+// ── Hacks via PlayerAttributes (Player + 0x680) ──────────────────
+static bool isInfiniteAmmo = NO;
+static bool isDamageBoost  = NO;
+static bool isSpeedBoost   = NO;
+static bool isEnemyOnMap   = NO;
+
+
 
 
 @interface CustomSwitch : UIControl
@@ -1235,22 +1234,17 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [settingTabContainer addSubview:cHdr];
     cy += 32;
 
-    // ── HACKS ─────────────────────────────────────────────────────
-    UIView *cSec0 = [self makeSectionHeaderWithTitle:@"HACKS" atY:cy width:cW];
-    [settingTabContainer addSubview:cSec0]; cy += 18;
-
-    struct { NSString *title; SEL action; } hackRows[] = {
-        { @"Invincible",          @selector(toggleSpeedHack:)  },
-        { @"No Angle Limit", @selector(toggleNoAngle:)    },
-        { @"Lock Enemy Fire",@selector(toggleLockFire:)   },
-        { @"Knockout Enemies", @selector(toggleLockMove:)   },
-        { @"High Jump",      @selector(toggleFlyUp:)      },
-    };
-    for (int i = 0; i < 5; i++) {
-        UIView *row = [self makeCheckRowWithTitle:hackRows[i].title badge:nil badgeColor:nil
-                            atY:cy width:cW initialValue:NO action:hackRows[i].action];
-        [settingTabContainer addSubview:row]; cy += 26;
-    }
+    cy += 4;
+    UIView *cSecH = [self makeSectionHeaderWithTitle:@"HACKS" atY:cy width:cW];
+    [settingTabContainer addSubview:cSecH]; cy += 18;
+    UIView *ammoRow  = [self makeCheckRowWithTitle:@"Infinite Ammo"   badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleInfiniteAmmo:)];
+    [settingTabContainer addSubview:ammoRow]; cy += 26;
+    UIView *dmgRow   = [self makeCheckRowWithTitle:@"Damage x2"       badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleDamageBoost:)];
+    [settingTabContainer addSubview:dmgRow]; cy += 26;
+    UIView *spdRow   = [self makeCheckRowWithTitle:@"Speed Boost"     badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleSpeedBoost:)];
+    [settingTabContainer addSubview:spdRow]; cy += 26;
+    UIView *mapRow   = [self makeCheckRowWithTitle:@"Enemy On Map"    badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleEnemyOnMap:)];
+    [settingTabContainer addSubview:mapRow]; cy += 26;
 
     cy += 4;
     UIView *cSec2 = [self makeSectionHeaderWithTitle:@"PRIVACY" atY:cy width:cW];
@@ -1517,14 +1511,14 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     __applyHideCapture(self, isStreamerMode);
 }
 
+// ── Hack toggles ─────────────────────────────────────────────────────
+- (void)toggleInfiniteAmmo:(CustomSwitch *)s { isInfiniteAmmo = s.isOn; }
+- (void)toggleDamageBoost:(CustomSwitch *)s  { isDamageBoost  = s.isOn; }
+- (void)toggleSpeedBoost:(CustomSwitch *)s   { isSpeedBoost   = s.isOn; }
+- (void)toggleEnemyOnMap:(CustomSwitch *)s   { isEnemyOnMap   = s.isOn; }
+
 // ── Value scan helper ────────────────────────────────────────────────
 
-// ── Новые фичи из дампа ──────────────────────────────────────────
-- (void)toggleSpeedHack:(CustomSwitch *)sender { isSpeedHack = sender.isOn; } // Invincible + no knockdown damage
-- (void)toggleNoAngle:(CustomSwitch *)sender   { isNoAngle   = sender.isOn; }
-- (void)toggleLockFire:(CustomSwitch *)sender  { isLockFire  = sender.isOn; }
-- (void)toggleLockMove:(CustomSwitch *)sender  { isLockMove  = sender.isOn; }
-- (void)toggleFlyUp:(CustomSwitch *)sender     { isFlyUp     = sender.isOn; }
 
 
 - (void)handleSegmentTapGesture:(UITapGestureRecognizer *)t {
@@ -1900,18 +1894,38 @@ static void resetMatchState(void) {
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
 
-    // ── Фичи для локального игрока ───────────────────────────────
-    if (isSpeedHack) {
-        // LastInvincibleOverTime @ 0x101C — читаем текущее и продлеваем
-        // Это float (Unity time в секундах)
-        // Читаем текущее значение и если истекает — продлеваем на 100 сек
-        float invTime = ReadAddr<float>(myPawnObject + 0x101C);
-        // Продлеваем если осталось меньше 10 секунд
-        // Мы не знаем Time.time, но можем просто добавить 100 к текущему
-        WriteAddr<float>(myPawnObject + 0x101C, invTime + 100.0f);
-        // Также убираем урон при нокдауне
-        WriteAddr<float>(myPawnObject + 0x2D4, 0.0f); // m_KnockDownDamagePerSec
+    // ── Hacks через PlayerAttributes @ player+0x680 ───────────────
+    uint64_t attr = ReadAddr<uint64_t>(myPawnObject + 0x680);
+    if (isVaildPtr(attr)) {
+        if (isInfiniteAmmo) {
+            WriteAddr<bool>(attr + 0xC9, true); // ShootNoReload
+            WriteAddr<bool>(attr + 0xC8, true); // ReloadNoConsumeAmmoclip
+        } else {
+            WriteAddr<bool>(attr + 0xC9, false);
+            WriteAddr<bool>(attr + 0xC8, false);
+        }
+        if (isDamageBoost) {
+            WriteAddr<float>(attr + 0x118, 2.0f); // BuffWeaponDamageScale
+        } else {
+            WriteAddr<float>(attr + 0x118, 1.0f);
+        }
+        if (isSpeedBoost) {
+            WriteAddr<float>(attr + 0x250, 2.0f); // RunSpeedUpScale
+            WriteAddr<float>(attr + 0x320, 15.0f); // ForceSetRunAndDashSpeed
+        } else {
+            WriteAddr<float>(attr + 0x250, 1.0f);
+            WriteAddr<float>(attr + 0x320, 0.0f);
+        }
+        if (isEnemyOnMap) {
+            WriteAddr<bool>(attr + 0x160, true); // ShowEnermyTargetOnMap
+            WriteAddr<bool>(attr + 0x161, true); // ShowEnermyTargetOnHud
+        } else {
+            WriteAddr<bool>(attr + 0x160, false);
+            WriteAddr<bool>(attr + 0x161, false);
+        }
     }
+
+
 
 
     uint64_t playerList = ReadAddr<uint64_t>(match + OFF_PLAYERLIST);
@@ -1988,18 +2002,6 @@ static void resetMatchState(void) {
         bool isKnocked = ReadAddr<bool>(PawnObject + 0xA0)
                       || ReadAddr<bool>(PawnObject + 0x1110);
 
-        // ── Фичи для врагов ──────────────────────────────────────────
-        if (isLockFire) {
-            // lockFire @ 0x1A00 — блокируем стрельбу
-            WriteAddr<bool>(PawnObject + 0x1A00, true);
-            // UGCStartFiring @ 0x18A = false — дополнительная блокировка
-            WriteAddr<uint8_t>(PawnObject + 0x18A, 0);
-        }
-        if (isLockMove) {
-            // IsFrozenKnockDown @ 0xA0 — нокаутируем врага
-            // Этот offset точный (мы его читаем для ESP)
-            WriteAddr<bool>(PawnObject + 0xA0, true);
-        }
 
         // Читаем голову — для дистанции и aimbot
         uint64_t headNode = getHead(PawnObject);
