@@ -2086,25 +2086,25 @@ static void resetMatchState(void) {
             WriteAddr<float>(attr + 0x118, 1.0f);
         }
         if (isInfGrenades) {
-            // ── NUKE GRENADE — горизонтальный ковровый взрыв ────
-            WriteAddr<bool> (attr + 0x264, true);    // CanGrenadeSplit
-            WriteAddr<int>  (attr + 0x268, 64);      // GrenadeSplitNum — 64 осколка
-            WriteAddr<float>(attr + 0x26C, 0.0f);    // GrenadeSplitTime — мгновенно
+            // ── CARPET BOMB ───────────────────────────────────────
+            // CanGrenadeSplit OFF — никаких вертикальных осколков
+            // Только основной взрыв с колоссальным радиусом
+            // GrenadeStaticSplitTan = 0 блокирует вертикаль даже при Split ON
+            WriteAddr<bool> (attr + 0x264, true);    // CanGrenadeSplit ON
+            WriteAddr<int>  (attr + 0x268, 16);      // мало осколков — они горизонтальные
+            WriteAddr<float>(attr + 0x26C, 0.01f);   // GrenadeSplitTime — почти сразу
             WriteAddr<float>(attr + 0x270, 0.0f);    // SubGrenadeExplodeTime — мгновенно
-            WriteAddr<float>(attr + 0x274, 6.0f);    // GrenadeSplitVelocityFactor — низкая скорость = близко к земле
-            WriteAddr<float>(attr + 0x278, 6.0f);    // GrenadeSplitVelocityFactorForStatic
-            WriteAddr<float>(attr + 0x27C, 30.0f);   // SubGrenadeRangeScale x30 — широкий радиус
+            WriteAddr<float>(attr + 0x274, 1.0f);    // VelocityFactor минимальный — не летят вверх
+            WriteAddr<float>(attr + 0x278, 1.0f);    // VelocityFactorStatic
+            WriteAddr<float>(attr + 0x27C, 50.0f);   // SubGrenadeRangeScale x50
             WriteAddr<float>(attr + 0x280, 99.0f);   // SubGrenadeDamageScale x99
             WriteAddr<float>(attr + 0x284, 1.0f);    // SubGrenadeModelScale
-            WriteAddr<float>(attr + 0x288, 30.0f);   // MainGrenadeRangeScale x30
+            WriteAddr<float>(attr + 0x288, 99.0f);   // MainGrenadeRangeScale x99 — ОГРОМНЫЙ
             WriteAddr<float>(attr + 0x28C, 99.0f);   // MainGrenadeDamageScale x99
-            WriteAddr<float>(attr + 0x290, 1.0f);    // MainGrenadeModelScale
-            WriteAddr<float>(attr + 0x294, 0.05f);   // GrenadeStaticSplitTan ≈ 3° → почти горизонталь
+            WriteAddr<float>(attr + 0x290, 5.0f);    // MainGrenadeModelScale большой
+            WriteAddr<float>(attr + 0x294, 0.0f);    // GrenadeStaticSplitTan = 0 → горизонталь
         } else {
             WriteAddr<bool> (attr + 0x264, false);
-            WriteAddr<int>  (attr + 0x268, 0);
-            WriteAddr<float>(attr + 0x26C, 0.3f);
-            WriteAddr<float>(attr + 0x270, 0.3f);
             WriteAddr<float>(attr + 0x274, 1.0f);
             WriteAddr<float>(attr + 0x278, 1.0f);
             WriteAddr<float>(attr + 0x27C, 1.0f);
@@ -2113,7 +2113,7 @@ static void resetMatchState(void) {
             WriteAddr<float>(attr + 0x288, 1.0f);
             WriteAddr<float>(attr + 0x28C, 1.0f);
             WriteAddr<float>(attr + 0x290, 1.0f);
-            WriteAddr<float>(attr + 0x294, 1.0f);
+            WriteAddr<float>(attr + 0x294, 0.5f);
         }
     }
     // ── Invincible: LastInvincibleOverTime @ 0x101C ───────────────
