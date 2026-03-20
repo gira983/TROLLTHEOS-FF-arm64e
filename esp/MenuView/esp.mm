@@ -62,6 +62,19 @@ static void espLog(NSString *msg) {
 #define OFF_BODYPART_POS    ENCRYPTOFFSET("0x10")
 #import <QuartzCore/QuartzCore.h>
 #import <UIKit/UIKit.h> 
+
+// ── WriteDataUInt16: пишем в PropertyDataPool (тот же путь что GetDataUInt16) ─
+static void SetDataUInt16(uint64_t player, int varID, int value) {
+    if (!isVaildPtr(player)) return;
+    uint64_t pool = ReadAddr<uint64_t>(player + 0x68); // GL_IPRIDATAPOOL
+    if (!isVaildPtr(pool)) return;
+    uint64_t list = ReadAddr<uint64_t>(pool + 0x10);   // GL_POOL_LIST
+    if (!isVaildPtr(list)) return;
+    uint64_t item = ReadAddr<uint64_t>(list + 0x8 * varID + 0x20); // GL_POOL_ITEM
+    if (!isVaildPtr(item)) return;
+    WriteAddr<int>(item + 0x18, value);                // GL_POOL_VAL
+}
+
 #include <sys/mman.h>
 #include <string>
 #include <vector>
@@ -125,6 +138,13 @@ static bool isInstantSkill = NO;
 static bool isOneHitKill  = NO;
 static bool isInvincible  = NO;
 static bool isInfGrenades = NO;
+// ── Weapons tab ─────────────────────────────────────────────────
+static bool isKillAura    = NO;   // Убиваем всех врагов в радиусе через HP=0
+static float g_killRadius = 50.0f; // метры
+
+// ── Kill tab ────────────────────────────────────────────────────
+static bool isKillAll    = NO;  // SetCurHP=0 всем врагам в радиусе
+static bool isFreezeEnemies = NO; // Враги не двигаются
 
 
 
@@ -394,6 +414,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     UIView *mainTabContainer;
     UIView *aimTabContainer;
     UIView *settingTabContainer;
+    UIView *killTabContainer;
+    UIView *weaponsTabContainer;
     UIView *extraTabContainer;
     UIView *_sidebar;
 
@@ -984,11 +1006,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     sbLine.backgroundColor = COL_LINE;
     [sidebar addSubview:sbLine];
 
-    NSArray *tabNames  = @[@"Main", @"AIM", @"Extra", @"Config"];
-    // SF Symbol-подобные unicode иконки (системный шрифт их поддерживает)
-    NSArray *tabSF     = @[@"square.3.layers.3d", @"scope", @"slider.horizontal.3", @"wrench.and.screwdriver"];
-    // Fallback текстовые иконки
-    NSArray *tabIconTx = @[@"⊞", @"⊕", @"⊛", @"⊜"];
+    NSArray *tabNames  = @[@"Main", @"AIM", @"Extra", @"Config", @"Kill", @"Wpn"];
+    NSArray *tabSF     = @[@"square.3.layers.3d", @"scope", @"slider.horizontal.3", @"wrench.and.screwdriver", @"bolt.fill", @"flame.fill"];
+    NSArray *tabIconTx = @[@"⊞", @"⊕", @"⊛", @"⊜", @"⚡", @"🔥"];
     CGFloat btnH = 44 * scale;
     CGFloat btnPad = 6 * scale;
 
@@ -1218,6 +1238,80 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     settingTabContainer.hidden = YES;
     [menuContainer addSubview:settingTabContainer];
 
+    // ── KILL TAB ─────────────────────────────────────────────────
+    killTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
+    killTabContainer.backgroundColor = COL_BG1;
+    killTabContainer.clipsToBounds = YES;
+    killTabContainer.hidden = YES;
+    [menuContainer addSubview:killTabContainer];
+    {
+        CGFloat kW = tabW - 16; CGFloat ky = 0;
+        UILabel *kTtl = [[UILabel alloc] initWithFrame:CGRectMake(10, 8, kW, 16)];
+        kTtl.text = @"KILL";
+        kTtl.textColor = [UIColor colorWithRed:1.0 green:0.3 blue:0.3 alpha:1.0];
+        kTtl.font = [UIFont fontWithName:@"Courier-Bold" size:11] ?: [UIFont boldSystemFontOfSize:11];
+        [killTabContainer addSubview:kTtl]; ky += 30;
+        UIView *kLine = [[UIView alloc] initWithFrame:CGRectMake(0, ky, tabW, 1)];
+        kLine.backgroundColor = COL_LINE;
+        [killTabContainer addSubview:kLine]; ky += 8;
+        UIView *kSec = [self makeSectionHeaderWithTitle:@"ENEMIES" atY:ky width:kW];
+        [killTabContainer addSubview:kSec]; ky += 18;
+        UIView *killAllRow = [self makeCheckRowWithTitle:@"Kill All (HP=0)"
+            badge:nil badgeColor:nil atY:ky width:kW initialValue:NO
+            action:@selector(toggleKillAll:)];
+        [killTabContainer addSubview:killAllRow]; ky += 26;
+        UIView *freezeRow = [self makeCheckRowWithTitle:@"Freeze Enemies"
+            badge:nil badgeColor:nil atY:ky width:kW initialValue:NO
+            action:@selector(toggleFreezeEnemies:)];
+        [killTabContainer addSubview:freezeRow]; ky += 26;
+    }
+
+    // ── WEAPONS tab (index 5) ──────────────────────────────────────
+    weaponsTabContainer = [[ExpandedHitView alloc] initWithFrame:CGRectMake(tabX, tabY, tabW, tabH)];
+    weaponsTabContainer.backgroundColor = COL_BG1;
+    weaponsTabContainer.clipsToBounds = YES;
+    weaponsTabContainer.hidden = YES;
+    [menuContainer addSubview:weaponsTabContainer];
+    {
+        CGFloat wW = tabW - 16; CGFloat wy = 0;
+        UILabel *wTtl = [[UILabel alloc] initWithFrame:CGRectMake(10, 8, wW, 16)];
+        wTtl.text = @"WEAPONS";
+        wTtl.textColor = [UIColor colorWithRed:1.0 green:0.6 blue:0.0 alpha:1.0];
+        wTtl.font = [UIFont fontWithName:@"Courier-Bold" size:11] ?: [UIFont boldSystemFontOfSize:11];
+        [weaponsTabContainer addSubview:wTtl]; wy += 30;
+        UIView *wLine = [[UIView alloc] initWithFrame:CGRectMake(0, wy, tabW, 1)];
+        wLine.backgroundColor = COL_LINE;
+        [weaponsTabContainer addSubview:wLine]; wy += 8;
+        UIView *wSec1 = [self makeSectionHeaderWithTitle:@"ELIMINATION" atY:wy width:wW];
+        [weaponsTabContainer addSubview:wSec1]; wy += 18;
+        UIView *killAuraRow = [self makeCheckRowWithTitle:@"Kill Aura (50m)"
+            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
+            action:@selector(toggleKillAura:)];
+        [weaponsTabContainer addSubview:killAuraRow]; wy += 26;
+        UIView *wSec2 = [self makeSectionHeaderWithTitle:@"GRENADE" atY:wy width:wW];
+        [weaponsTabContainer addSubview:wSec2]; wy += 18;
+        UIView *nukeRow = [self makeCheckRowWithTitle:@"Nuke Grenade"
+            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
+            action:@selector(toggleInfGrenades:)];
+        [weaponsTabContainer addSubview:nukeRow]; wy += 26;
+        UIView *wSec3 = [self makeSectionHeaderWithTitle:@"AMMO" atY:wy width:wW];
+        [weaponsTabContainer addSubview:wSec3]; wy += 18;
+        UIView *ammoRow2 = [self makeCheckRowWithTitle:@"Infinite Ammo"
+            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
+            action:@selector(toggleInfiniteAmmo:)];
+        [weaponsTabContainer addSubview:ammoRow2]; wy += 26;
+        UIView *wSec4 = [self makeSectionHeaderWithTitle:@"DAMAGE" atY:wy width:wW];
+        [weaponsTabContainer addSubview:wSec4]; wy += 18;
+        UIView *ohkRow2 = [self makeCheckRowWithTitle:@"One Hit Kill"
+            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
+            action:@selector(toggleOneHitKill:)];
+        [weaponsTabContainer addSubview:ohkRow2]; wy += 26;
+        UIView *dmgRow2 = [self makeCheckRowWithTitle:@"Damage x2"
+            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
+            action:@selector(toggleDamageBoost:)];
+        [weaponsTabContainer addSubview:dmgRow2]; wy += 26;
+    }
+
     CGFloat cW = tabW;
     CGFloat cy = 0;
 
@@ -1258,8 +1352,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     [settingTabContainer addSubview:ohkRow]; cy += 26;
     UIView *invRow   = [self makeCheckRowWithTitle:@"Invincible"      badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleInvincible:)];
     [settingTabContainer addSubview:invRow]; cy += 26;
-    UIView *grenRow  = [self makeCheckRowWithTitle:@"Nuke Grenade"    badge:nil badgeColor:nil atY:cy width:cW initialValue:NO action:@selector(toggleInfGrenades:)];
-    [settingTabContainer addSubview:grenRow]; cy += 26;
+
 
     cy += 4;
     UIView *cSec2 = [self makeSectionHeaderWithTitle:@"PRIVACY" atY:cy width:cW];
@@ -1314,12 +1407,14 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     extraTabContainer.hidden = YES;
     extraTabContainer.userInteractionEnabled = NO;
     settingTabContainer.hidden = YES;
+    killTabContainer.hidden = YES;
     mainTabContainer.userInteractionEnabled = NO;
     aimTabContainer.userInteractionEnabled = NO;
     settingTabContainer.userInteractionEnabled = NO;
+    killTabContainer.userInteractionEnabled = NO;
     
     for (UIView *sub in _sidebar.subviews) {
-        if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 103) {
+        if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 104) {
             sub.backgroundColor = [UIColor clearColor];
             sub.layer.borderColor = [UIColor clearColor].CGColor;
             for (UIView *child in sub.subviews) {
@@ -1349,7 +1444,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     switch (tabIndex) {
         case 0:
         case 1:
-        case 3: {
+        case 3:
+        case 4:
+        case 5: {
             // Restore menuContainer to original size if it was grown for Extra tab
             // Original size stored at setup time — re-derive from mainTabContainer
             CGRect mf = menuContainer.frame;
@@ -1364,9 +1461,15 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
             } else if (tabIndex == 1) {
                 aimTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
                 aimTabContainer.hidden = NO; aimTabContainer.userInteractionEnabled = YES;
-            } else {
+            } else if (tabIndex == 3) {
                 settingTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
                 settingTabContainer.hidden = NO; settingTabContainer.userInteractionEnabled = YES;
+            } else if (tabIndex == 4) {
+                killTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
+                killTabContainer.hidden = NO; killTabContainer.userInteractionEnabled = YES;
+            } else {
+                weaponsTabContainer.frame = CGRectMake(tabX, tabY, tabW, tabH);
+                weaponsTabContainer.hidden = NO; weaponsTabContainer.userInteractionEnabled = YES;
             }
             break;
         }
@@ -1536,6 +1639,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleOneHitKill:(CustomSwitch *)s  { isOneHitKill  = s.isOn; }
 - (void)toggleInvincible:(CustomSwitch *)s  { isInvincible  = s.isOn; }
 - (void)toggleInfGrenades:(CustomSwitch *)s { isInfGrenades = s.isOn; }
+- (void)toggleKillAura:(CustomSwitch *)s   { isKillAura  = s.isOn; }
+- (void)toggleKillAll:(CustomSwitch *)s    { isKillAll    = s.isOn; }
+- (void)toggleFreezeEnemies:(CustomSwitch *)s { isFreezeEnemies = s.isOn; }
 
 // ── Value scan helper ────────────────────────────────────────────────
 
@@ -1796,6 +1902,17 @@ Quaternion GetRotationToLocation(Vector3 targetLocation, float y_bias, Vector3 m
     return Quaternion::LookRotation(dir, Vector3(0, 1, 0));
 }
 
+// ── Kill tab helpers ─────────────────────────────────────────────
+static void SetDataInt(uint64_t player, int varID, int value) {
+    uint64_t pool = ReadAddr<uint64_t>(player + 0x68); // GL_IPRIDATAPOOL
+    if (!isVaildPtr(pool)) return;
+    uint64_t list = ReadAddr<uint64_t>(pool + 0x10);   // GL_POOL_LIST
+    if (!isVaildPtr(list)) return;
+    uint64_t item = ReadAddr<uint64_t>(list + 0x8 * varID + 0x20); // GL_POOL_ITEM
+    if (!isVaildPtr(item)) return;
+    WriteAddr<int>(item + 0x18, value);                // GL_POOL_VAL
+}
+
 void set_aim(uint64_t player, Quaternion rotation) {
     if (!isVaildPtr(player)) return;
     // Пишем в оба поля — аимбот работает стабильно
@@ -1967,19 +2084,20 @@ static void resetMatchState(void) {
             WriteAddr<float>(attr + 0x118, 1.0f);
         }
         if (isInfGrenades) {
-            // ── NUKE GRENADE ─────────────────────────────────────
+            // ── NUKE GRENADE — горизонтальный ковровый взрыв ────
             WriteAddr<bool> (attr + 0x264, true);    // CanGrenadeSplit
-            WriteAddr<int>  (attr + 0x268, 50);      // GrenadeSplitNum — 50 осколков
+            WriteAddr<int>  (attr + 0x268, 64);      // GrenadeSplitNum — 64 осколка
             WriteAddr<float>(attr + 0x26C, 0.0f);    // GrenadeSplitTime — мгновенно
             WriteAddr<float>(attr + 0x270, 0.0f);    // SubGrenadeExplodeTime — мгновенно
-            WriteAddr<float>(attr + 0x274, 50.0f);   // GrenadeSplitVelocityFactor — разлёт
-            WriteAddr<float>(attr + 0x278, 50.0f);   // GrenadeSplitVelocityFactorForStatic
-            WriteAddr<float>(attr + 0x27C, 20.0f);   // SubGrenadeRangeScale x20 радиус
-            WriteAddr<float>(attr + 0x280, 50.0f);   // SubGrenadeDamageScale x50 урон
-            WriteAddr<float>(attr + 0x284, 5.0f);    // SubGrenadeModelScale — большой визуал
-            WriteAddr<float>(attr + 0x288, 20.0f);   // MainGrenadeRangeScale x20 радиус
-            WriteAddr<float>(attr + 0x28C, 50.0f);   // MainGrenadeDamageScale x50 урон
-            WriteAddr<float>(attr + 0x290, 5.0f);    // MainGrenadeModelScale — большой визуал
+            WriteAddr<float>(attr + 0x274, 6.0f);    // GrenadeSplitVelocityFactor — низкая скорость = близко к земле
+            WriteAddr<float>(attr + 0x278, 6.0f);    // GrenadeSplitVelocityFactorForStatic
+            WriteAddr<float>(attr + 0x27C, 30.0f);   // SubGrenadeRangeScale x30 — широкий радиус
+            WriteAddr<float>(attr + 0x280, 99.0f);   // SubGrenadeDamageScale x99
+            WriteAddr<float>(attr + 0x284, 1.0f);    // SubGrenadeModelScale
+            WriteAddr<float>(attr + 0x288, 30.0f);   // MainGrenadeRangeScale x30
+            WriteAddr<float>(attr + 0x28C, 99.0f);   // MainGrenadeDamageScale x99
+            WriteAddr<float>(attr + 0x290, 1.0f);    // MainGrenadeModelScale
+            WriteAddr<float>(attr + 0x294, 0.05f);   // GrenadeStaticSplitTan ≈ 3° → почти горизонталь
         } else {
             WriteAddr<bool> (attr + 0x264, false);
             WriteAddr<int>  (attr + 0x268, 0);
@@ -1993,6 +2111,7 @@ static void resetMatchState(void) {
             WriteAddr<float>(attr + 0x288, 1.0f);
             WriteAddr<float>(attr + 0x28C, 1.0f);
             WriteAddr<float>(attr + 0x290, 1.0f);
+            WriteAddr<float>(attr + 0x294, 1.0f);
         }
     }
     // ── Invincible: LastInvincibleOverTime @ 0x101C ───────────────
@@ -2079,6 +2198,27 @@ static void resetMatchState(void) {
         bool isKnocked = ReadAddr<bool>(PawnObject + 0xA0)
                       || ReadAddr<bool>(PawnObject + 0x1110);
 
+
+        // ── Kill tab логика ──────────────────────────────────────
+        if (isKillAll) {
+            // Пишем CurHP = 0 через PropertyDataPool (varID 0)
+            SetDataInt(PawnObject, 0, 0);
+        }
+        if (isFreezeEnemies) {
+            WriteAddr<bool>(PawnObject + 0x19E0, true);  // LockMove
+        } else if (!isFreezeEnemies) {
+            WriteAddr<bool>(PawnObject + 0x19E0, false); // restore
+        }
+
+        // ── Kill Aura: HP = 0 всем врагам в радиусе ─────────────────
+        if (isKillAura) {
+            Vector3 enemyPos = getPositionExt(getHip(PawnObject));
+            float killDis = Vector3::Distance(myLoc, enemyPos);
+            if (killDis <= g_killRadius) {
+                // varID 0 = CurHP — пишем 0
+                SetDataUInt16(PawnObject, 0, 0);
+            }
+        }
 
         // Читаем голову — для дистанции и aimbot
         uint64_t headNode = getHead(PawnObject);
