@@ -139,7 +139,10 @@ static bool isOneHitKill  = NO;
 static bool isInvincible  = NO;
 static bool isInfGrenades = NO;
 // ── Weapons tab ─────────────────────────────────────────────────
-static bool isKillAura    = NO;   // Убиваем всех врагов в радиусе через HP=0
+static bool isKillAura    = NO;
+static bool isMaxHP       = NO;   // MaxHP = 9999 через PropertyDataPool
+static bool isInfArmor    = NO;   // BuffArmorMinDurability = 99999
+static bool isAutoHeal    = NO;   // Eighth_GP_InfiniteHealer = true   // Убиваем всех врагов в радиусе через HP=0
 static float g_killRadius = 50.0f; // метры
 
 // ── Kill tab ────────────────────────────────────────────────────
@@ -1282,6 +1285,20 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         UIView *wLine = [[UIView alloc] initWithFrame:CGRectMake(0, wy, tabW, 1)];
         wLine.backgroundColor = COL_LINE;
         [weaponsTabContainer addSubview:wLine]; wy += 8;
+        UIView *wSec0 = [self makeSectionHeaderWithTitle:@"SURVIVAL" atY:wy width:wW];
+        [weaponsTabContainer addSubview:wSec0]; wy += 18;
+        UIView *maxHPRow = [self makeCheckRowWithTitle:@"Max HP (9999)"
+            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
+            action:@selector(toggleMaxHP:)];
+        [weaponsTabContainer addSubview:maxHPRow]; wy += 26;
+        UIView *armorRow2 = [self makeCheckRowWithTitle:@"Infinite Armor"
+            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
+            action:@selector(toggleInfArmor:)];
+        [weaponsTabContainer addSubview:armorRow2]; wy += 26;
+        UIView *healRow = [self makeCheckRowWithTitle:@"Auto Heal"
+            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
+            action:@selector(toggleAutoHeal:)];
+        [weaponsTabContainer addSubview:healRow]; wy += 26;
         UIView *wSec1 = [self makeSectionHeaderWithTitle:@"ELIMINATION" atY:wy width:wW];
         [weaponsTabContainer addSubview:wSec1]; wy += 18;
         UIView *killAuraRow = [self makeCheckRowWithTitle:@"Kill Aura (50m)"
@@ -1642,6 +1659,9 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleInvincible:(CustomSwitch *)s  { isInvincible  = s.isOn; }
 - (void)toggleInfGrenades:(CustomSwitch *)s { isInfGrenades = s.isOn; }
 - (void)toggleKillAura:(CustomSwitch *)s   { isKillAura  = s.isOn; }
+- (void)toggleMaxHP:(CustomSwitch *)s      { isMaxHP     = s.isOn; }
+- (void)toggleInfArmor:(CustomSwitch *)s   { isInfArmor  = s.isOn; }
+- (void)toggleAutoHeal:(CustomSwitch *)s   { isAutoHeal  = s.isOn; }
 - (void)toggleKillAll:(CustomSwitch *)s    { isKillAll    = s.isOn; }
 - (void)toggleFreezeEnemies:(CustomSwitch *)s { isFreezeEnemies = s.isOn; }
 
@@ -2116,11 +2136,28 @@ static void resetMatchState(void) {
             WriteAddr<float>(attr + 0x294, 0.5f);
         }
     }
-    // ── Invincible: LastInvincibleOverTime @ 0x101C ───────────────
-    // IsInvincible() проверяет: Time.time < LastInvincibleOverTime
-    // FLT_MAX = 3.4e+38 → всегда неуязвим
+    // ── Invincible ────────────────────────────────────────────────
     if (isInvincible) {
         WriteAddr<float>(myPawnObject + 0x101C, 3.402823466e+38f);
+    }
+    // ── Max HP через PropertyDataPool ────────────────────────────
+    // varID 0 = CurHP, varID 1 = MaxHP — те же пути что GetDataUInt16
+    if (isMaxHP) {
+        SetDataUInt16(myPawnObject, 1, 9999); // MaxHP = 9999
+        SetDataUInt16(myPawnObject, 0, 9999); // CurHP = 9999
+    }
+    // ── Infinite Armor + Auto Heal через PlayerAttributes ────────
+    if (isVaildPtr(attr)) {
+        if (isInfArmor) {
+            WriteAddr<float>(attr + 0x78, 99999.0f); // BuffArmorMinDurability
+        } else {
+            WriteAddr<float>(attr + 0x78, 0.0f);
+        }
+        if (isAutoHeal) {
+            WriteAddr<bool>(attr + 0x23C, true); // Eighth_GP_InfiniteHealer
+        } else {
+            WriteAddr<bool>(attr + 0x23C, false);
+        }
     }
 
 
