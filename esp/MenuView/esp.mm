@@ -1751,7 +1751,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 // Это надёжно работает со всей иерархией UIScrollView/PassThroughScrollView
 - (void)handleTabTap:(UITapGestureRecognizer *)gr {
     NSInteger tag = gr.view.tag;
-    if (tag >= 100 && tag <= 103) {
+    if (tag >= 100 && tag <= 105) {
 #ifdef DEBUG
         espLog([NSString stringWithFormat:@"[TAP] sidebar btn tag=%ld", (long)tag]);
 #endif
