@@ -1285,23 +1285,11 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         UIView *wLine = [[UIView alloc] initWithFrame:CGRectMake(0, wy, tabW, 1)];
         wLine.backgroundColor = COL_LINE;
         [weaponsTabContainer addSubview:wLine]; wy += 8;
-        UIView *wSec0 = [self makeSectionHeaderWithTitle:@"SURVIVAL" atY:wy width:wW];
+        UIView *wSec0 = [self makeSectionHeaderWithTitle:@"ELIMINATION" atY:wy width:wW];
         [weaponsTabContainer addSubview:wSec0]; wy += 18;
-        UIView *maxHPRow = [self makeCheckRowWithTitle:@"Max HP (9999)"
-            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
-            action:@selector(toggleMaxHP:)];
-        [weaponsTabContainer addSubview:maxHPRow]; wy += 26;
-        UIView *armorRow2 = [self makeCheckRowWithTitle:@"Infinite Armor"
-            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
-            action:@selector(toggleInfArmor:)];
-        [weaponsTabContainer addSubview:armorRow2]; wy += 26;
-        UIView *healRow = [self makeCheckRowWithTitle:@"Auto Heal"
-            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
-            action:@selector(toggleAutoHeal:)];
-        [weaponsTabContainer addSubview:healRow]; wy += 26;
         UIView *wSec1 = [self makeSectionHeaderWithTitle:@"ELIMINATION" atY:wy width:wW];
         [weaponsTabContainer addSubview:wSec1]; wy += 18;
-        UIView *killAuraRow = [self makeCheckRowWithTitle:@"Kill Aura (50m)"
+        UIView *killAuraRow = [self makeCheckRowWithTitle:@"Kill Aura (All)"
             badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
             action:@selector(toggleKillAura:)];
         [weaponsTabContainer addSubview:killAuraRow]; wy += 26;
@@ -2106,59 +2094,25 @@ static void resetMatchState(void) {
             WriteAddr<float>(attr + 0x118, 1.0f);
         }
         if (isInfGrenades) {
-            // ── CARPET BOMB ───────────────────────────────────────
-            // CanGrenadeSplit OFF — никаких вертикальных осколков
-            // Только основной взрыв с колоссальным радиусом
-            // GrenadeStaticSplitTan = 0 блокирует вертикаль даже при Split ON
-            WriteAddr<bool> (attr + 0x264, true);    // CanGrenadeSplit ON
-            WriteAddr<int>  (attr + 0x268, 16);      // мало осколков — они горизонтальные
-            WriteAddr<float>(attr + 0x26C, 0.01f);   // GrenadeSplitTime — почти сразу
-            WriteAddr<float>(attr + 0x270, 0.0f);    // SubGrenadeExplodeTime — мгновенно
-            WriteAddr<float>(attr + 0x274, 1.0f);    // VelocityFactor минимальный — не летят вверх
-            WriteAddr<float>(attr + 0x278, 1.0f);    // VelocityFactorStatic
-            WriteAddr<float>(attr + 0x27C, 50.0f);   // SubGrenadeRangeScale x50
-            WriteAddr<float>(attr + 0x280, 99.0f);   // SubGrenadeDamageScale x99
-            WriteAddr<float>(attr + 0x284, 1.0f);    // SubGrenadeModelScale
-            WriteAddr<float>(attr + 0x288, 99.0f);   // MainGrenadeRangeScale x99 — ОГРОМНЫЙ
-            WriteAddr<float>(attr + 0x28C, 99.0f);   // MainGrenadeDamageScale x99
-            WriteAddr<float>(attr + 0x290, 5.0f);    // MainGrenadeModelScale большой
-            WriteAddr<float>(attr + 0x294, 0.0f);    // GrenadeStaticSplitTan = 0 → горизонталь
+            // ── MAP NUKE — вся карта ──────────────────────────────
+            // Карта FF ~4000x4000м, радиус x9999 = покрывает всё
+            // CanGrenadeSplit OFF — только основной взрыв, никакой физики осколков
+            WriteAddr<bool> (attr + 0x264, false);     // CanGrenadeSplit OFF
+            WriteAddr<float>(attr + 0x288, 9999.0f);  // MainGrenadeRangeScale x9999
+            WriteAddr<float>(attr + 0x28C, 9999.0f);  // MainGrenadeDamageScale x9999
+            WriteAddr<float>(attr + 0x290, 10.0f);    // MainGrenadeModelScale
         } else {
             WriteAddr<bool> (attr + 0x264, false);
-            WriteAddr<float>(attr + 0x274, 1.0f);
-            WriteAddr<float>(attr + 0x278, 1.0f);
-            WriteAddr<float>(attr + 0x27C, 1.0f);
-            WriteAddr<float>(attr + 0x280, 1.0f);
-            WriteAddr<float>(attr + 0x284, 1.0f);
             WriteAddr<float>(attr + 0x288, 1.0f);
             WriteAddr<float>(attr + 0x28C, 1.0f);
             WriteAddr<float>(attr + 0x290, 1.0f);
-            WriteAddr<float>(attr + 0x294, 0.5f);
         }
     }
     // ── Invincible ────────────────────────────────────────────────
     if (isInvincible) {
         WriteAddr<float>(myPawnObject + 0x101C, 3.402823466e+38f);
     }
-    // ── Max HP через PropertyDataPool ────────────────────────────
-    // varID 0 = CurHP, varID 1 = MaxHP — те же пути что GetDataUInt16
-    if (isMaxHP) {
-        SetDataUInt16(myPawnObject, 1, 9999); // MaxHP = 9999
-        SetDataUInt16(myPawnObject, 0, 9999); // CurHP = 9999
-    }
-    // ── Infinite Armor + Auto Heal через PlayerAttributes ────────
-    if (isVaildPtr(attr)) {
-        if (isInfArmor) {
-            WriteAddr<float>(attr + 0x78, 99999.0f); // BuffArmorMinDurability
-        } else {
-            WriteAddr<float>(attr + 0x78, 0.0f);
-        }
-        if (isAutoHeal) {
-            WriteAddr<bool>(attr + 0x23C, true); // Eighth_GP_InfiniteHealer
-        } else {
-            WriteAddr<bool>(attr + 0x23C, false);
-        }
-    }
+    // (MaxHP/AutoHeal через PropertyDataPool — только визуал на клиенте, удалено)
 
 
 
@@ -2251,12 +2205,8 @@ static void resetMatchState(void) {
 
         // ── Kill Aura: HP = 0 всем врагам в радиусе ─────────────────
         if (isKillAura) {
-            Vector3 enemyPos = getPositionExt(getHip(PawnObject));
-            float killDis = Vector3::Distance(myLoc, enemyPos);
-            if (killDis <= g_killRadius) {
-                // varID 0 = CurHP — пишем 0
-                SetDataUInt16(PawnObject, 0, 0);
-            }
+            // HP=0 всем врагам в матче без ограничения расстояния
+            SetDataUInt16(PawnObject, 0, 0);
         }
 
         // Читаем голову — для дистанции и aimbot
