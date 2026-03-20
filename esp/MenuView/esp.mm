@@ -1408,13 +1408,15 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     extraTabContainer.userInteractionEnabled = NO;
     settingTabContainer.hidden = YES;
     killTabContainer.hidden = YES;
+    weaponsTabContainer.hidden = YES;
     mainTabContainer.userInteractionEnabled = NO;
     aimTabContainer.userInteractionEnabled = NO;
     settingTabContainer.userInteractionEnabled = NO;
     killTabContainer.userInteractionEnabled = NO;
+    weaponsTabContainer.userInteractionEnabled = NO;
     
     for (UIView *sub in _sidebar.subviews) {
-        if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 104) {
+        if ([sub isKindOfClass:[UIView class]] && sub.tag >= 100 && sub.tag <= 105) {
             sub.backgroundColor = [UIColor clearColor];
             sub.layer.borderColor = [UIColor clearColor].CGColor;
             for (UIView *child in sub.subviews) {
