@@ -140,6 +140,25 @@ static bool isInvincible  = NO;
 static bool isInfGrenades = NO;
 // ── Weapons tab ─────────────────────────────────────────────────
 static bool isKillAura    = NO;
+static bool isGhostMode   = NO;
+static Vector3 g_frozenPos = {0, 0, 0};
+static bool    g_posFrozen = false;
+
+// Пишет позицию в Unity TransformHierarchy (обратная к getPositionExt)
+static void setPositionExt(uint64_t transObj2, Vector3 pos) {
+    if (!isVaildPtr(transObj2)) return;
+    uint64_t transObj = ReadAddr<uint64_t>(transObj2 + 0x10);
+    if (!isVaildPtr(transObj)) return;
+    uint64_t matrix    = ReadAddr<uint64_t>(transObj + 0x38);
+    uint64_t index     = ReadAddr<uint64_t>(transObj + 0x40);
+    if (!isVaildPtr(matrix)) return;
+    uint64_t matrix_list = ReadAddr<uint64_t>(matrix + 0x18);
+    if (!isVaildPtr(matrix_list)) return;
+    // Пишем position в TMatrix.position (первые 16 байт = Vector4)
+    WriteAddr<float>(matrix_list + sizeof(TMatrix) * index + 0,  pos.x);
+    WriteAddr<float>(matrix_list + sizeof(TMatrix) * index + 4,  pos.y);
+    WriteAddr<float>(matrix_list + sizeof(TMatrix) * index + 8,  pos.z);
+}
 static bool isMaxHP       = NO;   // MaxHP = 9999 через PropertyDataPool
 static bool isInfArmor    = NO;   // BuffArmorMinDurability = 99999
 static bool isAutoHeal    = NO;   // Eighth_GP_InfiniteHealer = true   // Убиваем всех врагов в радиусе через HP=0
@@ -1287,6 +1306,12 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         [weaponsTabContainer addSubview:wLine]; wy += 8;
         UIView *wSec0 = [self makeSectionHeaderWithTitle:@"ELIMINATION" atY:wy width:wW];
         [weaponsTabContainer addSubview:wSec0]; wy += 18;
+        UIView *wSecG = [self makeSectionHeaderWithTitle:@"MOVEMENT" atY:wy width:wW];
+        [weaponsTabContainer addSubview:wSecG]; wy += 18;
+        UIView *ghostRow = [self makeCheckRowWithTitle:@"Ghost Mode"
+            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO
+            action:@selector(toggleGhostMode:)];
+        [weaponsTabContainer addSubview:ghostRow]; wy += 26;
         UIView *wSec1 = [self makeSectionHeaderWithTitle:@"ELIMINATION" atY:wy width:wW];
         [weaponsTabContainer addSubview:wSec1]; wy += 18;
         UIView *killAuraRow = [self makeCheckRowWithTitle:@"Kill Aura (All)"
@@ -1647,6 +1672,10 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleInvincible:(CustomSwitch *)s  { isInvincible  = s.isOn; }
 - (void)toggleInfGrenades:(CustomSwitch *)s { isInfGrenades = s.isOn; }
 - (void)toggleKillAura:(CustomSwitch *)s   { isKillAura  = s.isOn; }
+- (void)toggleGhostMode:(CustomSwitch *)s  {
+    isGhostMode = s.isOn;
+    if (!isGhostMode) { g_posFrozen = false; } // сбрасываем при выключении
+}
 - (void)toggleMaxHP:(CustomSwitch *)s      { isMaxHP     = s.isOn; }
 - (void)toggleInfArmor:(CustomSwitch *)s   { isInfArmor  = s.isOn; }
 - (void)toggleAutoHeal:(CustomSwitch *)s   { isAutoHeal  = s.isOn; }
@@ -2040,6 +2069,31 @@ static void resetMatchState(void) {
 
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
+
+    // ── Ghost Mode ────────────────────────────────────────────────
+    // Замораживаем Transform тела персонажа
+    // Камера (camTransform) продолжает двигаться нормально
+    // Тело остаётся на месте — враги видят нас там где мы замерли
+    if (isGhostMode) {
+        uint64_t hipNode = getHip(myPawnObject);
+        if (isVaildPtr(hipNode)) {
+            if (!g_posFrozen) {
+                // Запоминаем позицию при первом включении
+                g_frozenPos = getPositionExt(hipNode);
+                g_posFrozen = true;
+            }
+            // Каждый кадр возвращаем тело на замороженную позицию
+            setPositionExt(hipNode, g_frozenPos);
+            // Также фиксируем голову (она следует за телом)
+            uint64_t headNode2 = getHead(myPawnObject);
+            if (isVaildPtr(headNode2)) {
+                Vector3 headFrozen = {g_frozenPos.x, g_frozenPos.y + 1.7f, g_frozenPos.z};
+                setPositionExt(headNode2, headFrozen);
+            }
+        }
+    } else {
+        g_posFrozen = false;
+    }
 
     // ── Hacks через PlayerAttributes @ player+0x680 ───────────────
     uint64_t attr = ReadAddr<uint64_t>(myPawnObject + 0x680);
