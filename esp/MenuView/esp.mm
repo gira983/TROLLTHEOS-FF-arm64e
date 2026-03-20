@@ -914,7 +914,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
     CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
     CGFloat menuWidth  = MIN(380, screenW - 20);
-    CGFloat menuHeight = MIN(320, screenH * 0.46);
+    CGFloat menuHeight = MIN(460, screenH * 0.72);
     CGFloat scale = menuWidth / 380.0;
 
     // ── КОНТЕЙНЕР ─────────────────────────────────────────────────────
@@ -1009,8 +1009,8 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     NSArray *tabNames  = @[@"Main", @"AIM", @"Extra", @"Config", @"Kill", @"Wpn"];
     NSArray *tabSF     = @[@"square.3.layers.3d", @"scope", @"slider.horizontal.3", @"wrench.and.screwdriver", @"bolt.fill", @"flame.fill"];
     NSArray *tabIconTx = @[@"⊞", @"⊕", @"⊛", @"⊜", @"⚡", @"🔥"];
-    CGFloat btnH = 44 * scale;
-    CGFloat btnPad = 6 * scale;
+    CGFloat btnH = 36 * scale;
+    CGFloat btnPad = 4 * scale;
 
     for (int i = 0; i < (int)tabNames.count; i++) {
         UIView *btn = [[UIView alloc] initWithFrame:CGRectMake(4, btnPad + i * (btnH + 3 * scale), sbW - 8, btnH)];
