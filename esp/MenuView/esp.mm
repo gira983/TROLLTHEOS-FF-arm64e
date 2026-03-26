@@ -141,11 +141,7 @@ static bool isInfGrenades = NO;
 // ── Weapons tab ─────────────────────────────────────────────────
 static bool isKillAura    = NO;
 static bool isGhostMode   = NO;
-// ── PhysicalCCT hacks (Player+0x190) ──────────────────────────
-static bool  isNoClip     = NO;
-static bool  isFlying     = NO;
-static bool  isSuperSpeed = NO;
-static bool  isSuperJump  = NO;
+
 static bool isMaxHP       = NO;   // MaxHP = 9999 через PropertyDataPool
 static bool isInfArmor    = NO;   // BuffArmorMinDurability = 99999
 static bool isAutoHeal    = NO;   // Eighth_GP_InfiniteHealer = true   // Убиваем всех врагов в радиусе через HP=0
@@ -1293,20 +1289,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
         [weaponsTabContainer addSubview:wLine]; wy += 8;
         UIView *wSec0 = [self makeSectionHeaderWithTitle:@"ELIMINATION" atY:wy width:wW];
         [weaponsTabContainer addSubview:wSec0]; wy += 18;
-        UIView *wSecP = [self makeSectionHeaderWithTitle:@"PHYSICS" atY:wy width:wW];
-        [weaponsTabContainer addSubview:wSecP]; wy += 18;
-        UIView *noClipRow = [self makeCheckRowWithTitle:@"No Clip"
-            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO action:@selector(toggleNoClip:)];
-        [weaponsTabContainer addSubview:noClipRow]; wy += 26;
-        UIView *flyRow = [self makeCheckRowWithTitle:@"Fly Mode"
-            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO action:@selector(toggleFlying:)];
-        [weaponsTabContainer addSubview:flyRow]; wy += 26;
-        UIView *sspeedRow = [self makeCheckRowWithTitle:@"Super Speed"
-            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO action:@selector(toggleSuperSpeed:)];
-        [weaponsTabContainer addSubview:sspeedRow]; wy += 26;
-        UIView *sjumpRow = [self makeCheckRowWithTitle:@"Super Jump"
-            badge:nil badgeColor:nil atY:wy width:wW initialValue:NO action:@selector(toggleSuperJump:)];
-        [weaponsTabContainer addSubview:sjumpRow]; wy += 26;
         UIView *wSecG = [self makeSectionHeaderWithTitle:@"MOVEMENT" atY:wy width:wW];
         [weaponsTabContainer addSubview:wSecG]; wy += 18;
         UIView *ghostRow = [self makeCheckRowWithTitle:@"Ghost Mode"
@@ -1674,10 +1656,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 - (void)toggleInfGrenades:(CustomSwitch *)s { isInfGrenades = s.isOn; }
 - (void)toggleKillAura:(CustomSwitch *)s   { isKillAura  = s.isOn; }
 - (void)toggleGhostMode:(CustomSwitch *)s  { isGhostMode  = s.isOn; }
-- (void)toggleNoClip:(CustomSwitch *)s     { isNoClip     = s.isOn; }
-- (void)toggleFlying:(CustomSwitch *)s     { isFlying     = s.isOn; }
-- (void)toggleSuperSpeed:(CustomSwitch *)s { isSuperSpeed = s.isOn; }
-- (void)toggleSuperJump:(CustomSwitch *)s  { isSuperJump  = s.isOn; }
 - (void)toggleMaxHP:(CustomSwitch *)s      { isMaxHP     = s.isOn; }
 - (void)toggleInfArmor:(CustomSwitch *)s   { isInfArmor  = s.isOn; }
 - (void)toggleAutoHeal:(CustomSwitch *)s   { isAutoHeal  = s.isOn; }
@@ -2072,23 +2050,6 @@ static void resetMatchState(void) {
     uint64_t camTransform = ReadAddr<uint64_t>(myPawnObject + OFF_CAMERA_TRANSFORM);
     Vector3 myLoc = getPositionExt(camTransform);
 
-    // ── PhysicalCCT hacks ─────────────────────────────────────────
-    // Player + 0x190 → PhysicalCCT pointer (ob52 дамп: private PhysicalCCT @ 0x190)
-    // Клиентская физика — сервер движение не верифицирует поэтому работает
-    uint64_t cct = ReadAddr<uint64_t>(myPawnObject + 0x190);
-    if (isVaildPtr(cct)) {
-        // NoClip: SolveMovementCollisions @ 0x85 = false → сквозь стены
-        WriteAddr<bool> (cct + 0x85, isNoClip ? false : true);
-        // Fly: UseGravity @ 0x40 = false, GravityScale @ 0x44 = 0
-        WriteAddr<bool> (cct + 0x40, isFlying ? false : true);
-        WriteAddr<float>(cct + 0x44, isFlying ? 0.0f : 1.0f);
-        // Super Speed: MaxSpeed @ 0x3C
-        WriteAddr<float>(cct + 0x3C, isSuperSpeed ? 150.0f : 10.0f);
-        // Super Jump: JumpHeight @ 0x70, JumpMaxCount @ 0x74
-        WriteAddr<float>(cct + 0x70, isSuperJump ? 50.0f  : 1.5f);
-        WriteAddr<int>  (cct + 0x74, isSuperJump ? 99     : 1);
-    }
-
     // ── Ghost Mode ────────────────────────────────────────────────
     // BlockUserMoveControl @ 0x1D18 = bool (подтверждено в ob52 дампе)
     // Это то что SetIgnoreMoveInput() пишет внутри себя
@@ -2123,7 +2084,7 @@ static void resetMatchState(void) {
             WriteAddr<float>(attr + 0xFC,  1.0f);
         }
         if (isSpeedBoost) {
-            WriteAddr<float>(attr + 0x250, 1.8f); // RunSpeedUpScale x1.8
+            WriteAddr<float>(attr + 0x250, 5.0f); // RunSpeedUpScale x5 — реально быстро
         } else {
             WriteAddr<float>(attr + 0x250, 1.0f);
         }
@@ -2168,6 +2129,15 @@ static void resetMatchState(void) {
             WriteAddr<float>(attr + 0x290, 1.0f);
         }
     }
+    // ── FlyUPDistance — высота прыжка напрямую в Player ──────────
+    // FlyUPDistance @ 0x1A44 = float (подтверждено в ob52)
+    // SpeedBoost включает и скорость и высокий прыжок
+    if (isSpeedBoost) {
+        WriteAddr<float>(myPawnObject + 0x1A44, 20.0f); // высокий прыжок
+    } else {
+        WriteAddr<float>(myPawnObject + 0x1A44, 0.0f);
+    }
+
     // ── Invincible ────────────────────────────────────────────────
     if (isInvincible) {
         WriteAddr<float>(myPawnObject + 0x101C, 3.402823466e+38f);
