@@ -1,4 +1,6 @@
 #import "MemoryUtils.h"
+#include <stdlib.h>
+#include <string.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <mach-o/dyld_images.h>
