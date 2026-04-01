@@ -15,9 +15,7 @@
 #import <UIKit/UIKit.h>
 #import "HUDPresetPosition.h"
 #import "../esp/MenuView/esp.h"
-#import "../esp/lib/PortStash.h"
 
-extern "C" void HUDPortServer_Start(void);
 
 
 #define SPAWN_AS_ROOT 1
@@ -528,7 +526,6 @@ static void DumpThreads(void)
 #endif
         notify_post(NOTIFY_LAUNCHED_HUD);
         // Start root port server — only active when running as UID 0
-        HUDPortServer_Start();
         
 #ifdef NOTIFY_DISMISSAL_HUD
         {
