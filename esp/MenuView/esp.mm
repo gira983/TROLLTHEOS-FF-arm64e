@@ -18,48 +18,47 @@ static void espLog(NSString *msg) {
     [fh closeFile];
 #endif
 }
-#import "mahoa.h"
 #import <notify.h>
 
 // --- Obfuscated offsets (compile-time encrypted, runtime decrypted) ---
 // Player fields
-#define OFF_ROTATION        ENCRYPTOFFSET("0x53C")    // m_AimRotation (камера)
+#define OFF_ROTATION        0x53C    // m_AimRotation (камера)
 // Silent aim: пишем в оба поля rotation одновременно
 // m_AimRotation (камера)         @ 0x53C  = OFF_ROTATION
 // m_CurrentAimRotation (пуля)    @ 0x172C
-#define OFF_FIRING          ENCRYPTOFFSET("0x750")
+#define OFF_FIRING          0x750
 
 // Knocked state через PropertyData pool @ player+0x68 (varID=2)
 // Тот же механизм что HP (varID=0,1) — работает стабильно
-#define OFF_PLAYERID        ENCRYPTOFFSET("0x338")
-#define OFF_CAMERA_TRANSFORM ENCRYPTOFFSET("0x318")
-#define OFF_HEAD_NODE       ENCRYPTOFFSET("0x5B8")
-#define OFF_HIP_NODE        ENCRYPTOFFSET("0x5C0")
-#define OFF_LEFTANKLE_NODE  ENCRYPTOFFSET("0x5F0")
-#define OFF_RIGHTANKLE_NODE ENCRYPTOFFSET("0x5F8")
-#define OFF_RIGHTTOE_NODE   ENCRYPTOFFSET("0x608")
-#define OFF_LEFTARM_NODE    ENCRYPTOFFSET("0x620")
-#define OFF_LEFTFOREARM_NODE ENCRYPTOFFSET("0x648")
-#define OFF_LEFTHAND_NODE   ENCRYPTOFFSET("0x638")
-#define OFF_RIGHTARM_NODE   ENCRYPTOFFSET("0x628")
-#define OFF_RIGHTFOREARM_NODE ENCRYPTOFFSET("0x640")
-#define OFF_RIGHTHAND_NODE  ENCRYPTOFFSET("0x630")
+#define OFF_PLAYERID        0x338
+#define OFF_CAMERA_TRANSFORM 0x318
+#define OFF_HEAD_NODE       0x5B8
+#define OFF_HIP_NODE        0x5C0
+#define OFF_LEFTANKLE_NODE  0x5F0
+#define OFF_RIGHTANKLE_NODE 0x5F8
+#define OFF_RIGHTTOE_NODE   0x608
+#define OFF_LEFTARM_NODE    0x620
+#define OFF_LEFTFOREARM_NODE 0x648
+#define OFF_LEFTHAND_NODE   0x638
+#define OFF_RIGHTARM_NODE   0x628
+#define OFF_RIGHTFOREARM_NODE 0x640
+#define OFF_RIGHTHAND_NODE  0x630
 // Match/game fields
-#define OFF_MATCH           ENCRYPTOFFSET("0x90")
-#define OFF_LOCALPLAYER     ENCRYPTOFFSET("0xB0")
-#define OFF_CAMERA_MGR      ENCRYPTOFFSET("0xD8")
-#define OFF_CAMERA_MGR2     ENCRYPTOFFSET("0x18")
-#define OFF_MATRIX_BASE     ENCRYPTOFFSET("0xD8")
-#define OFF_CAM_V1          ENCRYPTOFFSET("0x10")
-#define OFF_PLAYERLIST      ENCRYPTOFFSET("0x120")
-#define OFF_PLAYERLIST_ARR  ENCRYPTOFFSET("0x28")
-#define OFF_PLAYERLIST_CNT  ENCRYPTOFFSET("0x18")
-#define OFF_PLAYERLIST_ITEM ENCRYPTOFFSET("0x20")
+#define OFF_MATCH           0x90
+#define OFF_LOCALPLAYER     0xB0
+#define OFF_CAMERA_MGR      0xD8
+#define OFF_CAMERA_MGR2     0x18
+#define OFF_MATRIX_BASE     0xD8
+#define OFF_CAM_V1          0x10
+#define OFF_PLAYERLIST      0x120
+#define OFF_PLAYERLIST_ARR  0x28
+#define OFF_PLAYERLIST_CNT  0x18
+#define OFF_PLAYERLIST_ITEM 0x20
 // GameFacade
-#define OFF_GAMEFACADE_TI   ENCRYPTOFFSET("0xA4D2968")
-#define OFF_GAMEFACADE_ST   ENCRYPTOFFSET("0xB8")
+#define OFF_GAMEFACADE_TI   0xA4D2968
+#define OFF_GAMEFACADE_ST   0xB8
 // BodyPart
-#define OFF_BODYPART_POS    ENCRYPTOFFSET("0x10")
+#define OFF_BODYPART_POS    0x10
 #import <QuartzCore/QuartzCore.h>
 #import <UIKit/UIKit.h> 
 
@@ -579,7 +578,6 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
 
         // value-scan features инициализируются при первом включении
 
-        [self SetUpBase];
 
         self.displayLink = [CADisplayLink displayLinkWithTarget:self selector:@selector(updateFrame)];
         // 30fps для ESP: плавно и не жрёт FPS игры
@@ -1856,23 +1854,7 @@ static BOOL __applyHideCapture(UIView *v, BOOL hidden) {
     }
 }
 
-- (void)SetUpBase {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-        while (YES) {
-            uint64_t base = (uint64_t)GetGameModule_Base((char*)ENCRYPT("freefireth"));
-            if (base != 0 && base != Moudule_Base) {
-                // Base changed (game restarted) — reset all state
-                Moudule_Base = base;
-                resetMatchState();
-                __atomic_store_n(&_validFrameCount, 0, __ATOMIC_RELAXED);
-            } else if (base == 0) {
-                Moudule_Base = (uint64_t)-1;
-            }
-            // Re-check every 10 seconds to catch game restarts
-            [NSThread sleepForTimeInterval:10.0];
-        }
-    });
-}
+// SetUpBase удалён — инициализация inline в renderESP как в sisi проекте
 
 - (void)updateFrame {
     if (!self.window) return;
@@ -1996,7 +1978,26 @@ static void resetMatchState(void) {
 }
 
 - (void)renderESP {
-    if (Moudule_Base == -1) return;
+    // Inline инициализация как в sisi — кэшируем по PID
+    static pid_t cached_ff_pid = 0;
+    {
+        mach_vm_address_t base = GetGameModule_Base("freefireth", "freefireth");
+        if (Processpid <= 0) {
+            // Игра не запущена
+            Moudule_Base = (uint64_t)-1;
+            return;
+        }
+        if (Processpid != cached_ff_pid || Moudule_Base == (uint64_t)-1) {
+            // Новый PID или первый запуск
+            cached_ff_pid = Processpid;
+            if (base != 0) {
+                Moudule_Base = (uint64_t)base;
+                resetMatchState();
+                __atomic_store_n(&_validFrameCount, 0, __ATOMIC_RELAXED);
+            }
+        }
+    }
+    if (Moudule_Base == (uint64_t)-1 || Moudule_Base == 0) return;
 
     // ── Primary match check: CurrentMatchGame from GameFacade (dump offset 0x8) ──
     // Non-zero only while inside a match — lobby/loading = 0
