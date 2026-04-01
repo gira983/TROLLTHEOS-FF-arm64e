@@ -8,7 +8,6 @@
 
 OBJC_EXTERN BOOL IsHUDEnabled(void);
 OBJC_EXTERN void SetHUDEnabled(BOOL isEnabled);
-#include "KFDMemory.h"
 
 @interface UIApplication (Private)
 - (void)suspend;
@@ -94,9 +93,6 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     UILabel *_authorLabel;
     BOOL _supportsCenterMost;
     // Task method selector UI
-    // kfd puaf sub-метод
-    UIView             *_kfdCard;
-    UISegmentedControl *_kfdPuafSegment;
 }
 
 - (void)registerNotifications
@@ -331,7 +327,6 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [_authorLabel setUserInteractionEnabled:YES];
     [_authorLabel addGestureRecognizer:authorTapGesture];
 
-    // ── TASK METHOD: PortStash via root HUD (fixed, no selector needed) ─
     UIView *taskCard = [[UIView alloc] init];
     taskCard.backgroundColor = [UIColor colorWithWhite:1.0 alpha:0.06];
     taskCard.layer.cornerRadius = 14;
@@ -348,7 +343,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [taskCard addSubview:taskTitleLbl];
 
     UILabel *taskDescLbl = [[UILabel alloc] init];
-    taskDescLbl.text = @"PortStash via root HUD  •  processor_set_tasks  •  undetectable";
+    taskDescLbl.text = @"processor_set_tasks  •  root HUD  •  undetectable";
     taskDescLbl.textColor = [UIColor colorWithRed:0.78 green:0.95 blue:0.1 alpha:0.5];
     taskDescLbl.font = [UIFont fontWithName:@"Courier" size:8] ?: [UIFont systemFontOfSize:8];
     taskDescLbl.textAlignment = NSTextAlignmentCenter;
@@ -356,16 +351,8 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     taskDescLbl.translatesAutoresizingMaskIntoConstraints = NO;
     [taskCard addSubview:taskDescLbl];
 
-    // kfd card is hidden — kfd kernel exploit does not provide a functional kread
     // primitive on arm64e iOS 16.6+ (PPL blocks PUAF page access). Memory is read
     // via vm_read_overwrite with a task port from procset/iterate instead.
-    _kfdCard = [[UIView alloc] init];
-    _kfdCard.hidden = YES;
-    _kfdCard.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.backgroundView addSubview:_kfdCard];
-    _kfdPuafSegment = [[UISegmentedControl alloc] initWithItems:@[@"landa"]];
-    _kfdPuafSegment.translatesAutoresizingMaskIntoConstraints = NO;
-    [_kfdCard addSubview:_kfdPuafSegment];
 
     [NSLayoutConstraint activateConstraints:@[
         // Карточка — под _mainButton, над _authorLabel
@@ -384,12 +371,7 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
         [taskDescLbl.bottomAnchor constraintEqualToAnchor:taskCard.bottomAnchor constant:-12],
     ]];
 
-    // kfd card is hidden — no visible constraints needed
     [NSLayoutConstraint activateConstraints:@[
-        [_kfdCard.topAnchor constraintEqualToAnchor:taskCard.bottomAnchor constant:0],
-        [_kfdCard.leadingAnchor constraintEqualToAnchor:self.backgroundView.leadingAnchor constant:30],
-        [_kfdCard.trailingAnchor constraintEqualToAnchor:self.backgroundView.trailingAnchor constant:-30],
-        [_kfdCard.heightAnchor constraintEqualToConstant:0],
     ]];
 
     [self reloadMainButtonState];
@@ -654,21 +636,6 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
     [_topCenterButton setImage:topCenterImage forState:UIControlStateNormal];
 }
 
-- (NSInteger)kfdPuafMethod {
-    [self loadUserDefaults:NO];
-    NSNumber *m = [_userDefaults objectForKey:@"kfdPuafMethod"];
-    return m ? [m integerValue] : 2; // landa по умолчанию (smith не работает на iOS 16.6+)
-}
-
-- (void)setKfdPuafMethod:(NSInteger)method {
-    [self loadUserDefaults:NO];
-    [_userDefaults setObject:@(method) forKey:@"kfdPuafMethod"];
-    [self saveUserDefaults];
-}
-
-- (void)kfdPuafMethodChanged:(UISegmentedControl *)sender {
-    [self setKfdPuafMethod:sender.selectedSegmentIndex];
-}
 
 - (void)tapAuthorLabel:(UITapGestureRecognizer *)sender
 {
@@ -747,7 +714,6 @@ static NSString * const kToggleHUDAfterLaunchNotificationActionToggleOff = @"tog
 
     BOOL isNowEnabled = IsHUDEnabled();
     
-    // kfd method removed — procset and iterate handle task port acquisition directly
     
     SetHUDEnabled(!isNowEnabled);
     isNowEnabled = !isNowEnabled;
