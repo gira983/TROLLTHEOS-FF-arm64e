@@ -1,17 +1,16 @@
 #import "GameLogic.h"
-#import "../../mahoa.h"
 
 // --- Obfuscated offsets ---
 // GameFacade
-#define GL_GAMEFACADE_TI    ENCRYPTOFFSET("0xA4D2968")
-#define GL_GAMEFACADE_ST    ENCRYPTOFFSET("0xB8")
+#define GL_GAMEFACADE_TI    0xA4D2968
+#define GL_GAMEFACADE_ST    0xB8
 // Match/game
-#define GL_MATCH            ENCRYPTOFFSET("0x90")
-#define GL_LOCALPLAYER      ENCRYPTOFFSET("0xB0")
-#define GL_CAMERA_MGR       ENCRYPTOFFSET("0xD8")
-#define GL_CAMERA_MGR2      ENCRYPTOFFSET("0x18")
-#define GL_CAM_V1           ENCRYPTOFFSET("0x10")
-#define GL_MATRIX_BASE      ENCRYPTOFFSET("0xD8")
+#define GL_MATCH            0x90
+#define GL_LOCALPLAYER      0xB0
+#define GL_CAMERA_MGR       0xD8
+#define GL_CAMERA_MGR2      0x18
+#define GL_CAM_V1           0x10
+#define GL_MATRIX_BASE      0xD8
 
 // ─── Player bone nodes (verified against obfuscated dump + Kuydum) ────────────
 // Offset  OldName              ObfName        KuydumName
@@ -29,36 +28,36 @@
 // 0x638   —                    JHIBMHEMJOL    LeftHand
 // 0x640   —                    JBACCHNMGNJ    RightElbow
 // 0x648   —                    FGECMMJKFNC    LeftElbow
-#define GL_HEAD_NODE         ENCRYPTOFFSET("0x5B8")
-#define GL_HIP_NODE          ENCRYPTOFFSET("0x5C0")
-#define GL_NECK_NODE         ENCRYPTOFFSET("0x5C8")  // NEW — real Neck joint
-#define GL_ROOT_NODE         ENCRYPTOFFSET("0x5E0")
-#define GL_LEFT_KNEE_NODE    ENCRYPTOFFSET("0x5F0")  // was wrongly named LeftAnkle
-#define GL_RIGHT_KNEE_NODE   ENCRYPTOFFSET("0x5F8")  // was wrongly named RightAnkle
-#define GL_LEFT_FOOT_NODE    ENCRYPTOFFSET("0x600")  // NEW — real foot/ankle
-#define GL_RIGHT_FOOT_NODE   ENCRYPTOFFSET("0x608")  // NEW — real foot/ankle
-#define GL_LEFTARM_NODE      ENCRYPTOFFSET("0x620")  // LeftShoulder
-#define GL_RIGHTARM_NODE     ENCRYPTOFFSET("0x628")  // RightShoulder
-#define GL_RIGHTHAND_NODE    ENCRYPTOFFSET("0x630")
-#define GL_LEFTHAND_NODE     ENCRYPTOFFSET("0x638")
-#define GL_RIGHTFOREARM_NODE ENCRYPTOFFSET("0x640")  // RightElbow
-#define GL_LEFTFOREARM_NODE  ENCRYPTOFFSET("0x648")  // LeftElbow
+#define GL_HEAD_NODE         0x5B8
+#define GL_HIP_NODE          0x5C0
+#define GL_NECK_NODE         0x5C8  // NEW — real Neck joint
+#define GL_ROOT_NODE         0x5E0
+#define GL_LEFT_KNEE_NODE    0x5F0  // was wrongly named LeftAnkle
+#define GL_RIGHT_KNEE_NODE   0x5F8  // was wrongly named RightAnkle
+#define GL_LEFT_FOOT_NODE    0x600  // NEW — real foot/ankle
+#define GL_RIGHT_FOOT_NODE   0x608  // NEW — real foot/ankle
+#define GL_LEFTARM_NODE      0x620  // LeftShoulder
+#define GL_RIGHTARM_NODE     0x628  // RightShoulder
+#define GL_RIGHTHAND_NODE    0x630
+#define GL_LEFTHAND_NODE     0x638
+#define GL_RIGHTFOREARM_NODE 0x640  // RightElbow
+#define GL_LEFTFOREARM_NODE  0x648  // LeftElbow
 
-#define GL_BODYPART_POS     ENCRYPTOFFSET("0x10")
+#define GL_BODYPART_POS     0x10
 // Player data
-#define GL_PLAYERID         ENCRYPTOFFSET("0x338")
-#define GL_IPRIDATAPOOL     ENCRYPTOFFSET("0x68")
-#define GL_POOL_LIST        ENCRYPTOFFSET("0x10")
-#define GL_POOL_ITEM        ENCRYPTOFFSET("0x20")
-#define GL_POOL_VAL         ENCRYPTOFFSET("0x18")
+#define GL_PLAYERID         0x338
+#define GL_IPRIDATAPOOL     0x68
+#define GL_POOL_LIST        0x10
+#define GL_POOL_ITEM        0x20
+#define GL_POOL_VAL         0x18
 
 #pragma mark - Function Game
 
 // ─── GameFacade static fields (from dump) ────────────────────────────────────
 // GameFacade_Static + 0x0 = CurrentGame      (BaseGame)
 // GameFacade_Static + 0x8 = CurrentMatchGame (MatchGame) ← in-match indicator
-#define GL_GAMEFACADE_CURRENT_GAME       ENCRYPTOFFSET("0x0")
-#define GL_GAMEFACADE_CURRENT_MATCHGAME  ENCRYPTOFFSET("0x8")
+#define GL_GAMEFACADE_CURRENT_GAME       0x0
+#define GL_GAMEFACADE_CURRENT_MATCHGAME  0x8
 
 uint64_t getMatchGame(uint64_t Moudule_Base) {
     uint64_t GameFacade_TypeInfo = ReadAddr<uint64_t>(Moudule_Base + GL_GAMEFACADE_TI);
